@@ -51,7 +51,13 @@ juce_add_binary_data(MelvilleBinaryData HEADER_NAME BinaryData.h NAMESPACE Binar
     "${PEQUOD_HOST_DIR}/Resources/Fonts/Ubuntu-Light.ttf"
     "${PEQUOD_HOST_DIR}/Resources/Fonts/Hack-Regular.ttf"
     "${HAWTHORNE_DIR}/Resources/hawthorne-mark.svg"
-    "${HAWTHORNE_DIR}/Resources/manual.html")
+    "${HAWTHORNE_DIR}/Resources/manual.html"
+    # each part's own icon, for the MELVILLE bar
+    "${HAWTHORNE_DIR}/Resources/hawthorne-logo.png"
+    "${EMERSON_DIR}/Resources/Icon/EMERSON.png"
+    "${WHITMAN_DIR}/Resources/Icon/WHITMAN.png"
+    "${THOREAU_DIR}/Resources/Icon/THOREAU.png"
+    "${PEQUOD_HOST_DIR}/Resources/Icon/PEQUOD-Host.png")
 
 set(_icon "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Icon/MELVILLE.png")
 if(EXISTS "${_icon}")

@@ -58,7 +58,71 @@ private:
 };
 
 //==============================================================================
-/** The MELVILLE bar: a button per part, the patchbay, the interface. */
+/** One tile on the MELVILLE bar: a part's own icon (or a drawn one), its name, and a lamp. */
+class Tile : public juce::Button
+{
+public:
+    Tile (const juce::String& name, juce::Image icon, juce::Colour colour)
+        : juce::Button (name), image (std::move (icon)), accent (colour)
+    {
+        setTooltip (name);
+    }
+
+    std::function<void (juce::Graphics&, juce::Rectangle<float>)> drawIcon;   // when there's no image
+    std::function<bool()> isLit;                                               // the lamp (none if empty)
+
+    void paintButton (juce::Graphics& g, bool over, bool down) override
+    {
+        auto r = getLocalBounds().toFloat().reduced (2.0f);
+        if (over || down)
+        {
+            g.setColour (Colours::panelHi.brighter (down ? 0.08f : 0.0f));
+            g.fillRoundedRectangle (r, 6.0f);
+        }
+
+        auto iconArea = r.removeFromTop (r.getHeight() - 26.0f).reduced (6.0f);
+        const float side = juce::jmin (iconArea.getWidth(), iconArea.getHeight());
+        iconArea = iconArea.withSizeKeepingCentre (side, side);
+        if (image.isValid())
+            g.drawImage (image, iconArea, juce::RectanglePlacement::centred);
+        else if (drawIcon)
+            drawIcon (g, iconArea);
+
+        g.setColour (over ? accent.brighter (0.2f) : accent);
+        g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+        g.drawFittedText (getName().toUpperCase(), r.removeFromTop (14.0f).toNearestInt(), juce::Justification::centred, 1, 0.7f);
+
+        if (isLit)
+        {
+            const bool on = isLit();
+            auto lamp = r.removeFromTop (10.0f).withSizeKeepingCentre (6.0f, 6.0f);
+            g.setColour (on ? accent : Colours::lampOff);
+            g.fillEllipse (lamp);
+        }
+    }
+
+private:
+    juce::Image image;
+    juce::Colour accent;
+};
+
+static juce::Image loadIcon (const juce::String& id)
+{
+    const void* data = nullptr; int size = 0;
+    if (id == "hawthorne") { data = BinaryData::hawthornelogo_png; size = BinaryData::hawthornelogo_pngSize; }
+    if (id == "emerson")   { data = BinaryData::EMERSON_png;       size = BinaryData::EMERSON_pngSize; }
+    if (id == "whitman")   { data = BinaryData::WHITMAN_png;       size = BinaryData::WHITMAN_pngSize; }
+    if (id == "thoreau")   { data = BinaryData::THOREAU_png;       size = BinaryData::THOREAU_pngSize; }
+    if (id == "pequod")    { data = BinaryData::PEQUODHost_png;    size = BinaryData::PEQUODHost_pngSize; }
+    if (data == nullptr) return {};
+    // scaled down once, so the bar draws it crisply and cheaply
+    auto big = juce::ImageCache::getFromMemory (data, size);
+    return big.isValid() ? big.rescaled (128, 128, juce::Graphics::highResamplingQuality) : big;
+}
+
+//==============================================================================
+/** The MELVILLE bar: every part's icon (click to bring up its window, lamp lit while it
+    runs), then the patchbay and the interface. It stays on top of the parts' windows. */
 class Bar : public juce::Component, private juce::Timer
 {
 public:
@@ -67,17 +131,53 @@ public:
     {
         for (size_t i = 0; i < parts.size(); ++i)
         {
-            auto* b = buttons.add (new juce::TextButton (parts[i]->title.toUpperCase()));
-            b->setColour (juce::TextButton::textColourOffId, Colours::forPart (parts[i]->id));
-            b->onClick = [this, i] { windows[i]->show(); };
-            addAndMakeVisible (b);
+            const auto id = parts[i]->id;
+            auto* t = tiles.add (new Tile (parts[i]->title, loadIcon (id), Colours::forPart (id)));
+            t->isLit = [this, id] { return hub.isPartConnected (id); };
+            t->onClick = [this, i] { windows[i]->show(); };
+            addAndMakeVisible (t);
         }
-        patchButton.onClick = [this] { showPatchbay(); };
-        audioButton.onClick = [this] { showAudio(); };
-        addAndMakeVisible (patchButton);
-        addAndMakeVisible (audioButton);
+
+        patchTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
+        {
+            // a jack field with two cords
+            g.setColour (Colours::panelHi);
+            g.fillRoundedRectangle (r, r.getWidth() * 0.12f);
+            const float step = r.getWidth() / 5.0f;
+            g.setColour (Colours::textDim);
+            for (int row = 0; row < 2; ++row)
+                for (int c = 0; c < 4; ++c)
+                    g.fillEllipse (r.getX() + step * (c + 1) - 3.5f, r.getY() + r.getHeight() * (row == 0 ? 0.3f : 0.7f) - 3.5f, 7.0f, 7.0f);
+            g.setColour (Colours::accent);
+            juce::Path cord;
+            cord.startNewSubPath (r.getX() + step, r.getY() + r.getHeight() * 0.3f);
+            cord.cubicTo (r.getX() + step, r.getBottom(), r.getX() + step * 3, r.getY(), r.getX() + step * 3, r.getY() + r.getHeight() * 0.7f);
+            cord.startNewSubPath (r.getX() + step * 2, r.getY() + r.getHeight() * 0.3f);
+            cord.cubicTo (r.getX() + step * 2, r.getBottom() + 4.0f, r.getX() + step * 4, r.getY() + 4.0f, r.getX() + step * 4, r.getY() + r.getHeight() * 0.7f);
+            g.strokePath (cord, juce::PathStrokeType (2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        };
+        audioTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
+        {
+            // an interface: a box with two inputs and a meter
+            auto box = r.withSizeKeepingCentre (r.getWidth(), r.getHeight() * 0.56f);
+            g.setColour (Colours::panelHi);
+            g.fillRoundedRectangle (box, 5.0f);
+            g.setColour (Colours::textDim);
+            for (int c = 0; c < 2; ++c)
+                g.drawEllipse (box.getX() + box.getWidth() * (0.18f + 0.22f * c) - 7.0f, box.getCentreY() - 7.0f, 14.0f, 14.0f, 2.0f);
+            g.setColour (Colours::accent);
+            for (int k = 0; k < 5; ++k)
+                g.fillRect (box.getX() + box.getWidth() * 0.66f + k * 6.0f, box.getCentreY() + 8.0f - k * 4.0f, 4.0f, 4.0f + k * 4.0f);
+        };
+        patchTile.onClick = [this] { showPatchbay(); };
+        audioTile.onClick = [this] { showAudio(); };
+        patchTile.setTooltip ("PATCHBAY: what goes where between the parts and the interface");
+        audioTile.setTooltip ("INTERFACE: the audio interface, sample rate and buffer");
+        addAndMakeVisible (patchTile);
+        addAndMakeVisible (audioTile);
+
         startTimerHz (4);
-        setSize (1180, 64);
+        setSize (wordmarkWidth + (tiles.size() + 2) * (tileWidth + gap) + 26 + 260, barHeight);
     }
 
     void paint (juce::Graphics& g) override
@@ -85,36 +185,40 @@ public:
         g.fillAll (Colours::panel);
         auto r = getLocalBounds().reduced (14, 0);
         g.setColour (Colours::accent);
-        g.setFont (juce::Font (juce::FontOptions (22.0f, juce::Font::bold)));
-        g.drawText ("MELVILLE", r.removeFromLeft (130), juce::Justification::centredLeft);
+        g.setFont (juce::Font (juce::FontOptions (24.0f, juce::Font::bold)));
+        g.drawText ("MELVILLE", r.removeFromLeft (wordmarkWidth - 14), juce::Justification::centredLeft);
 
-        // a lamp under each part: lit while it's running in the hub
-        for (int i = 0; i < buttons.size(); ++i)
+        // a divider between the parts and the studio controls
+        g.setColour (Colours::line);
+        g.drawVerticalLine (dividerX, 14.0f, (float) getHeight() - 14.0f);
+
+        if (statusArea.getWidth() > 60)
         {
-            auto b = buttons[i]->getBounds();
-            const bool on = hub.isPartConnected (parts[(size_t) i]->id);
-            g.setColour (on ? Colours::forPart (parts[(size_t) i]->id) : Colours::lampOff);
-            g.fillEllipse ((float) b.getCentreX() - 3.0f, (float) b.getBottom() + 4.0f, 6.0f, 6.0f);
+            g.setFont (juce::Font (juce::FontOptions (12.0f)));
+            g.setColour (Colours::textDim);
+            auto* dev = hub.deviceManager.getCurrentAudioDevice();
+            juce::StringArray lines;
+            if (dev == nullptr) lines.add ("NO INTERFACE - CLICK INTERFACE");
+            else
+            {
+                lines.add (dev->getName().toUpperCase());
+                lines.add (juce::String (dev->getCurrentSampleRate() / 1000.0, 1) + " kHz  \xc2\xb7  " + juce::String (dev->getCurrentBufferSizeSamples())
+                           + "  \xc2\xb7  CPU " + juce::String (juce::roundToInt (hub.getLoad() * 100.0f)) + "%");
+            }
+            g.drawFittedText (lines.joinIntoString ("\n"), statusArea, juce::Justification::centredRight, 2);
         }
-
-        g.setFont (juce::Font (juce::FontOptions (12.0f)));
-        g.setColour (Colours::textDim);
-        auto* dev = hub.deviceManager.getCurrentAudioDevice();
-        const juce::String status = dev == nullptr ? juce::String ("NO INTERFACE")
-            : dev->getName().toUpperCase() + "  " + juce::String (dev->getCurrentSampleRate() / 1000.0, 1) + " kHz  "
-              + juce::String (dev->getCurrentBufferSizeSamples()) + "  CPU " + juce::String (juce::roundToInt (hub.getLoad() * 100.0f)) + "%";
-        g.drawText (status, statusArea, juce::Justification::centredRight, true);
     }
 
     void resized() override
     {
-        auto r = getLocalBounds().reduced (14, 12).withTrimmedBottom (6);
-        r.removeFromLeft (130);
-        statusArea = r.removeFromRight (260);
-        for (auto* b : { &audioButton, &patchButton }) { b->setBounds (r.removeFromRight (90)); r.removeFromRight (6); }
-        r.removeFromRight (10);
-        const int w = buttons.isEmpty() ? 0 : juce::jmin (130, r.getWidth() / buttons.size() - 6);
-        for (auto* b : buttons) { b->setBounds (r.removeFromLeft (w)); r.removeFromLeft (6); }
+        auto r = getLocalBounds().reduced (14, 6);
+        r.removeFromLeft (wordmarkWidth - 14);
+        for (auto* t : tiles) { t->setBounds (r.removeFromLeft (tileWidth)); r.removeFromLeft (gap); }
+        r.removeFromLeft (6);
+        dividerX = r.getX();
+        r.removeFromLeft (14);
+        for (auto* t : { &patchTile, &audioTile }) { t->setBounds (r.removeFromLeft (tileWidth)); r.removeFromLeft (gap); }
+        statusArea = r.withTrimmedLeft (10);
     }
 
     void showPatchbay()
@@ -147,15 +251,18 @@ public:
     void closePatchbay() { patchWindow = nullptr; }
     juce::Component* getPatchbayContent() { return patchWindow != nullptr ? patchWindow->getContentComponent() : nullptr; }
 
+    static constexpr int barHeight = 100, tileWidth = 84, gap = 4, wordmarkWidth = 160;
+
 private:
     void timerCallback() override { repaint(); }
 
     Hub& hub;
     std::vector<std::unique_ptr<PartUI>>& parts;
     std::vector<std::unique_ptr<PartWindow>>& windows;
-    juce::OwnedArray<juce::TextButton> buttons;
-    juce::TextButton patchButton { "PATCHBAY" }, audioButton { "INTERFACE" };
+    juce::OwnedArray<Tile> tiles;
+    Tile patchTile { "Patchbay", {}, Colours::accent }, audioTile { "Interface", {}, Colours::accent };
     juce::Rectangle<int> statusArea;
+    int dividerX = 0;
     std::unique_ptr<juce::DocumentWindow> patchWindow;
 };
 
@@ -166,9 +273,12 @@ public:
     {
         setUsingNativeTitleBar (true);
         setContentOwned (bar, true);
-        setResizable (true, false);
-        setResizeLimits (1000, 64, 4000, 64);
-        setTopLeftPosition (40, 40);
+        setResizable (false, false);
+        // on top of the parts (Hawthorne opens full screen), at the top centre of the main screen
+        setAlwaysOnTop (true);
+        auto area = juce::Rectangle<int> (0, 0, 1920, 1080);
+        if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()) area = d->userBounds.toNearestInt();
+        setTopLeftPosition (area.getCentreX() - getWidth() / 2, area.getY() + 8);
         setVisible (true);
     }
     void closeButtonPressed() override { juce::JUCEApplication::getInstance()->systemRequestedQuit(); }
