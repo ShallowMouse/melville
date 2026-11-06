@@ -11,6 +11,7 @@
 #include "Parts/Parts.h"
 #include "UI/MelvilleLookAndFeel.h"
 #include "UI/PatchbayView.h"
+#include "UI/Taskbar.h"
 
 namespace melville
 {
@@ -50,7 +51,8 @@ public:
         toFront (true);
     }
 
-    void closeButtonPressed() override { setVisible (false); }   // the part keeps running
+    // closing a part sends it down to its taskbar button (it keeps running and keeps its place)
+    void closeButtonPressed() override { setMinimised (true); }
 
 private:
     PartUI& part;
@@ -106,7 +108,7 @@ private:
     juce::Colour accent;
 };
 
-static juce::Image loadIcon (const juce::String& id)
+static juce::Image loadIcon (const juce::String& id, int px = 128)
 {
     const void* data = nullptr; int size = 0;
     if (id == "hawthorne") { data = BinaryData::hawthornelogo_png; size = BinaryData::hawthornelogo_pngSize; }
@@ -117,7 +119,7 @@ static juce::Image loadIcon (const juce::String& id)
     if (data == nullptr) return {};
     // scaled down once, so the bar draws it crisply and cheaply
     auto big = juce::ImageCache::getFromMemory (data, size);
-    return big.isValid() ? big.rescaled (128, 128, juce::Graphics::highResamplingQuality) : big;
+    return big.isValid() ? big.rescaled (px, px, juce::Graphics::highResamplingQuality) : big;
 }
 
 //==============================================================================
@@ -294,9 +296,10 @@ public:
     const juce::String getApplicationVersion() override { return MELVILLE_VERSION_STRING; }
     bool moreThanOneInstanceAllowed() override          { return false; }
 
-    void initialise (const juce::String&) override
+    void initialise (const juce::String& commandLine) override
     {
         using namespace melville;
+        taskbar::setProcessIdentity();
         juce::PropertiesFile::Options o;
         o.applicationName = "MELVILLE";
         o.filenameSuffix = ".settings";
@@ -321,9 +324,21 @@ public:
         parts.push_back (parts::makePequod());
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);   // (Hawthorne sets its own as the default)
 
-        for (auto& p : parts) windows.push_back (std::make_unique<PartWindow> (*p));
+        // every part gets its own taskbar button and icon, in the same order every time:
+        // Hawthorne up front, the rest down on the taskbar ready to click
+        for (auto& p : parts)
+        {
+            windows.push_back (std::make_unique<PartWindow> (*p));
+            taskbar::setWindowIdentity (*windows.back(), p->id, p->title, loadIcon (p->id, 256));
+        }
         bar = std::make_unique<BarWindow> (new Bar (*hub, parts, windows));
+        for (size_t i = 1; i < windows.size(); ++i)
+        {
+            windows[i]->show();
+            windows[i]->setMinimised (true);
+        }
         windows.front()->show();   // Hawthorne, as you'd start the day
+        showFromCommandLine (commandLine);
 
         // Test hook (the workflow's smoke test): report which parts came up, then quit
         const auto quitAfter = juce::SystemStats::getEnvironmentVariable ("MELVILLE_QUIT_AFTER_MS", {}).getIntValue();
@@ -395,7 +410,19 @@ public:
     }
 
     void systemRequestedQuit() override { quit(); }
-    void anotherInstanceStarted (const juce::String&) override { if (bar != nullptr) bar->toFront (true); }
+    // a pinned part's taskbar button runs MELVILLE.exe --show=<part>: bring that part up
+    void anotherInstanceStarted (const juce::String& commandLine) override
+    {
+        if (! showFromCommandLine (commandLine) && bar != nullptr) bar->toFront (true);
+    }
+
+    bool showFromCommandLine (const juce::String& commandLine)
+    {
+        const auto id = commandLine.fromFirstOccurrenceOf ("--show=", false, true).upToFirstOccurrenceOf (" ", false, false).unquoted().trim();
+        for (size_t i = 0; id.isNotEmpty() && i < parts.size(); ++i)
+            if (parts[i]->id.equalsIgnoreCase (id)) { windows[i]->show(); return true; }
+        return false;
+    }
 
 private:
     juce::ApplicationProperties props;
