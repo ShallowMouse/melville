@@ -1,0 +1,140 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore: [ 'docs/**', '**.md' ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      parts_branch:
+        description: "Branch of the app repos to build from"
+        default: "melville"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      MELVILLE_VERSION: 1.0.${{ github.run_number }}
+      # The apps' MELVILLE hooks live on this branch of each app repo until it's merged into main
+      PARTS_BRANCH: ${{ github.event.inputs.parts_branch || 'melville' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # every part, from its own repo
+      - name: Get Hawthorne
+        uses: actions/checkout@v4
+        with: { repository: ShallowMouse/hawthorne, ref: "${{ env.PARTS_BRANCH }}", path: parts/hawthorne }
+      - name: Get EMERSON
+        uses: actions/checkout@v4
+        with: { repository: ShallowMouse/emerson, ref: "${{ env.PARTS_BRANCH }}", path: parts/emerson }
+      - name: Get WHITMAN
+        uses: actions/checkout@v4
+        with: { repository: ShallowMouse/whitman, ref: "${{ env.PARTS_BRANCH }}", path: parts/whitman }
+      - name: Get THOREAU
+        uses: actions/checkout@v4
+        with: { repository: ShallowMouse/thoreau, ref: "${{ env.PARTS_BRANCH }}", path: parts/thoreau }
+      - name: Get PEQUOD Host
+        uses: actions/checkout@v4
+        with: { repository: ShallowMouse/PEQUOD-HOST, ref: "${{ env.PARTS_BRANCH }}", path: parts/pequod-host }
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: parts/pequod-host/engine
+
+      - name: Build the PEQUOD engine
+        shell: pwsh
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: |
+          rustup default stable
+          cargo rustc --release -p pequod_engine --lib --target x86_64-pc-windows-msvc --manifest-path parts/pequod-host/engine/Cargo.toml -- --print native-static-libs *>&1 | Tee-Object -FilePath engine.log
+          if ($LASTEXITCODE -ne 0) {
+            $msg = (Select-String -Path engine.log -Pattern "error" | Select-Object -First 60 | ForEach-Object { $_.Line }) -join "%0A"; Write-Output "::error title=engine::$msg"
+            exit 1
+          }
+          $lib = "parts/pequod-host/engine/target/x86_64-pc-windows-msvc/release/pequod_engine.lib"
+          $libs = Select-String -Path engine.log -Pattern "native-static-libs: (.*)" | Select-Object -Last 1
+          if ($libs) { Set-Content -Path "$lib.libs" -Value $libs.Matches[0].Groups[1].Value }
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
+          $reg = Join-Path $cargoHome "registry\src"
+          Get-ChildItem $reg -Recurse -Filter "*.lib" | Where-Object { $_.FullName -match "windows_x86_64_msvc-[^\\]+\\lib\\" } | ForEach-Object { Copy-Item $_.FullName (Split-Path $lib) -Force }
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 "-DMELVILLE_VERSION=$env:MELVILLE_VERSION" -DMELVILLE_BUILD_TESTS=ON *>&1 | Tee-Object -FilePath configure.log
+          if ($LASTEXITCODE -ne 0) {
+            $msg = (Get-Content configure.log -Tail 60) -join "%0A"; Write-Output "::error title=configure::$msg"
+            exit 1
+          }
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel -- /v:minimal *>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            $msg = (Select-String -Path build.log -Pattern "error" | Select-Object -First 60 | ForEach-Object { $_.Line }) -join "%0A"; Write-Output "::error title=build::$msg"
+            exit 1
+          }
+
+      - name: Core tests (must pass to ship)
+        shell: pwsh
+        run: |
+          & "build/MelvilleTests_artefacts/Release/MelvilleTests.exe" *>&1 | Tee-Object -FilePath tests.log
+          $code = $LASTEXITCODE
+          Select-String -Path tests.log -Pattern "FAIL" | ForEach-Object { Write-Output "::error title=test::$($_.Line)" }
+          exit $code
+
+      - name: Smoke test (every part starts inside MELVILLE)
+        shell: pwsh
+        run: |
+          $env:MELVILLE_QUIT_AFTER_MS = "8000"
+          $p = Start-Process -FilePath "build/Melville_artefacts/Release/MELVILLE.exe" -PassThru -RedirectStandardOutput smoke.log -NoNewWindow
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); Write-Output "::error title=smoke::MELVILLE didn't quit"; exit 1 }
+          Get-Content smoke.log
+          if ($p.ExitCode -ne 0) { Write-Output "::error title=smoke::Not every part started (exit $($p.ExitCode))"; exit 1 }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist, portable | Out-Null
+          Copy-Item "build/Melville_artefacts/Release/MELVILLE.exe" portable/
+          Copy-Item README.md portable/
+          Copy-Item Resources/Licences/*.txt portable/
+          Compress-Archive -Path portable/* -DestinationPath "dist/MELVILLE-$env:MELVILLE_VERSION-portable.zip"
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DAppVersion=$env:MELVILLE_VERSION" Installer\MELVILLE.iss *>&1 | Tee-Object -FilePath iscc.log
+          if ($LASTEXITCODE -ne 0) {
+            $msg = (Get-Content iscc.log -Tail 40) -join "%0A"; Write-Output "::error title=installer::$msg"
+            exit 1
+          }
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: MELVILLE-Windows
+          path: dist/
+
+      - name: Publish release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          if (-not $env:GH_TOKEN) {
+            Write-Output "::warning title=release::Not published - add the RELEASES_TOKEN secret and the ShallowMouse/Melville-Releases repo"
+            exit 0
+          }
+          $notes = git log -1 --pretty=%s
+          $notes | Out-File -Encoding utf8 notes.md
+          gh release create "v$env:MELVILLE_VERSION" --repo ShallowMouse/Melville-Releases `
+            --title "MELVILLE $env:MELVILLE_VERSION" --notes-file notes.md `
+            "dist/MELVILLE-Setup-$env:MELVILLE_VERSION.exe" "dist/MELVILLE-$env:MELVILLE_VERSION-portable.zip"
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=release::Publishing the release failed"; exit 1 }
