@@ -276,8 +276,7 @@ public:
         setUsingNativeTitleBar (true);
         setContentOwned (bar, true);
         setResizable (false, false);
-        // on top of the parts (Hawthorne opens full screen), at the top centre of the main screen
-        setAlwaysOnTop (true);
+        // at the top centre of the main screen
         auto area = juce::Rectangle<int> (0, 0, 1920, 1080);
         if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay()) area = d->userBounds.toNearestInt();
         setTopLeftPosition (area.getCentreX() - getWidth() / 2, area.getY() + 8);

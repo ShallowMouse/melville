@@ -1,9 +1,16 @@
 #pragma once
 
-// The patchbay window: pick what you're patching FROM (a part's outputs) and TO (a
-// part's inputs), and click the grid to make or break a cord. A source can feed any
-// number of destinations; a destination with several cords hears them summed.
-// Right-click a cord to set its level.
+// MELVILLE's patchbay, laid out like a hardware one: a patch panel for each app, in the
+// app's own colour, with its outputs on the top row of jacks and its inputs on the bottom
+// row. Cables hang between the jacks.
+//
+//   drag from an OUTPUT jack to an INPUT jack       patch a cable
+//   drag the plug out of an INPUT jack               move it to another input, or pull it out
+//   drag a section's name onto another section's     patch the whole section, 1 to 1, 2 to 2 ...
+//   right-click a jack or a multicore                levels, pull cables
+//
+// A run of cables between the same two sections (24 tape tracks into EMERSON, say) is
+// drawn as one multicore with its count; SHOW EVERY CABLE draws them all.
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "../Core/Hub.h"
@@ -11,26 +18,85 @@
 namespace melville
 {
 
-class PatchGrid : public juce::Component,
-                  public juce::SettableTooltipClient
+class PatchCanvas : public juce::Component,
+                    public juce::SettableTooltipClient,
+                    private juce::Timer
 {
 public:
-    explicit PatchGrid (Patchbay&);
+    explicit PatchCanvas (Hub&);
+    ~PatchCanvas() override;
 
-    void setPorts (int fromPort, int toPort, int maxTracks);
+    void rebuild();                  // the panels (when the reel or interface changes)
+    void setShowEveryCable (bool);
+
     void paint (juce::Graphics&) override;
-    void mouseDown (const juce::MouseEvent&) override;
     void mouseMove (const juce::MouseEvent&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
 
-    static constexpr int cell = 18, labelWidth = 220, headerHeight = 150;
+    int getContentHeight() const noexcept { return contentHeight; }
+    std::function<void()> onShowEveryCable;    // the multicore menu turned it on
 
 private:
-    std::pair<int, int> cellAt (juce::Point<int>) const;    // (column, row) or -1
-    Patchbay& patchbay;
-    std::vector<int> sources, dests;                          // flat numbers shown
-    juce::String fromId, toId;
-    int hoverCol = -1, hoverRow = -1;
+    struct Jack
+    {
+        int flat = -1;                      // source or destination number in the patchbay
+        juce::String label;                 // "7", "L", "LTC"
+        juce::Point<float> centre;
+    };
+
+    struct Section
+    {
+        juce::String title;                 // "TRACKS", "MASTER", "TO DESK"
+        bool output = true;                 // top row (sources) or bottom row (destinations)
+        std::vector<Jack> jacks;
+        juce::Rectangle<float> titleArea, area;
+    };
+
+    struct Panel
+    {
+        juce::String id, title;
+        juce::Colour colour;
+        std::vector<Section> sections;
+        juce::Rectangle<float> area;
+    };
+
+    struct Hit { int panel = -1, section = -1, jack = -1; bool titleOnly = false; };
+
+    void layOut();
+    Hit hitTest (juce::Point<float>) const;
+    const Jack* jackFor (int flat, bool output) const;
+    const Section* sectionFor (int flat, bool output, int* panelIndex = nullptr) const;
+    juce::Colour colourOfSource (int flat) const;
+    void drawPanel (juce::Graphics&, const Panel&) const;
+    void drawCables (juce::Graphics&) const;
+    static void drawCable (juce::Graphics&, juce::Point<float> a, juce::Point<float> b, juce::Colour, float thickness);
+    void showJackMenu (const Hit&);
+    void showMulticoreMenu (int srcPanel, int srcSection, int dstPanel, int dstSection);
+    void timerCallback() override;
+
+    Hub& hub;
+    std::vector<Panel> panels;
+    bool showEveryCable = false;
+    int contentHeight = 600;
+    int lastTracks = -1, lastIns = -1, lastOuts = -1;
+
+    // dragging a cable
+    struct Drag
+    {
+        bool active = false;
+        bool fromTitle = false;             // a whole section
+        Hit from;
+        std::vector<int> sources;           // what the plug carries
+        juce::Point<float> start, end;
+    } drag;
+    Hit hover;
+
+    // multicores drawn this time (for clicking them)
+    struct Multicore { int sp, ss, dp, ds; juce::Point<float> label; };
+    mutable std::vector<Multicore> multicores;
 };
 
 class PatchbayView : public juce::Component
@@ -43,15 +109,13 @@ public:
     void resized() override;
 
 private:
-    void refresh();
     void save();
     void open();
 
     Hub& hub;
-    juce::Label fromLabel { {}, "FROM" }, toLabel { {}, "TO" };
-    juce::ComboBox fromBox, toBox;
-    juce::TextButton defaultButton { "DEFAULT" }, clearButton { "CLEAR VIEW" }, saveButton { "SAVE" }, openButton { "OPEN" };
-    PatchGrid grid;
+    juce::TextButton defaultButton { "DEFAULT" }, clearButton { "PULL ALL" }, saveButton { "SAVE" }, openButton { "OPEN" };
+    juce::ToggleButton everyCable { "SHOW EVERY CABLE" };
+    PatchCanvas canvas;
     juce::Viewport viewport;
     std::unique_ptr<juce::FileChooser> chooser;
 };
