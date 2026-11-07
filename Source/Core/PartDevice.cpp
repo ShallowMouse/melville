@@ -28,6 +28,18 @@ PartDevice::~PartDevice()
 juce::Array<double> PartDevice::getAvailableSampleRates() { return { hub.getSampleRate() }; }
 juce::Array<int> PartDevice::getAvailableBufferSizes()    { return { hub.getBlockSize() }; }
 int PartDevice::getDefaultBufferSize()                    { return hub.getBlockSize(); }
+int PartDevice::getOutputLatencyInSamples()
+{
+    auto* d = hub.deviceManager.getCurrentAudioDevice();
+    return d != nullptr ? d->getOutputLatencyInSamples() : 0;
+}
+
+int PartDevice::getInputLatencyInSamples()
+{
+    auto* d = hub.deviceManager.getCurrentAudioDevice();
+    return (d != nullptr ? d->getInputLatencyInSamples() : 0) + hub.extraLatency.load();   // (+ what MELVILLE measured)
+}
+
 int PartDevice::getCurrentBufferSizeSamples()             { return hub.getBlockSize(); }
 double PartDevice::getCurrentSampleRate()                 { return hub.getSampleRate(); }
 

@@ -1,6 +1,7 @@
 #include "PatchbayView.h"
 #include "MelvilleLookAndFeel.h"
 #include "../Core/NetworkNode.h"
+#include "../Core/Bridges.h"
 #include <map>
 
 namespace melville
@@ -114,10 +115,9 @@ void PatchCanvas::rebuild()
         auto& p = panel ("melville", "MELVILLE");
         column (p, { "LTC OUT", "route", "MELVILLE's timecode (LTC) from the transport, for anything that chases it.", { "Hawthorne LTC" }, { "LTC" } },
                    { "LTC IN", "hawthorne", "Timecode for MELVILLE's transport to chase (SYNC > chase LTC).", { "LTC in" }, { "LTC" } });
-        column (p, { "CLICK", "hawthorne", "The click (metronome) at the transport's tempo: to the monitors by default.", { "Click" }, { "CLK" } }, none); }
+        column (p, { "CLICK", "hawthorne", "The click (metronome) at the transport's tempo: to the monitors by default.", { "Click" }, { "CLK" } }, none);
 
-    {   // MELVILLE Link: a column of jacks per connected sender
-        auto& p = panel ("network", "MELVILLE LINK");
+        // MELVILLE Link, to the right: a set of jacks per connected sender (THOREAU, IRVING ... on other PCs)
         auto& rx = hub.getNetwork().getReceiver();
         for (int slot = 0; slot < NetworkNode::slots; ++slot)
         {
@@ -125,11 +125,11 @@ void PatchCanvas::rebuild()
             if (st.state == hawthorne::NetReceiver::State::off || st.channels <= 0) continue;
             juce::StringArray chans;
             for (int c = 0; c < st.channels; ++c) chans.add (NetworkNode::channelName (slot, c));
-            column (p, { juce::String (slot + 1) + " " + st.name.toUpperCase(), "network",
-                         "Audio from " + st.name + " on another PC, over MELVILLE Link. Senders follow Hawthorne's tape and tempo.",
+            column (p, { "LINK " + juce::String (slot + 1) + " " + st.name.toUpperCase(), "network",
+                         "Audio from " + st.name + " on another PC, over MELVILLE Link. Senders follow the transport's position and tempo.",
                          chans, numbers (st.channels) }, none);
         }
-        if (p.sections.empty()) p.note = "No senders connected. Click MELVILLE LINK on the MELVILLE bar to connect one."; }
+    }
 
     {   // IRVING: one panel, a set of jacks per instance open
         auto& p = panel ("pequod", "IRVING");
@@ -149,7 +149,13 @@ void PatchCanvas::rebuild()
     }
 
     {   auto& p = panel ("thoreau", "THOREAU");
-        column (p, { "OUT", "thoreau", "THOREAU's drums (its stereo mix).", { "Out 1", "Out 2" }, lr }, none); }
+        column (p, { "MIX OUT", "thoreau", "THOREAU's stereo mix: the whole kit after its mixer.", { "Mix L", "Mix R" }, lr }, none);
+        juce::StringArray kit, kitShort;
+        const auto all = names::thoreauOuts();
+        for (int i = 2; i < all.size(); ++i) kit.add (all[i]);
+        kitShort.addArray ({ "BD", "SD", "CP", "RS", "CH", "OH", "LT", "MT", "HT", "CY", "RD", "CB", "OVL", "OVR", "RML", "RMR" });
+        column (p, { "KIT OUTS", "thoreau", "Each drum on its own, after its level: cable them to tape tracks or desk channels to record or mix the kit in parts. Then the overheads and room.",
+                     kit, kitShort }, none); }
 
     {   auto& p = panel ("hawthorne", "HAWTHORNE");
         column (p, { "TRACK OUT", "route", "Each tape track playing back (or its input, while the track monitors input). To EMERSON by default.",
@@ -174,9 +180,7 @@ void PatchCanvas::rebuild()
         column (p, { "RETURN A", "link", "FX return A: EMERSON's return A chain coming back to the desk.", { "EMERSON return A L", "EMERSON return A R" }, lr },
                    { "SEND A", "link", "FX send A from the desk into EMERSON's return A chain.", { "To EMERSON send A L", "To EMERSON send A R" }, lr });
         column (p, { "RETURN B", "link", "FX return B: EMERSON's return B chain coming back to the desk.", { "EMERSON return B L", "EMERSON return B R" }, lr },
-                   { "SEND B", "link", "FX send B from the desk into EMERSON's return B chain.", { "To EMERSON send B L", "To EMERSON send B R" }, lr });
-        column (p, none, { "MASTER IN", "emerson", "Hawthorne's master playing back, for EMERSON's meters.", { "Hawthorne master L", "Hawthorne master R" }, lr });
-        column (p, none, { "LTC IN", "emerson", "Timecode for EMERSON (from Hawthorne by default).", { "Hawthorne LTC" }, { "LTC" } }); }
+                   { "SEND B", "link", "FX send B from the desk into EMERSON's return B chain.", { "To EMERSON send B L", "To EMERSON send B R" }, lr }); }
 
     {   auto& p = panel ("whitman", "WHITMAN");
         column (p, none, { "TRACKS", "whitman", "Into WHITMAN's channel strips, one per track (EMERSON's TRACKS OUT by default).",

@@ -42,8 +42,10 @@ public:
     int getCurrentBitDepth() override { return 32; }
     juce::BigInteger getActiveOutputChannels() const override { return activeOut; }
     juce::BigInteger getActiveInputChannels() const override  { return activeIn; }
-    int getOutputLatencyInSamples() override { return 0; }
-    int getInputLatencyInSamples() override  { return 0; }
+    // the interface's own latency: the parts run in its callback, so theirs is the same
+    // (Hawthorne lines overdubs up with it)
+    int getOutputLatencyInSamples() override;
+    int getInputLatencyInSamples() override;
 
     //--------------------------------------------------------------------------
     // From the hub

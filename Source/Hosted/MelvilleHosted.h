@@ -13,6 +13,9 @@
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <atomic>
+#include <functional>
+#include <map>
 
 namespace melville
 {
@@ -33,4 +36,54 @@ namespace melville
 
     /** The part's manager is going away (call before it's destroyed). */
     void detach (juce::AudioDeviceManager&);
+
+    //==========================================================================
+    /** MELVILLE's transport. Hawthorne is the clock: it fills in the controls and publishes
+        where the tape is every block; MELVILLE's bar drives it, and THOREAU and IRVING follow
+        it directly (no network). */
+    struct Transport
+    {
+        // --- Controls (message thread), given by Hawthorne
+        std::function<void()> play, stop, record, returnToZero;
+        std::function<void (int direction)> wind;           // -1 rewind, +1 fast forward, 0 let go
+        std::function<void (double bpm, int beatsPerBar, double barOne)> setTempo;   // barOne: tape samples
+
+        // --- State (any thread)
+        std::atomic<bool> available { false };              // Hawthorne is there
+        std::atomic<bool> rolling { false }, recording { false }, reelLoaded { false };
+        std::atomic<juce::int64> position { 0 };             // tape position (reel samples), for the counter
+        std::atomic<double> reelRate { 48000.0 };            // the reel's sample rate
+        std::atomic<double> bpm { 0.0 };                     // 0: the reel has no tempo
+        std::atomic<int> beatsPerBar { 4 };
+        std::atomic<double> barOne { 0.0 };                  // tape position of bar 1's downbeat
+        std::atomic<int> tempoRev { 0 };                     // changes when the tempo or bar 1 changes
+
+        // --- Audio thread: Hawthorne publishes, once per block, where an input sample at the
+        //     start of its block lands on tape and how fast the tape goes (0 when stopped).
+        std::atomic<double> tapePos { 0.0 }, tapePerSample { 0.0 };
+        std::atomic<juce::int64> publishedFrame { -1 };      // the hub frame of that block's start
+        std::atomic<int> flags { 0 };                        // 1 rolling, 2 recording, 4 reel loaded
+    };
+    Transport& transport() noexcept;
+
+    /** Audio thread: MELVILLE's frame count at the start of the block being run now (every
+        part sees the same number in the same block). */
+    juce::int64 currentFrame() noexcept;
+
+    /** Where frame f lands on tape, from the latest published block; false if Hawthorne isn't
+        publishing (no tape clock). */
+    bool tapePositionAt (juce::int64 frame, double& tapePos, double& tapePerSample, int& flags) noexcept;
+
+    //==========================================================================
+    /** MELVILLE's session file: one file for the whole studio. Each part (after attach) says
+        how to put its state in it and take it back. Message thread. */
+    struct SessionPart
+    {
+        std::function<std::unique_ptr<juce::XmlElement>()> save;     // the part's state, any tag
+        std::function<void (const juce::XmlElement&)> load;          // what save() gave
+    };
+    void addToSession (juce::AudioDeviceManager&, SessionPart);
+
+    /** MELVILLE: the parts in the session, by part id ("hawthorne", "pequod2" ...). */
+    const std::map<juce::String, SessionPart>& sessionParts();
 }

@@ -72,6 +72,31 @@ public:
     /** CPU load of the whole block, 0..1 (for the launcher's meter). */
     float getLoad() const noexcept { return load.load (std::memory_order_relaxed); }
 
+    /** Frames run since the interface started, at the start of the block being run now. */
+    juce::int64 getBlockFrame() const noexcept { return blockFrame.load (std::memory_order_relaxed); }
+
+    //==========================================================================
+    /** Round-trip latency: with an interface output cabled straight to an input, MELVILLE
+        sends a few clicks out and times them coming back. What the driver doesn't report
+        (converters, cables) becomes the "extra" latency every part is told about, so
+        Hawthorne's overdubs land in time. */
+    struct LatencyTest
+    {
+        enum State { idle, running, done, failed };
+        std::atomic<int> state { idle };
+        std::atomic<int> outChannel { 0 }, inChannel { 0 };
+        std::atomic<int> roundTrip { 0 };        // samples, measured
+        std::atomic<int> reported { 0 };         // what the driver says (in + out)
+        // audio thread
+        int ping = 0, waited = 0, gap = 0;
+        int results[8] {};
+    };
+    void startLatencyTest (int outChannel, int inChannel);
+    LatencyTest& getLatencyTest() noexcept { return latencyTest; }
+
+    /** Latency the interface adds beyond what its driver reports (samples); reported with the input latency. */
+    std::atomic<int> extraLatency { 0 };
+
     /** A PartDevice opening / closing (keeps the parts in step with the interface). */
     void partDeviceOpened (PartDevice&);
     void partDeviceClosed (PartDevice&);
@@ -114,6 +139,9 @@ private:
     int blockSize = 512;
     std::atomic<bool> running { false };
     std::atomic<float> load { 0.0f };
+    std::atomic<juce::int64> blockFrame { 0 };
+    LatencyTest latencyTest;
+    void runLatencyTest (const float* const* in, int numIn, float* const* out, int numOut, int n);
 };
 
 } // namespace melville

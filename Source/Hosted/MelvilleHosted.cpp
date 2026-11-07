@@ -7,7 +7,22 @@
 namespace melville
 {
 
-namespace { juce::String nextPart; }
+namespace
+{
+    juce::String nextPart;
+    std::map<juce::String, SessionPart> sessions;
+    std::map<juce::String, juce::AudioDeviceManager*> sessionOwners;
+}
+
+void addToSession (juce::AudioDeviceManager& dm, SessionPart sp)
+{
+    if (auto* hub = Hub::getIfExists())
+        for (auto& n : hub->getNodes())
+            if (auto* p = dynamic_cast<PartNode*> (n.get()))
+                if (p->manager == &dm) { sessions[p->port.id] = std::move (sp); sessionOwners[p->port.id] = &dm; return; }
+}
+
+const std::map<juce::String, SessionPart>& sessionParts() { return sessions; }
 
 bool isHosted() noexcept { return Hub::getIfExists() != nullptr; }
 
@@ -113,12 +128,38 @@ std::unique_ptr<juce::Component> midiInputsPanel (juce::AudioDeviceManager& dm)
     return std::make_unique<MidiInputsPanel> (dm);
 }
 
+Transport& transport() noexcept
+{
+    static Transport t;
+    return t;
+}
+
+juce::int64 currentFrame() noexcept
+{
+    auto* hub = Hub::getIfExists();
+    return hub != nullptr ? hub->getBlockFrame() : 0;
+}
+
+bool tapePositionAt (juce::int64 frame, double& tapePos, double& tapePerSample, int& flags) noexcept
+{
+    auto& t = transport();
+    const auto at = t.publishedFrame.load (std::memory_order_acquire);
+    if (at < 0 || ! t.available.load()) return false;
+    tapePerSample = t.tapePerSample.load (std::memory_order_relaxed);
+    tapePos = t.tapePos.load (std::memory_order_relaxed) + (double) (frame - at) * tapePerSample;
+    flags = t.flags.load (std::memory_order_relaxed);
+    return true;
+}
+
 void detach (juce::AudioDeviceManager& dm)
 {
     if (auto* hub = Hub::getIfExists())
         for (auto& n : hub->getNodes())
             if (auto* p = dynamic_cast<PartNode*> (n.get()))
                 if (p->manager == &dm) p->manager = nullptr;
+    for (auto it = sessionOwners.begin(); it != sessionOwners.end();)
+        if (it->second == &dm) { sessions.erase (it->first); it = sessionOwners.erase (it); }
+        else ++it;
 }
 
 } // namespace melville

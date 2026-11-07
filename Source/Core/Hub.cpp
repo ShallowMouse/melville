@@ -1,4 +1,5 @@
 #include "Hub.h"
+#include <algorithm>
 #include "PartDevice.h"
 #include "Bridges.h"
 #include "NetworkNode.h"
@@ -40,7 +41,7 @@ Hub::Hub()
     addNode (std::make_unique<PartNode> ("hawthorne", "HAWTHORNE", hawthorneIns, juce::StringArray ("Click")));
     addNode (std::make_unique<PartNode> ("emerson", "EMERSON", names::routeFromHawthorne(), names::routeToHawthorne()));
     addNode (std::make_unique<PartNode> ("whitman", "WHITMAN", names::linkToWhitman(), names::linkFromWhitman()));
-    addNode (std::make_unique<PartNode> ("thoreau", "THOREAU", juce::StringArray(), names::numbered ("Out ", 16)));
+    addNode (std::make_unique<PartNode> ("thoreau", "THOREAU", juce::StringArray(), names::thoreauOuts()));
     // IRVING (PEQUOD Host): up to four at once, "pequod", "pequod2" ... (each its own patch panel)
     for (int n = 1; n <= maxIrvings; ++n)
         addNode (std::make_unique<PartNode> (irvingId (n), irvingTitle (n), names::numbered ("In ", 8), names::numbered ("Out ", 8)));
@@ -141,7 +142,9 @@ void Hub::defaultPatch()
     pb.connect (pb.findSource ("hawthorne", "Click"), pb.findDest ("interface", "Out 1"));
     pb.connect (pb.findSource ("hawthorne", "Click"), pb.findDest ("interface", "Out 2"));
     // Hawthorne -> EMERSON -> WHITMAN -> EMERSON -> Hawthorne, as Route and the Link do now
-    pb.connectByName ("route", "emerson");
+    for (int t = 0; t < hawthorne::route::maxTracks; ++t)       // the tape tracks into EMERSON
+        pb.connect (pb.findSource ("route", "Hawthorne track " + juce::String (t + 1)),
+                    pb.findDest ("emerson", "Hawthorne track " + juce::String (t + 1)));
     // (EMERSON's processed tracks leave by the Link; only its mix chain goes back to Hawthorne here)
     for (auto side : { "L", "R" })
         pb.connect (pb.findSource ("emerson", juce::String ("To Hawthorne master ") + side),
@@ -260,9 +263,59 @@ void Hub::audioDeviceIOCallbackWithContext (const float* const* in, int numIn, f
         }
     }
 
+    if (latencyTest.state.load (std::memory_order_relaxed) == LatencyTest::running)
+        runLatencyTest (in, numIn, out, numOut, n);
+
     patchbay.audioBlockDone();
+    blockFrame.fetch_add (n, std::memory_order_relaxed);
     const double took = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0);
     load.store ((float) (took * sampleRate / juce::jmax (1, n)), std::memory_order_relaxed);
+}
+
+//==============================================================================
+void Hub::startLatencyTest (int outChannel, int inChannel)
+{
+    if (latencyTest.state.load() == LatencyTest::running) return;
+    auto* d = deviceManager.getCurrentAudioDevice();
+    latencyTest.reported = d != nullptr ? d->getInputLatencyInSamples() + d->getOutputLatencyInSamples() : 0;
+    latencyTest.outChannel = outChannel;
+    latencyTest.inChannel = inChannel;
+    latencyTest.ping = latencyTest.waited = latencyTest.gap = 0;
+    latencyTest.state = LatencyTest::running;      // (the audio thread picks it up)
+}
+
+void Hub::runLatencyTest (const float* const* in, int numIn, float* const* out, int numOut, int n)
+{
+    auto& t = latencyTest;
+    constexpr int pings = 5;
+    const int oc = t.outChannel.load(), ic = t.inChannel.load();
+    const int timeout = (int) sampleRate, spacing = (int) (sampleRate * 0.15);
+    if (oc >= numOut || ic >= numIn || out[oc] == nullptr || in[ic] == nullptr) { t.state = LatencyTest::failed; return; }
+
+    float* o = out[oc];
+    juce::FloatVectorOperations::clear (o, n);        // only the test on that output while it runs
+    const float* x = in[ic];
+
+    for (int i = 0; i < n; ++i)
+    {
+        if (t.gap > 0) { --t.gap; continue; }          // quiet between pings
+        if (t.waited == 0) o[i] = 0.9f;                // the click
+        else if (std::abs (x[i]) > 0.25f)              // ... back
+        {
+            t.results[t.ping] = t.waited;
+            t.waited = 0;
+            t.gap = spacing;
+            if (++t.ping == pings)
+            {
+                std::sort (t.results, t.results + pings);
+                t.roundTrip = t.results[pings / 2];
+                t.state = LatencyTest::done;
+                return;
+            }
+            continue;
+        }
+        if (++t.waited > timeout) { t.state = LatencyTest::failed; return; }
+    }
 }
 
 //==============================================================================
@@ -290,7 +343,7 @@ void Hub::updateVisibleTracks (int numTracks)
         e->visibleIns.clear();
         e->visibleOuts.clear();
         for (int t = 0; t < numTracks; ++t) { e->visibleIns.push_back (t); e->visibleOuts.push_back (t); }
-        e->visibleIns.insert (e->visibleIns.end(), { maxT, maxT + 1, maxT + 2 });   // master L / R, LTC
+        // (just the tracks in: EMERSON doesn't use Hawthorne's master or LTC)
         e->visibleOuts.insert (e->visibleOuts.end(), { maxT, maxT + 1 });          // to master L / R
     }
     if (auto* w = findPart ("whitman"))

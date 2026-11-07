@@ -93,7 +93,7 @@ int main()
     FakeCallback emerson;
     auto emDev = openPart (hub, "emerson");
     const auto emIns = emDev->getInputChannelNames(), emOuts = emDev->getOutputChannelNames();
-    CHECK (emIns.size() == hawthorne::route::defaultTracks + 3);    // reel tracks + master L/R + LTC
+    CHECK (emIns.size() == hawthorne::route::defaultTracks);        // just the reel tracks
     CHECK (emIns[0] == "Hawthorne track 1" && emOuts[0] == "To Hawthorne track 1");
     std::vector<float> emSaw (n);
     emerson.fn = [&] (const float* const* in, int, float* const* out, int no, int nn)

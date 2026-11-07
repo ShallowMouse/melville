@@ -112,6 +112,12 @@ namespace names
     juce::StringArray linkToWhitman();        // "Hawthorne track 1".."96", "EMERSON return A L/R", "EMERSON return B L/R"
     juce::StringArray linkFromWhitman();      // "To Hawthorne master L/R", "To EMERSON send A L/R", "To EMERSON send B L/R"
     juce::StringArray numbered (const juce::String& prefix, int n, int first = 1);
+    /** THOREAU's outputs, in its device-channel order: mix L/R, the 12 drums, overheads L/R, room L/R. */
+    inline juce::StringArray thoreauOuts()
+    {
+        return { "Mix L", "Mix R", "Kick", "Snare", "Clap", "Rim", "Closed hat", "Open hat", "Low tom", "Mid tom",
+                 "High tom", "Crash", "Ride", "Cowbell", "Overheads L", "Overheads R", "Room L", "Room R" };
+    }
 }
 
 } // namespace melville

@@ -14,6 +14,7 @@
 #include "UI/Taskbar.h"
 #include "Core/NetworkNode.h"
 #include "Updater.h"
+#include "Hosted/MelvilleHosted.h"
 
 namespace melville
 {
@@ -152,6 +153,297 @@ static juce::Image loadIcon (const juce::String& id, int px = 128)
 }
 
 //==============================================================================
+/** MELVILLE's transport on the bar: RTZ, REW, FFW, STOP, PLAY, REC, the counter and the
+    tempo. It drives Hawthorne (the clock), whose own keys show the same thing. */
+class TransportStrip : public juce::Component, private juce::Timer
+{
+public:
+    TransportStrip()
+    {
+        for (int k = 0; k < numKeys; ++k)
+        {
+            auto* b = keys.add (new Key ((Kind) k));
+            addAndMakeVisible (b);
+        }
+        keys[rtz]->onClick  = [] { if (auto& f = melville::transport().returnToZero) f(); };
+        keys[stop]->onClick = [] { if (auto& f = melville::transport().stop) f(); };
+        keys[play]->onClick = [] { if (auto& f = melville::transport().play) f(); };
+        keys[rec]->onClick  = [] { if (auto& f = melville::transport().record) f(); };
+        for (int k : { (int) rew, (int) ffw })
+        {
+            auto* b = keys[k];
+            b->onStateChange = [b, k, held = false] () mutable
+            {
+                auto& f = melville::transport().wind;
+                if (f == nullptr) return;
+                if (b->isDown() && ! held)       { held = true;  f (k == rew ? -1 : +1); }
+                else if (! b->isDown() && held)  { held = false; f (0); }
+            };
+        }
+        keys[rtz]->setTooltip ("Return to zero");
+        keys[rew]->setTooltip ("Rewind (hold)");
+        keys[ffw]->setTooltip ("Fast forward (hold)");
+        keys[stop]->setTooltip ("Stop");
+        keys[play]->setTooltip ("Play");
+        keys[rec]->setTooltip ("Record (the armed tracks on Hawthorne)");
+
+        tempo.setEditable (false, true, false);
+        tempo.setJustificationType (juce::Justification::centred);
+        tempo.setColour (juce::Label::textColourId, Colours::text);
+        tempo.setColour (juce::Label::backgroundWhenEditingColourId, Colours::panelHi);
+        tempo.setColour (juce::Label::textWhenEditingColourId, Colours::text);
+        tempo.setTooltip ("The tempo (the reel's): double-click to type one. THOREAU and IRVING follow it.");
+        tempo.onTextChange = [this]
+        {
+            const double b = tempo.getText().retainCharacters ("0123456789.").getDoubleValue();
+            if (b >= 20.0 && b <= 400.0)
+                {
+                    auto& t = melville::transport();
+                    if (auto& f = t.setTempo) f (b, t.beatsPerBar.load(), t.barOne.load());
+                }
+            refresh();
+        };
+        addAndMakeVisible (tempo);
+        startTimerHz (20);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto& t = melville::transport();
+        // the counter, like a tape machine's: hours, minutes, seconds, frames
+        g.setColour (juce::Colour (0xff101112));
+        g.fillRoundedRectangle (counterArea.toFloat(), 4.0f);
+        const double rate = juce::jmax (1.0, t.reelRate.load());
+        const double secs = (double) t.position.load() / rate;
+        const int h = (int) (secs / 3600.0), m = (int) std::fmod (secs / 60.0, 60.0), sec = (int) std::fmod (secs, 60.0);
+        const int fr = (int) (std::fmod (secs, 1.0) * 30.0);
+        const auto text = juce::String (h) + ":" + juce::String (m).paddedLeft ('0', 2) + ":" + juce::String (sec).paddedLeft ('0', 2)
+                          + ":" + juce::String (fr).paddedLeft ('0', 2);
+        g.setColour (t.recording.load() ? Colours::warn : t.rolling.load() ? Colours::accent : Colours::text);
+        g.setFont (juce::Font (juce::FontOptions (22.0f, juce::Font::bold)));
+        auto c = counterArea.reduced (8, 2);
+        g.drawText (text, c.removeFromTop (c.getHeight() * 3 / 5), juce::Justification::centred);
+        g.setFont (juce::Font (juce::FontOptions (11.0f)));
+        g.setColour (Colours::textDim);
+        juce::String sub = t.available.load() ? juce::String ("TAPE") : juce::String ("NO HAWTHORNE");
+        if (t.bpm.load() > 0.0)
+        {
+            const double beats = ((double) t.position.load() - t.barOne.load()) / (rate * 60.0 / t.bpm.load());
+            const int bpb = juce::jmax (1, t.beatsPerBar.load());
+            const int bar = (int) std::floor (beats / bpb) + 1, beat = (int) std::floor (std::fmod (std::fmod (beats, (double) bpb) + bpb, (double) bpb)) + 1;
+            sub = "BAR " + juce::String (bar) + "  BEAT " + juce::String (beat);
+        }
+        g.drawText (sub, c, juce::Justification::centred);
+
+        g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
+        g.setColour (Colours::textDim);
+        g.drawText ("TEMPO", tempoCaption, juce::Justification::centred);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (0, 18);
+        for (auto* k : keys) { k->setBounds (r.removeFromLeft (40)); r.removeFromLeft (4); }
+        r.removeFromLeft (8);
+        counterArea = r.removeFromLeft (150);
+        r.removeFromLeft (8);
+        auto tr = r.removeFromLeft (80);
+        tempoCaption = tr.removeFromTop (14);
+        tempo.setBounds (tr);
+    }
+
+    static constexpr int preferredWidth = 6 * 44 + 8 + 150 + 8 + 80;
+
+private:
+    enum Kind { rtz, rew, ffw, stop, play, rec, numKeys };
+
+    struct Key : juce::Button
+    {
+        explicit Key (Kind k) : juce::Button ({}), kind (k) {}
+        Kind kind;
+        bool lit = false;
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            auto r = getLocalBounds().toFloat().reduced (1.0f);
+            g.setColour (Colours::panelHi.brighter (down ? 0.12f : over ? 0.05f : 0.0f));
+            g.fillRoundedRectangle (r, 4.0f);
+            const auto on = kind == rec ? Colours::warn : Colours::accent;
+            g.setColour (lit ? on : Colours::line);
+            g.drawRoundedRectangle (r, 4.0f, lit ? 1.5f : 1.0f);
+
+            auto a = r.withSizeKeepingCentre (16.0f, 16.0f);
+            g.setColour (lit ? on : kind == rec ? Colours::warn.withAlpha (0.8f) : Colours::text);
+            juce::Path p;
+            auto tri = [&p] (juce::Rectangle<float> b, bool right)
+            {
+                if (right) p.addTriangle (b.getX(), b.getY(), b.getX(), b.getBottom(), b.getRight(), b.getCentreY());
+                else       p.addTriangle (b.getRight(), b.getY(), b.getRight(), b.getBottom(), b.getX(), b.getCentreY());
+            };
+            switch (kind)
+            {
+                case rtz:  p.addRectangle (a.getX(), a.getY(), 3.0f, a.getHeight()); tri (a.withTrimmedLeft (4.0f), false); break;
+                case rew:  tri (a.withWidth (8.0f), false); tri (a.withTrimmedLeft (8.0f), false); break;
+                case ffw:  tri (a.withWidth (8.0f), true);  tri (a.withTrimmedLeft (8.0f), true); break;
+                case stop: p.addRectangle (a.reduced (1.5f)); break;
+                case play: tri (a.reduced (1.0f, 0.0f), true); break;
+                case rec:  p.addEllipse (a.reduced (1.0f)); break;
+                default: break;
+            }
+            g.fillPath (p);
+        }
+    };
+
+    void refresh()
+    {
+        auto& t = melville::transport();
+        const auto txt = t.bpm.load() > 0.0 ? juce::String (t.bpm.load(), 1) : juce::String ("--");
+        if (! tempo.isBeingEdited() && tempo.getText() != txt) tempo.setText (txt, juce::dontSendNotification);
+    }
+
+    void timerCallback() override
+    {
+        auto& t = melville::transport();
+        const bool rolling = t.rolling.load(), recording = t.recording.load();
+        if (keys[play]->lit != rolling)  { keys[play]->lit = rolling;  keys[play]->repaint(); }
+        if (keys[rec]->lit != recording) { keys[rec]->lit = recording; keys[rec]->repaint(); }
+        for (auto* k : keys) k->setEnabled (t.available.load());
+        refresh();
+        repaint (counterArea);
+    }
+
+    juce::OwnedArray<Key> keys;
+    juce::Label tempo;
+    juce::Rectangle<int> counterArea, tempoCaption;
+};
+
+//==============================================================================
+/** INTERFACE: the device selector, and underneath a round-trip latency measurement. */
+class InterfacePanel : public juce::Component, private juce::Timer
+{
+public:
+    explicit InterfacePanel (Hub& h) : hub (h), selector (h.deviceManager, 0, 64, 0, 64, true, false, false, false)
+    {
+        addAndMakeVisible (selector);
+        caption.setText ("LATENCY", juce::dontSendNotification);
+        caption.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
+        caption.setColour (juce::Label::textColourId, Colours::accent);
+        addAndMakeVisible (caption);
+        help.setText ("Cable an output of the interface straight into an input, pick them, and MEASURE: MELVILLE times a few clicks "
+                      "round the loop. What the driver doesn't report is added to every part's latency, so overdubs land in time. "
+                      "Take the cable out afterwards.", juce::dontSendNotification);
+        help.setJustificationType (juce::Justification::topLeft);
+        help.setColour (juce::Label::textColourId, Colours::textDim);
+        addAndMakeVisible (help);
+        for (auto* b : { &outBox, &inBox }) addAndMakeVisible (b);
+        outBox.setTooltip ("The output the loop cable comes from");
+        inBox.setTooltip ("The input the loop cable goes into");
+        measure.onClick = [this] { start(); };
+        measure.setTooltip ("Send clicks out and time them back (the output plays only the clicks for a moment)");
+        addAndMakeVisible (measure);
+        clear.onClick = [this] { hub.extraLatency = 0; result.setText ("cleared: the driver's figures only", juce::dontSendNotification); };
+        clear.setTooltip ("Forget the measurement");
+        addAndMakeVisible (clear);
+        result.setColour (juce::Label::textColourId, Colours::text);
+        addAndMakeVisible (result);
+        fillBoxes();
+        showCurrent();
+        setSize (580, 640);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds();
+        selector.setBounds (r.removeFromTop (440));
+        r.reduce (16, 6);
+        caption.setBounds (r.removeFromTop (22));
+        help.setBounds (r.removeFromTop (52));
+        r.removeFromTop (6);
+        auto row = r.removeFromTop (28);
+        outBox.setBounds (row.removeFromLeft (150)); row.removeFromLeft (8);
+        inBox.setBounds (row.removeFromLeft (150)); row.removeFromLeft (8);
+        measure.setBounds (row.removeFromLeft (100)); row.removeFromLeft (8);
+        clear.setBounds (row.removeFromLeft (70));
+        r.removeFromTop (8);
+        result.setBounds (r.removeFromTop (44));
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (Colours::bg);
+        g.setColour (Colours::line);
+        g.drawHorizontalLine (440, 12.0f, (float) getWidth() - 12.0f);
+    }
+
+private:
+    void fillBoxes()
+    {
+        outBox.clear (juce::dontSendNotification);
+        inBox.clear (juce::dontSendNotification);
+        if (auto* d = hub.deviceManager.getCurrentAudioDevice())
+        {
+            const auto outs = d->getOutputChannelNames(), ins = d->getInputChannelNames();
+            const auto activeOut = d->getActiveOutputChannels(), activeIn = d->getActiveInputChannels();
+            for (int c = 0; c < outs.size(); ++c) if (activeOut[c]) outBox.addItem ("Out " + juce::String (c + 1) + "  " + outs[c], c + 1);
+            for (int c = 0; c < ins.size(); ++c)  if (activeIn[c])  inBox.addItem ("In " + juce::String (c + 1) + "  " + ins[c], c + 1);
+        }
+        outBox.setSelectedItemIndex (0, juce::dontSendNotification);
+        inBox.setSelectedItemIndex (0, juce::dontSendNotification);
+    }
+
+    void showCurrent()
+    {
+        auto* d = hub.deviceManager.getCurrentAudioDevice();
+        const int rep = d != nullptr ? d->getInputLatencyInSamples() + d->getOutputLatencyInSamples() : 0;
+        const int extra = hub.extraLatency.load();
+        result.setText ("Driver reports " + juce::String (rep) + " samples round trip"
+                        + (extra != 0 ? ";  measured extra " + juce::String (extra) + " samples (" + ms (extra) + ")" : juce::String ("; not measured")),
+                        juce::dontSendNotification);
+    }
+
+    juce::String ms (int samples) const { return juce::String (1000.0 * samples / juce::jmax (1.0, hub.getSampleRate()), 2) + " ms"; }
+
+    void start()
+    {
+        if (outBox.getSelectedId() == 0 || inBox.getSelectedId() == 0) { result.setText ("No interface open", juce::dontSendNotification); return; }
+        // the device's channel index among the active ones (that's how the hub sees them)
+        auto indexOf = [] (const juce::BigInteger& active, int channel) { int k = 0; for (int c = 0; c < channel; ++c) k += active[c] ? 1 : 0; return k; };
+        auto* d = hub.deviceManager.getCurrentAudioDevice();
+        if (d == nullptr) return;
+        hub.startLatencyTest (indexOf (d->getActiveOutputChannels(), outBox.getSelectedId() - 1),
+                              indexOf (d->getActiveInputChannels(), inBox.getSelectedId() - 1));
+        result.setText ("measuring...", juce::dontSendNotification);
+        measure.setEnabled (false);
+        startTimer (100);
+    }
+
+    void timerCallback() override
+    {
+        auto& t = hub.getLatencyTest();
+        const int s = t.state.load();
+        if (s == Hub::LatencyTest::running) return;
+        stopTimer();
+        measure.setEnabled (true);
+        if (s == Hub::LatencyTest::done)
+        {
+            const int extra = juce::jmax (0, t.roundTrip.load() - t.reported.load());
+            hub.extraLatency = extra;
+            result.setText ("Round trip " + juce::String (t.roundTrip.load()) + " samples (" + ms (t.roundTrip.load()) + "); driver reports "
+                            + juce::String (t.reported.load()) + ".  Extra " + juce::String (extra) + " samples now added for every part.",
+                            juce::dontSendNotification);
+        }
+        else
+            result.setText ("Nothing came back: check the cable goes from that output to that input, and the input level isn't down.",
+                            juce::dontSendNotification);
+        t.state = Hub::LatencyTest::idle;
+    }
+
+    Hub& hub;
+    juce::AudioDeviceSelectorComponent selector;
+    juce::Label caption, help, result;
+    juce::ComboBox outBox, inBox;
+    juce::TextButton measure { "MEASURE" }, clear { "CLEAR" };
+};
+
 /** The MELVILLE bar: every part's icon (click to bring up its window, lamp lit while it
     runs), then the patchbay and the interface. It stays on top of the parts' windows. */
 class Bar : public juce::Component, private juce::Timer
@@ -209,6 +501,25 @@ public:
                 g.drawRoundedRectangle (juce::Rectangle<float> (16, 12).withCentre (p), 2.0f, 1.5f);
             }
         };
+        sessionTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
+        {
+            // a tape box: the whole studio in one
+            auto box = r.reduced (r.getWidth() * 0.14f, r.getHeight() * 0.08f);
+            g.setColour (Colours::panelHi);
+            g.fillRoundedRectangle (box, 3.0f);
+            g.setColour (Colours::textDim);
+            g.drawRoundedRectangle (box, 3.0f, 1.5f);
+            const float d = box.getWidth() * 0.62f;
+            auto reelArea = juce::Rectangle<float> (d, d).withCentre ({ box.getCentreX(), box.getY() + box.getHeight() * 0.42f });
+            g.setColour (Colours::accent);
+            g.drawEllipse (reelArea, 2.5f);
+            g.fillEllipse (reelArea.withSizeKeepingCentre (d * 0.22f, d * 0.22f));
+            g.fillRect (box.getX() + box.getWidth() * 0.2f, box.getBottom() - box.getHeight() * 0.18f, box.getWidth() * 0.6f, 3.0f);
+        };
+        sessionTile.onClick = [this] { if (onSessionMenu) onSessionMenu (sessionTile); };
+        sessionTile.setTooltip ("SESSION: save or open the whole studio in one file (the reel, racks, mix, drums, IRVINGs and patch)");
+        addAndMakeVisible (sessionTile);
+
         netTile.onClick = [this] { if (onShowNetwork) onShowNetwork(); };
         netTile.setTooltip ("MELVILLE LINK: audio from other PCs (THOREAU, IRVING), onto the patchbay");
         addAndMakeVisible (netTile);
@@ -243,9 +554,10 @@ public:
         audioTile.setTooltip ("INTERFACE: the audio interface, sample rate and buffer");
         addAndMakeVisible (patchTile);
         addAndMakeVisible (audioTile);
+        addAndMakeVisible (transportStrip);
 
         startTimerHz (4);
-        setSize (wordmarkWidth + (tiles.size() + 4) * (tileWidth + gap) + 26 + 260, barHeight);
+        setSize (wordmarkWidth + (tiles.size() + 5) * (tileWidth + gap) + 26 + TransportStrip::preferredWidth + 28 + 200, barHeight);
     }
 
     void paint (juce::Graphics& g) override
@@ -259,6 +571,7 @@ public:
         // a divider between the parts and the studio controls
         g.setColour (Colours::line);
         g.drawVerticalLine (dividerX, 14.0f, (float) getHeight() - 14.0f);
+        g.drawVerticalLine (divider2X, 14.0f, (float) getHeight() - 14.0f);
 
         if (statusArea.getWidth() > 60)
         {
@@ -285,7 +598,11 @@ public:
         r.removeFromLeft (6);
         dividerX = r.getX();
         r.removeFromLeft (14);
-        for (auto* t : { &patchTile, &netTile, &audioTile, &updateTile }) { t->setBounds (r.removeFromLeft (tileWidth)); r.removeFromLeft (gap); }
+        transportStrip.setBounds (r.removeFromLeft (TransportStrip::preferredWidth));
+        r.removeFromLeft (14);
+        divider2X = r.getX();
+        r.removeFromLeft (14);
+        for (auto* t : { &sessionTile, &patchTile, &netTile, &audioTile, &updateTile }) { t->setBounds (r.removeFromLeft (tileWidth)); r.removeFromLeft (gap); }
         statusArea = r.withTrimmedLeft (10);
     }
 
@@ -305,10 +622,8 @@ public:
 
     void showAudio()
     {
-        auto* sel = new juce::AudioDeviceSelectorComponent (hub.deviceManager, 0, 64, 0, 64, true, false, false, false);
-        sel->setSize (560, 460);
         juce::DialogWindow::LaunchOptions o;
-        o.content.setOwned (sel);
+        o.content.setOwned (new InterfacePanel (hub));
         o.dialogTitle = "MELVILLE \xc2\xb7 INTERFACE";
         o.dialogBackgroundColour = Colours::bg;
         o.useNativeTitleBar = true;
@@ -381,7 +696,7 @@ public:
             }
             addAndMakeVisible (t);
         }
-        setSize (wordmarkWidth + (tiles.size() + 4) * (tileWidth + gap) + 26 + 260, barHeight);
+        setSize (wordmarkWidth + (tiles.size() + 5) * (tileWidth + gap) + 26 + TransportStrip::preferredWidth + 28 + 200, barHeight);
         resized();
     }
 
@@ -439,12 +754,19 @@ private:
     std::vector<std::unique_ptr<PartWindow>>& windows;
     juce::OwnedArray<Tile> tiles;
     Tile patchTile { "Patchbay", {}, Colours::accent }, netTile { "MELVILLE Link", {}, Colours::accent }, audioTile { "Interface", {}, Colours::accent },
-         updateTile { "Update", {}, Colours::accent };
+         updateTile { "Update", {}, Colours::accent }, sessionTile { "Session", {}, Colours::accent };
 public:
     std::function<void()> onShowNetwork;
+    std::function<void (juce::Component&)> onSessionMenu;
+    void setSessionName (const juce::String& n)
+    {
+        sessionTile.setTooltip ("SESSION" + (n.isNotEmpty() ? " \"" + n + "\"" : juce::String())
+                                + ": save or open the whole studio in one file (the reel, racks, mix, drums, IRVINGs and patch)");
+    }
 private:
     juce::Rectangle<int> statusArea;
-    int dividerX = 0;
+    int dividerX = 0, divider2X = 0;
+    TransportStrip transportStrip;
     std::unique_ptr<juce::DocumentWindow> patchWindow;
 };
 
@@ -495,6 +817,7 @@ public:
         if (auto patch = props.getUserSettings()->getXmlValue ("patch"))
             if (patch->getIntAttribute ("version") >= 3)      // (older patches were for Hawthorne's old jacks)
                 hub->getPatchbay().fromXml (*patch);
+        hub->extraLatency = props.getUserSettings()->getIntValue ("latencyExtra", 0);   // (INTERFACE > MEASURE)
 
         // Hawthorne Link, now MELVILLE's (the first time with the senders Hawthorne had)
         {
@@ -529,6 +852,8 @@ public:
 
         auto* barContent = new Bar (*hub, parts, windows);
         barContent->onShowNetwork = [this] { showNetwork(); };
+        barContent->onSessionMenu = [this] (juce::Component& c) { showSessionMenu (c); };
+        barContent->setSessionName (sessionFile().getFileNameWithoutExtension());
         barContent->canAddIrving = [this] { return nextFreeIrving() > 0; };
         barContent->onAddIrving = [this] { if (auto n = nextFreeIrving()) { addIrving (n, true); refreshBar(); } };
         barContent->onRemoveIrving = [this] (const juce::String& id) { removeIrving (id); };
@@ -578,10 +903,17 @@ public:
                     up += on ? 1 : 0;
                     std::printf ("MELVILLE smoke: %-10s %s\n", p->id.toRawUTF8(), on ? "running" : "NOT RUNNING");
                 }
+                // the session file round trip
+                const auto sessionTest = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("melville-smoke.melville");
+                bool sessionOk = saveSession (sessionTest) && openSession (sessionTest);
+                if (auto x = juce::XmlDocument::parse (sessionTest))
+                    std::printf ("MELVILLE smoke: session %s, %d parts in it\n", sessionOk ? "saved and reopened" : "FAILED",
+                                 x->getNumChildElements() - 1);
+                else sessionOk = false;
                 std::printf ("MELVILLE smoke: %d of %d parts running, %d cords\n", up, (int) parts.size(),
                              (int) hub->getPatchbay().getAllCords().size());
                 std::fflush (stdout);
-                setApplicationReturnValue (up == (int) parts.size() ? 0 : 1);
+                setApplicationReturnValue (up == (int) parts.size() && sessionOk ? 0 : 1);
                 systemRequestedQuit();
             });
     }
@@ -591,6 +923,7 @@ public:
         if (hub != nullptr)
         {
             props.getUserSettings()->setValue ("patch", hub->getPatchbay().toXml().get());
+            props.getUserSettings()->setValue ("latencyExtra", hub->extraLatency.load());
             hub->getNetwork().saveSettings (*props.getUserSettings());
             if (auto xml = hub->deviceManager.createStateXml())
                 props.getUserSettings()->setValue ("audio", xml.get());
@@ -673,6 +1006,115 @@ public:
             }));
     }
 
+    //==========================================================================
+    // The session: one file for the whole studio
+
+    static constexpr const char* sessionExtension = ".melville";
+
+    juce::File sessionFile()
+    {
+        const auto path = props.getUserSettings()->getValue ("session");
+        return juce::File::isAbsolutePath (path) ? juce::File (path) : juce::File();
+    }
+
+    static juce::File sessionsFolder()
+    {
+        return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("MELVILLE").getChildFile ("Sessions");
+    }
+
+    void setSessionFile (const juce::File& f)
+    {
+        props.getUserSettings()->setValue ("session", f.getFullPathName());
+        if (bar != nullptr)
+            if (auto* b = dynamic_cast<melville::Bar*> (bar->getContentComponent())) b->setSessionName (f.getFileNameWithoutExtension());
+    }
+
+    void showSessionMenu (juce::Component& target)
+    {
+        juce::PopupMenu m;
+        const auto current = sessionFile();
+        m.addItem ("Save session" + (current.existsAsFile() ? juce::String (" \"" + current.getFileNameWithoutExtension() + "\"") : juce::String()),
+                   [this] { const auto f = sessionFile(); if (f.existsAsFile()) saveSession (f); else chooseSession (true); });
+        m.addItem ("Save session as...", [this] { chooseSession (true); });
+        m.addItem ("Open session...",    [this] { chooseSession (false); });
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
+    }
+
+    void chooseSession (bool saving)
+    {
+        sessionsFolder().createDirectory();
+        const auto start = sessionFile().existsAsFile() ? sessionFile() : sessionsFolder().getChildFile (juce::String ("Session") + sessionExtension);
+        sessionChooser = std::make_unique<juce::FileChooser> (saving ? "Save the MELVILLE session" : "Open a MELVILLE session", start,
+                                                              juce::String ("*") + sessionExtension);
+        const int flags = saving ? (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting)
+                                 : (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles);
+        sessionChooser->launchAsync (flags, [this, saving] (const juce::FileChooser& fc)
+        {
+            auto f = fc.getResult();
+            if (f == juce::File()) return;
+            if (saving) saveSession (f.withFileExtension (sessionExtension));
+            else        openSession (f);
+        });
+    }
+
+    bool saveSession (const juce::File& f)
+    {
+        juce::XmlElement root ("MELVILLE_SESSION");
+        root.setAttribute ("version", 1);
+        root.setAttribute ("irvings", countIrvings());
+        root.addChildElement (hub->getPatchbay().toXml().release());
+        for (auto& [id, sp] : melville::sessionParts())
+            if (sp.save)
+                if (auto x = sp.save())
+                {
+                    auto* part = root.createNewChildElement ("PART");
+                    part->setAttribute ("id", id);
+                    part->addChildElement (x.release());
+                }
+        if (! root.writeTo (f))
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MELVILLE", "Couldn't save " + f.getFullPathName());
+            return false;
+        }
+        setSessionFile (f);
+        return true;
+    }
+
+    bool openSession (const juce::File& f)
+    {
+        auto root = juce::XmlDocument::parse (f);
+        if (root == nullptr || ! root->hasTagName ("MELVILLE_SESSION"))
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MELVILLE", f.getFileName() + " isn't a MELVILLE session.");
+            return false;
+        }
+        // the IRVINGs it had (their racks come back below)
+        bool added = false;
+        for (auto* part : root->getChildWithTagNameIterator ("PART"))
+        {
+            const auto id = part->getStringAttribute ("id");
+            const int n = id.getTrailingIntValue();
+            if (! id.startsWith ("pequod") || n < 2 || n > melville::Hub::maxIrvings) continue;
+            bool have = false;
+            for (auto& p : parts) have = have || p->id == id;
+            if (! have) { addIrving (n, false); added = true; }
+        }
+        if (added) refreshBar();
+
+        if (auto* patch = root->getChildByName ("PATCH"))
+            hub->getPatchbay().fromXml (*patch);
+
+        const auto& sessions = melville::sessionParts();
+        for (auto* part : root->getChildWithTagNameIterator ("PART"))
+        {
+            auto it = sessions.find (part->getStringAttribute ("id"));
+            if (it != sessions.end() && it->second.load && part->getFirstChildElement() != nullptr)
+                it->second.load (*part->getFirstChildElement());
+        }
+        setSessionFile (f);
+        return true;
+    }
+
     void refreshBar()
     {
         if (bar != nullptr)
@@ -712,6 +1154,7 @@ public:
 
 private:
     juce::ApplicationProperties props;
+    std::unique_ptr<juce::FileChooser> sessionChooser;
     melville::MelvilleLookAndFeel lookAndFeel;
     std::unique_ptr<melville::Hub> hub;
     std::vector<std::unique_ptr<melville::PartUI>> parts;
