@@ -28,13 +28,15 @@ The **MELVILLE bar** opens with Hawthorne. It has a button for each part and a l
 | Interface in 1–64 | Hawthorne in 1–64 |
 | Hawthorne out 1–64 | Interface out 1–64 |
 | Hawthorne's tracks, master and LTC | EMERSON, as Hawthorne Route did |
-| EMERSON's tracks, mix and returns | WHITMAN, as the EMERSON Link did |
+| EMERSON's TRACKS OUT and returns | WHITMAN, as the EMERSON Link did |
 | WHITMAN's mix and sends | back to EMERSON, then on into Hawthorne's master inputs |
 | THOREAU out 1–2 | Hawthorne **MELVILLE bus 1–2** |
 | PEQUOD Host out 1–2 | Hawthorne **MELVILLE bus 3–4** |
 | Interface in 1 | PEQUOD Host in 1 (the guitar) |
 
 In Hawthorne's ROUTING, pick **MELVILLE bus 1–4** as track inputs to record the drums or the rig. Hawthorne's master inputs and **MIX** switches are set up the same way as with WHITMAN on its own.
+
+EMERSON has one set of track outputs (**TRACKS OUT**). For a hardware desk, cable them to the interface's outputs as well as, or instead of, WHITMAN: inside MELVILLE EMERSON has no TO WHITMAN / DIRECT OUTS switch.
 
 ### Timing
 

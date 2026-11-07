@@ -123,9 +123,9 @@ void PatchCanvas::rebuild()
         section (p, "ROUTE MASTER", false, "route", { "To Hawthorne master L", "To Hawthorne master R" }, lr); }
 
     {   auto& p = panel ("emerson", "EMERSON");
-        section (p, "DIRECT OUTS", true, "emerson", numbered ("To Hawthorne track ", tracks), numbers (tracks));
         section (p, "MIX OUT", true, "emerson", { "To Hawthorne master L", "To Hawthorne master R" }, lr);
-        section (p, "TO DESK", true, "link", numbered ("Hawthorne track ", tracks), numbers (tracks));
+        // its processed tracks: one set, cabled to WHITMAN, the interface (a hardware desk) or both
+        section (p, "TRACKS OUT", true, "link", numbered ("Hawthorne track ", tracks), numbers (tracks));
         section (p, "RETURN A", true, "link", { "EMERSON return A L", "EMERSON return A R" }, lr);
         section (p, "RETURN B", true, "link", { "EMERSON return B L", "EMERSON return B R" }, lr);
         section (p, "TRACKS IN", false, "emerson", numbered ("Hawthorne track ", tracks), numbers (tracks));

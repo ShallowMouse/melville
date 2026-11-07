@@ -126,7 +126,10 @@ void Hub::defaultPatch()
     pb.connectInOrder ("hawthorne", 0, "interface", 0, hawthorneChannels);
     // Hawthorne -> EMERSON -> WHITMAN -> EMERSON -> Hawthorne, as Route and the Link do now
     pb.connectByName ("route", "emerson");
-    pb.connectByName ("emerson", "route");
+    // (EMERSON's processed tracks leave by the Link; only its mix chain goes back to Hawthorne here)
+    for (auto side : { "L", "R" })
+        pb.connect (pb.findSource ("emerson", juce::String ("To Hawthorne master ") + side),
+                    pb.findDest ("route", juce::String ("To Hawthorne master ") + side));
     pb.connectByName ("link", "whitman");
     pb.connectByName ("whitman", "link");
     // THOREAU's stereo out onto MELVILLE buses 1-2, PEQUOD Host's onto 3-4 (Hawthorne records them from there)

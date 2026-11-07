@@ -2,7 +2,7 @@
 // standing in for the apps. Each fake does what its app does at the device level:
 //   Hawthorne: device in 1 -> device out 1; track 1 = device in 1, written to the Route
 //              memory the way RouteHost::endBlock does
-//   EMERSON:   "Hawthorne track 1" -> "To Hawthorne track 1" at half level; also writes
+//   EMERSON:   "Hawthorne track 1" -> "To Hawthorne master L" at half level (its mix chain); also writes
 //              track 1 into the link memory the way LinkHost::writeToWhitman does
 //   WHITMAN:   "Hawthorne track 1" -> "To Hawthorne master L"
 
@@ -99,7 +99,7 @@ int main()
     emerson.fn = [&] (const float* const* in, int, float* const* out, int no, int nn)
     {
         for (int c = 0; c < no; ++c) juce::FloatVectorOperations::clear (out[c], nn);
-        juce::FloatVectorOperations::copyWithMultiply (out[0], in[0], 0.5f, nn);
+        juce::FloatVectorOperations::copyWithMultiply (out[hawthorne::route::defaultTracks], in[0], 0.5f, nn);   // master L
         std::copy (in[0], in[0] + nn, emSaw.begin());
         // LinkHost::writeToWhitman: track 1 into the link
         const auto w = ls->toWrite.load();
@@ -144,12 +144,12 @@ int main()
         for (int k = 0; k < n; ++k) wh &= whSaw[(size_t) k] == in.getSample (0, k);
         CHECK (wh);
 
-        // EMERSON's output went into Hawthorne's ROUTE memory, at the frames just written
+        // EMERSON's mix went into Hawthorne's ROUTE master L, at the frames just written
         const auto tw = rs->toWrite.load();
         CHECK (tw == (block + 1) * n);
         bool back = true;
         for (int k = 0; k < n; ++k)
-            back &= rs->toHawthorne[0][(tw - n + k) & hawthorne::route::ringMask] == 0.5f * in.getSample (0, k);
+            back &= rs->toHawthorne[hawthorne::route::maxTracks][(tw - n + k) & hawthorne::route::ringMask] == 0.5f * in.getSample (0, k);
         CHECK (back);
 
         // WHITMAN's mix went back over the link for exactly the block EMERSON wrote
@@ -190,7 +190,7 @@ int main()
     hub.processBlockForTest (in.getArrayOfReadPointers(), 2, out.getArrayOfWritePointers(), 2, n);
     const auto tw = rs->toWrite.load();
     float sum = 0;
-    for (int k = 0; k < n; ++k) sum += std::abs (rs->toHawthorne[0][(tw - n + k) & hawthorne::route::ringMask]);
+    for (int k = 0; k < n; ++k) sum += std::abs (rs->toHawthorne[hawthorne::route::maxTracks][(tw - n + k) & hawthorne::route::ringMask]);
     CHECK (sum == 0.0f);
 
     whDev->close(); emDev->close(); hawDev->close();
