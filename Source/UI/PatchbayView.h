@@ -61,6 +61,7 @@ private:
         juce::Colour colour;
         std::vector<Section> sections;
         juce::Rectangle<float> area;
+        juce::String note;                  // shown when it has no jacks
     };
 
     struct Hit { int panel = -1, section = -1, jack = -1; bool titleOnly = false; };
@@ -82,6 +83,8 @@ private:
     bool showEveryCable = false;
     int contentHeight = 600;
     int lastTracks = -1, lastIns = -1, lastOuts = -1;
+    juce::String lastNetwork;
+    juce::String networkKey() const;
 
     // dragging a cable
     struct Drag

@@ -8,7 +8,7 @@
 //
 // Order in a block (Hub::buildSteps):
 //
-//   interface in -> PEQUOD Host -> THOREAU -> Hawthorne
+//   interface in, network in -> PEQUOD Host -> THOREAU -> Hawthorne
 //     -> Route bridge (Hawthorne's tracks out)  -> EMERSON -> Route bridge (back into Hawthorne)
 //     -> Link bridge (EMERSON to the desk)      -> WHITMAN -> Link bridge (the mix and sends back)
 //     -> interface out
@@ -25,6 +25,7 @@ namespace melville
 {
 
 class PartDevice;
+class NetworkNode;
 class RouteBridge;
 class LinkBridge;
 
@@ -49,6 +50,8 @@ public:
 
     /** A part, by id ("hawthorne", "emerson", "whitman", "thoreau", "pequod"). */
     PartNode* findPart (const juce::String& id) const;
+    /** Hawthorne Link (the NETWORK panel). */
+    NetworkNode& getNetwork() const noexcept { return *network; }
     const std::vector<std::unique_ptr<Node>>& getNodes() const noexcept { return nodes; }
 
     double getSampleRate() const noexcept { return sampleRate; }
@@ -90,6 +93,7 @@ private:
     std::vector<std::unique_ptr<Node>> nodes;
     std::vector<Step> steps;
     Node* interfaceNode = nullptr;
+    NetworkNode* network = nullptr;
 
     // one buffer per source channel: what each part / bridge put out this (or last) block
     juce::AudioBuffer<float> sourcePool;

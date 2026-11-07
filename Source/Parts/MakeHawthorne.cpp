@@ -1,6 +1,7 @@
 // Hawthorne inside MELVILLE (compiled with Hawthorne's settings).
 #include "Parts.h"
 #include "UI/MainComponent.h"
+#include "UI/NetworkWindow.h"
 
 namespace melville::parts
 {
@@ -29,6 +30,28 @@ std::unique_ptr<PartUI> makeHawthorne()
     ui->shutdown = [mc, props] { mc->shutdown(); props->saveIfNeeded(); };
     ui->keep = props;
     return ui;
+}
+
+namespace
+{
+    // Hawthorne Link's window, as MELVILLE's NETWORK window (with Hawthorne's look for its controls)
+    struct MelvilleNetworkWindow : hawthorne::NetworkWindow
+    {
+        explicit MelvilleNetworkWindow (hawthorne::NetReceiver& rx) : hawthorne::NetworkWindow (rx)
+        {
+            setName ("MELVILLE \xc2\xb7 NETWORK (Hawthorne Link)");
+            setLookAndFeel (&lnf);
+        }
+        ~MelvilleNetworkWindow() override { setLookAndFeel (nullptr); }
+        hawthorne::HawthorneLookAndFeel lnf;
+    };
+}
+
+std::unique_ptr<juce::DocumentWindow> makeNetworkWindow (hawthorne::NetReceiver& rx, std::function<void()> onChanged)
+{
+    auto w = std::make_unique<MelvilleNetworkWindow> (rx);
+    w->getPanel().onChanged = std::move (onChanged);
+    return w;
 }
 
 } // namespace melville::parts

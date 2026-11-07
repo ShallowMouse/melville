@@ -31,6 +31,7 @@ namespace Colours
         if (id == "thoreau")   return juce::Colour (0xff9fbf62);   // moss green
         if (id == "pequod")    return juce::Colour (0xffe0a82e);   // mustard
         if (id == "interface") return juce::Colour (0xffbdbdbd);
+        if (id == "network")   return juce::Colour (0xff8fa6bd);   // steel blue
         return accent;                                             // the links
     }
 }

@@ -1,5 +1,6 @@
 #include "PatchbayView.h"
 #include "MelvilleLookAndFeel.h"
+#include "../Core/NetworkNode.h"
 #include <map>
 
 namespace melville
@@ -52,6 +53,7 @@ void PatchCanvas::rebuild()
         outs = juce::jlimit (2, 64, dev->getActiveOutputChannels().countNumberOfSetBits());
     }
     lastTracks = tracks; lastIns = ins; lastOuts = outs;
+    lastNetwork = networkKey();
 
     panels.clear();
 
@@ -90,6 +92,19 @@ void PatchCanvas::rebuild()
         section (p, "INPUTS", true, "interface", numbered ("In ", ins), numbers (ins));
         section (p, "OUTPUTS", false, "interface", numbered ("Out ", outs), numbers (outs)); }
 
+    {   // Hawthorne Link: a block of jacks per connected sender
+        auto& p = panel ("network", "NETWORK");
+        auto& rx = hub.getNetwork().getReceiver();
+        for (int slot = 0; slot < NetworkNode::slots; ++slot)
+        {
+            const auto st = rx.getStatus (slot);
+            if (st.state == hawthorne::NetReceiver::State::off || st.channels <= 0) continue;
+            juce::StringArray chans;
+            for (int c = 0; c < st.channels; ++c) chans.add (NetworkNode::channelName (slot, c));
+            section (p, juce::String (slot + 1) + " " + st.name.toUpperCase(), true, "network", chans, numbers (st.channels));
+        }
+        if (p.sections.empty()) p.note = "No senders connected. Click NETWORK on the MELVILLE bar to connect one."; }
+
     {   auto& p = panel ("pequod", "PEQUOD HOST");
         section (p, "OUT", true, "pequod", { "Out 1", "Out 2" }, lr);
         section (p, "IN", false, "pequod", { "In 1", "In 2" }, lr); }
@@ -103,13 +118,13 @@ void PatchCanvas::rebuild()
         section (p, "LTC", true, "route", { "Hawthorne LTC" }, { "LTC" });
         section (p, "MONITOR OUT", true, "hawthorne", numbered ("Out ", outs), numbers (outs));
         section (p, "INPUTS", false, "hawthorne", numbered ("In ", ins), numbers (ins));
-        section (p, "MELVILLE BUSES", false, "hawthorne", numbered ("MELVILLE bus ", 8), numbers (8));
+        section (p, "MELVILLE BUSES", false, "hawthorne", numbered ("MELVILLE bus ", 16), numbers (16));
         section (p, "ROUTE TRACKS", false, "route", numbered ("To Hawthorne track ", tracks), numbers (tracks));
         section (p, "ROUTE MASTER", false, "route", { "To Hawthorne master L", "To Hawthorne master R" }, lr); }
 
     {   auto& p = panel ("emerson", "EMERSON");
-        section (p, "TRACKS OUT", true, "emerson", numbered ("To Hawthorne track ", tracks), numbers (tracks));
-        section (p, "MASTER OUT", true, "emerson", { "To Hawthorne master L", "To Hawthorne master R" }, lr);
+        section (p, "DIRECT OUTS", true, "emerson", numbered ("To Hawthorne track ", tracks), numbers (tracks));
+        section (p, "MIX OUT", true, "emerson", { "To Hawthorne master L", "To Hawthorne master R" }, lr);
         section (p, "TO DESK", true, "link", numbered ("Hawthorne track ", tracks), numbers (tracks));
         section (p, "RETURN A", true, "link", { "EMERSON return A L", "EMERSON return A R" }, lr);
         section (p, "RETURN B", true, "link", { "EMERSON return B L", "EMERSON return B R" }, lr);
@@ -138,6 +153,18 @@ void PatchCanvas::setShowEveryCable (bool b)
     repaint();
 }
 
+juce::String PatchCanvas::networkKey() const
+{
+    juce::String key;
+    auto& rx = hub.getNetwork().getReceiver();
+    for (int slot = 0; slot < NetworkNode::slots; ++slot)
+    {
+        const auto st = rx.getStatus (slot);
+        if (st.state != hawthorne::NetReceiver::State::off) key << slot << st.name << st.channels << "|";
+    }
+    return key;
+}
+
 void PatchCanvas::timerCallback()
 {
     int ins = 8, outs = 8;
@@ -146,7 +173,7 @@ void PatchCanvas::timerCallback()
         ins = juce::jlimit (2, 64, dev->getActiveInputChannels().countNumberOfSetBits());
         outs = juce::jlimit (2, 64, dev->getActiveOutputChannels().countNumberOfSetBits());
     }
-    if (hub.getVisibleTracks() != lastTracks || ins != lastIns || outs != lastOuts)
+    if (hub.getVisibleTracks() != lastTracks || ins != lastIns || outs != lastOuts || networkKey() != lastNetwork)
         rebuild();
 }
 
@@ -180,6 +207,7 @@ void PatchCanvas::layOut()
             }
             if (any) y += rowH;
         }
+        if (p.sections.empty() && p.note.isNotEmpty()) y += rowH * 0.6f;
         y += panelPad - 6.0f;
         p.area = { margin, panelTop, width - margin * 2.0f, y - panelTop };
         y += panelGap;
@@ -271,6 +299,13 @@ void PatchCanvas::drawPanel (juce::Graphics& g, const Panel& p) const
     g.drawFittedText (p.title, nameArea.toNearestInt(), juce::Justification::centredLeft, 2);
     g.setColour (face.darker (0.25f));
     g.drawVerticalLine ((int) (p.area.getX() + nameColumn - 4.0f), p.area.getY() + 8.0f, p.area.getBottom() - 8.0f);
+
+    if (p.note.isNotEmpty())
+    {
+        g.setColour (inkDim);
+        g.setFont (font (12.0f));
+        g.drawText (p.note, p.area.withTrimmedLeft (nameColumn + 4.0f).reduced (0, 4), juce::Justification::centredLeft);
+    }
 
     // OUT / IN marks at the start of each row
     for (auto& s : p.sections)

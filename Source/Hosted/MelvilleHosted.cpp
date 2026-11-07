@@ -1,6 +1,8 @@
 #include "MelvilleHosted.h"
 #include "../Core/Hub.h"
 #include "../Core/PartDevice.h"
+#include "../Core/NetworkNode.h"
+#include "MelvilleNetwork.h"
 
 namespace melville
 {
@@ -32,6 +34,12 @@ bool attach (juce::AudioDeviceManager& dm, const char* partId)
     const auto error = dm.setAudioDeviceSetup (setup, true);
     jassert (error.isEmpty());
     return true;
+}
+
+hawthorne::NetReceiver* networkReceiver() noexcept
+{
+    auto* hub = Hub::getIfExists();
+    return hub != nullptr ? &hub->getNetwork().getReceiver() : nullptr;
 }
 
 void detach (juce::AudioDeviceManager& dm)

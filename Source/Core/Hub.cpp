@@ -1,6 +1,7 @@
 #include "Hub.h"
 #include "PartDevice.h"
 #include "Bridges.h"
+#include "NetworkNode.h"
 
 namespace melville
 {
@@ -42,6 +43,11 @@ Hub::Hub()
     addNode (std::make_unique<PartNode> ("thoreau", "THOREAU", juce::StringArray(), names::numbered ("Out ", 16)));
     addNode (std::make_unique<PartNode> ("pequod", "PEQUOD HOST", names::numbered ("In ", 8), names::numbered ("Out ", 8)));
 
+    // Hawthorne Link: audio from other PCs
+    auto net = std::make_unique<NetworkNode>();
+    network = net.get();
+    addNode (std::move (net));
+
     // the links the apps already speak, played from MELVILLE's end
     auto route = std::make_unique<RouteBridge>();
     route->open();
@@ -59,6 +65,7 @@ Hub::Hub()
     // the running order (see Hub.h)
     steps = {
         { Step::pull,    node ("interface") },
+        { Step::pull,    node ("network") },
         { Step::process, node ("pequod") },
         { Step::process, node ("thoreau") },
         { Step::process, node ("hawthorne") },

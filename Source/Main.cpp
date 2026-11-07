@@ -12,6 +12,7 @@
 #include "UI/MelvilleLookAndFeel.h"
 #include "UI/PatchbayView.h"
 #include "UI/Taskbar.h"
+#include "Core/NetworkNode.h"
 
 namespace melville
 {
@@ -171,6 +172,25 @@ public:
             for (int k = 0; k < 5; ++k)
                 g.fillRect (box.getX() + box.getWidth() * 0.66f + k * 6.0f, box.getCentreY() + 8.0f - k * 4.0f, 4.0f, 4.0f + k * 4.0f);
         };
+        netTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
+        {
+            // three machines linked
+            const juce::Point<float> a { r.getCentreX(), r.getY() + r.getHeight() * 0.22f },
+                                     b { r.getX() + r.getWidth() * 0.2f, r.getBottom() - r.getHeight() * 0.22f },
+                                     c { r.getRight() - r.getWidth() * 0.2f, r.getBottom() - r.getHeight() * 0.22f };
+            g.setColour (Colours::textDim);
+            for (auto [p, q] : { std::pair { a, b }, std::pair { a, c }, std::pair { b, c } }) g.drawLine ({ p, q }, 2.0f);
+            for (auto p : { a, b, c })
+            {
+                g.setColour (Colours::panelHi);
+                g.fillRoundedRectangle (juce::Rectangle<float> (16, 12).withCentre (p), 2.0f);
+                g.setColour (Colours::forPart ("network"));
+                g.drawRoundedRectangle (juce::Rectangle<float> (16, 12).withCentre (p), 2.0f, 1.5f);
+            }
+        };
+        netTile.onClick = [this] { if (onShowNetwork) onShowNetwork(); };
+        netTile.setTooltip ("NETWORK: Hawthorne Link - audio from other PCs, onto the patchbay");
+        addAndMakeVisible (netTile);
         patchTile.onClick = [this] { showPatchbay(); };
         audioTile.onClick = [this] { showAudio(); };
         patchTile.setTooltip ("PATCHBAY: what goes where between the parts and the interface");
@@ -179,7 +199,7 @@ public:
         addAndMakeVisible (audioTile);
 
         startTimerHz (4);
-        setSize (wordmarkWidth + (tiles.size() + 2) * (tileWidth + gap) + 26 + 260, barHeight);
+        setSize (wordmarkWidth + (tiles.size() + 3) * (tileWidth + gap) + 26 + 260, barHeight);
     }
 
     void paint (juce::Graphics& g) override
@@ -219,7 +239,7 @@ public:
         r.removeFromLeft (6);
         dividerX = r.getX();
         r.removeFromLeft (14);
-        for (auto* t : { &patchTile, &audioTile }) { t->setBounds (r.removeFromLeft (tileWidth)); r.removeFromLeft (gap); }
+        for (auto* t : { &patchTile, &netTile, &audioTile }) { t->setBounds (r.removeFromLeft (tileWidth)); r.removeFromLeft (gap); }
         statusArea = r.withTrimmedLeft (10);
     }
 
@@ -262,7 +282,10 @@ private:
     std::vector<std::unique_ptr<PartUI>>& parts;
     std::vector<std::unique_ptr<PartWindow>>& windows;
     juce::OwnedArray<Tile> tiles;
-    Tile patchTile { "Patchbay", {}, Colours::accent }, audioTile { "Interface", {}, Colours::accent };
+    Tile patchTile { "Patchbay", {}, Colours::accent }, netTile { "Network", {}, Colours::accent }, audioTile { "Interface", {}, Colours::accent };
+public:
+    std::function<void()> onShowNetwork;
+private:
     juce::Rectangle<int> statusArea;
     int dividerX = 0;
     std::unique_ptr<juce::DocumentWindow> patchWindow;
@@ -315,6 +338,17 @@ public:
         if (auto patch = props.getUserSettings()->getXmlValue ("patch"))
             hub->getPatchbay().fromXml (*patch);
 
+        // Hawthorne Link, now MELVILLE's (the first time with the senders Hawthorne had)
+        {
+            juce::PropertiesFile::Options ho;
+            ho.applicationName = "Hawthorne";
+            ho.filenameSuffix = ".settings";
+            ho.folderName = "Hawthorne";
+            ho.osxLibrarySubFolder = "Application Support";
+            juce::PropertiesFile hawthorneSettings (ho);
+            hub->getNetwork().start (*props.getUserSettings(), &hawthorneSettings);
+        }
+
         // every part, running from the start (windows open from the bar)
         parts.push_back (parts::makeHawthorne());
         parts.push_back (parts::makeEmerson());
@@ -330,7 +364,9 @@ public:
             windows.push_back (std::make_unique<PartWindow> (*p));
             taskbar::setWindowIdentity (*windows.back(), p->id, p->title, loadIcon (p->id, 256));
         }
-        bar = std::make_unique<BarWindow> (new Bar (*hub, parts, windows));
+        auto* barContent = new Bar (*hub, parts, windows);
+        barContent->onShowNetwork = [this] { showNetwork(); };
+        bar = std::make_unique<BarWindow> (barContent);
         for (size_t i = 1; i < windows.size(); ++i)
         {
             windows[i]->show();
@@ -386,6 +422,7 @@ public:
         if (hub != nullptr)
         {
             props.getUserSettings()->setValue ("patch", hub->getPatchbay().toXml().get());
+            hub->getNetwork().saveSettings (*props.getUserSettings());
             if (auto xml = hub->deviceManager.createStateXml())
                 props.getUserSettings()->setValue ("audio", xml.get());
         }
@@ -400,12 +437,25 @@ public:
             }
         juce::ModalComponentManager::getInstance()->cancelAllModalComponents();
 
+        networkWindow = nullptr;
         bar = nullptr;
         windows.clear();
         while (! parts.empty()) parts.pop_back();               // the parts close their devices
         hub = nullptr;
         props.closeFiles();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+    }
+
+    void showNetwork()
+    {
+        if (networkWindow == nullptr)
+            networkWindow = melville::parts::makeNetworkWindow (hub->getNetwork().getReceiver(), [this]
+            {
+                hub->getNetwork().saveSettings (*props.getUserSettings());
+                props.saveIfNeeded();
+            });
+        networkWindow->setVisible (true);
+        networkWindow->toFront (true);
     }
 
     void systemRequestedQuit() override { quit(); }
@@ -430,6 +480,7 @@ private:
     std::vector<std::unique_ptr<melville::PartUI>> parts;
     std::vector<std::unique_ptr<melville::PartWindow>> windows;
     std::unique_ptr<melville::BarWindow> bar;
+    std::unique_ptr<juce::DocumentWindow> networkWindow;
 };
 
 START_JUCE_APPLICATION (MelvilleApplication)

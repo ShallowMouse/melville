@@ -48,11 +48,13 @@ set(CORE_SOURCES
     Source/Core/Hub.cpp
     Source/Core/PartDevice.cpp
     Source/Core/Bridges.cpp
+    Source/Core/NetworkNode.cpp
     Source/Hosted/MelvilleHosted.cpp)
 
 # the link headers MELVILLE's bridges share with the apps
 set(LINK_INCLUDES
     "${HAWTHORNE_DIR}/Source/Route"
+    "${HAWTHORNE_DIR}/Source/Network"
     "${EMERSON_DIR}/Source/Link")
 
 set(COMMON_DEFS
@@ -70,7 +72,10 @@ endif()
 # ---------------------------------------------------------------------------
 if(MELVILLE_BUILD_TESTS)
     juce_add_console_app(MelvilleTests PRODUCT_NAME "MelvilleTests")
-    target_sources(MelvilleTests PRIVATE ${CORE_SOURCES} Tests/CoreTests.cpp)
+    target_sources(MelvilleTests PRIVATE ${CORE_SOURCES} Tests/CoreTests.cpp
+        "${HAWTHORNE_DIR}/Source/Network/NetReceiver.cpp"
+        "${HAWTHORNE_DIR}/Source/Network/NetSender.cpp"
+        "${HAWTHORNE_DIR}/Source/Engine/Varispeed.cpp")
     target_include_directories(MelvilleTests PRIVATE ${LINK_INCLUDES} Source/Hosted)
     target_compile_definitions(MelvilleTests PRIVATE ${COMMON_DEFS}
         JUCE_ALSA=0 JUCE_JACK=0 JUCE_ASIO=0
@@ -78,5 +83,6 @@ if(MELVILLE_BUILD_TESTS)
     target_link_libraries(MelvilleTests PRIVATE
         juce::juce_audio_devices
         juce::juce_events
+        juce::juce_data_structures
         juce::juce_recommended_config_flags)
 endif()
