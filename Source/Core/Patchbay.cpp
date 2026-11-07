@@ -145,6 +145,7 @@ std::vector<std::pair<int, Cord>> Patchbay::getAllCords() const
 std::unique_ptr<juce::XmlElement> Patchbay::toXml() const
 {
     auto xml = std::make_unique<juce::XmlElement> ("PATCH");
+    xml->setAttribute ("version", 2);
     auto where = [this] (int flat, bool isSource) -> std::pair<juce::String, juce::String>
     {
         for (auto& p : ports)

@@ -1,6 +1,6 @@
 // MELVILLE core tests: the hub, part devices, patchbay and both bridges, with fake parts
 // standing in for the apps. Each fake does what its app does at the device level:
-//   Hawthorne: device in 1 -> device out 1; track 1 = device in 1, written to the Route
+//   Hawthorne: device in 1 (TRACK IN 1) -> device out 1; track 1 = device in 1, written to the Route
 //              memory the way RouteHost::endBlock does
 //   EMERSON:   "Hawthorne track 1" -> "To Hawthorne master L" at half level (its mix chain); also writes
 //              track 1 into the link memory the way LinkHost::writeToWhitman does
@@ -167,7 +167,7 @@ int main()
     auto& pb = hub.getPatchbay();
     auto saved = pb.toXml();
     const int src = pb.findSource ("interface", "In 1");
-    const int dst = pb.findDest ("hawthorne", "In 1");
+    const int dst = pb.findDest ("hawthorne", "Track 1");
     CHECK (pb.isConnected (src, dst));
     pb.disconnect (src, dst);
     hub.processBlockForTest (in.getArrayOfReadPointers(), 2, out.getArrayOfWritePointers(), 2, n);
@@ -178,7 +178,7 @@ int main()
     CHECK (out.getSample (0, 5) == in.getSample (0, 5));
 
     // a mult with gain: interface in 1 also onto Hawthorne in 2 at -6 dB
-    pb.connect (src, pb.findDest ("hawthorne", "In 2"), 0.5f);
+    pb.connect (src, pb.findDest ("hawthorne", "Track 2"), 0.5f);
     CHECK (pb.getAllCords().size() == saved->getNumChildElements() + 1);
 
     // old matrices are freed once the audio thread has moved on

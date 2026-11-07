@@ -13,7 +13,6 @@ namespace
 
     constexpr int interfaceChannels = 64;
     constexpr int hawthorneChannels = 64;
-    constexpr int busChannels = 16;
 }
 
 Hub& Hub::get()
@@ -35,8 +34,9 @@ Hub::Hub()
     addNode (std::move (iface));
 
     // the parts, in the order they're shown
-    auto hawthorneIns = names::numbered ("In ", hawthorneChannels);
-    hawthorneIns.addArray (names::numbered ("MELVILLE bus ", busChannels));
+    // Hawthorne's inputs: one per tape track (what that track records), then LTC for chase
+    auto hawthorneIns = names::numbered ("Track ", hawthorne::route::maxTracks);
+    hawthorneIns.add ("LTC in");
     addNode (std::make_unique<PartNode> ("hawthorne", "HAWTHORNE", hawthorneIns, names::numbered ("Out ", hawthorneChannels)));
     addNode (std::make_unique<PartNode> ("emerson", "EMERSON", names::routeFromHawthorne(), names::routeToHawthorne()));
     addNode (std::make_unique<PartNode> ("whitman", "WHITMAN", names::linkToWhitman(), names::linkFromWhitman()));
@@ -121,8 +121,8 @@ void Hub::defaultPatch()
 {
     auto& pb = patchbay;
     pb.clearAll();
-    // the interface into Hawthorne and back out, channel for channel
-    pb.connectInOrder ("interface", 0, "hawthorne", 0, hawthorneChannels);
+    // the interface's inputs onto the first tracks, Hawthorne's monitor outs back to the interface
+    pb.connectInOrder ("interface", 0, "hawthorne", 0, hawthorne::route::defaultTracks);
     pb.connectInOrder ("hawthorne", 0, "interface", 0, hawthorneChannels);
     // Hawthorne -> EMERSON -> WHITMAN -> EMERSON -> Hawthorne, as Route and the Link do now
     pb.connectByName ("route", "emerson");
@@ -132,9 +132,7 @@ void Hub::defaultPatch()
                     pb.findDest ("route", juce::String ("To Hawthorne master ") + side));
     pb.connectByName ("link", "whitman");
     pb.connectByName ("whitman", "link");
-    // THOREAU's stereo out onto MELVILLE buses 1-2, PEQUOD Host's onto 3-4 (Hawthorne records them from there)
-    pb.connectInOrder ("thoreau", 0, "hawthorne", hawthorneChannels, 2);
-    pb.connectInOrder ("pequod", 0, "hawthorne", hawthorneChannels + 2, 2);
+    // (THOREAU and PEQUOD Host: cable them onto whichever tracks should record them)
     // the guitar: interface input 1 into PEQUOD Host
     pb.connectInOrder ("interface", 0, "pequod", 0, 1);
 }

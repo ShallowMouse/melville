@@ -407,7 +407,8 @@ public:
         auto audio = props.getUserSettings()->getXmlValue ("audio");
         hub->initialiseAudio (audio.get());
         if (auto patch = props.getUserSettings()->getXmlValue ("patch"))
-            hub->getPatchbay().fromXml (*patch);
+            if (patch->getIntAttribute ("version") >= 2)      // (older patches were for Hawthorne's old inputs)
+                hub->getPatchbay().fromXml (*patch);
 
         // Hawthorne Link, now MELVILLE's (the first time with the senders Hawthorne had)
         {

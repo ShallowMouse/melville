@@ -133,20 +133,17 @@ void PatchCanvas::rebuild()
         column (p, { "OUT", "thoreau", "THOREAU's drums (its stereo mix).", { "Out 1", "Out 2" }, lr }, none); }
 
     {   auto& p = panel ("hawthorne", "HAWTHORNE");
-        column (p, { "TRACKS", "route", "Each tape track playing back (or what it's recording, while it monitors input). To EMERSON by default.",
+        column (p, { "TRACK OUT", "route", "Each tape track playing back (or its input, while the track monitors input). To EMERSON by default.",
                      numbered ("Hawthorne track ", tracks), numbers (tracks) },
-                   { "TRACK RETURNS", "route", "Into each tape track's ROUTE input: pick ROUTE as the track's input in Hawthorne's ROUTING to record what's cabled here.",
-                     numbered ("To Hawthorne track ", tracks), numbers (tracks) });
-        column (p, { "MASTER", "route", "Hawthorne's 2-track master playing back.", { "Hawthorne master L", "Hawthorne master R" }, lr },
-                   { "MASTER RETURN", "route", "Into the 2-track master: the mix to print. Set the master inputs to ROUTE master L / R in Hawthorne's ROUTING.",
+                   { "TRACK IN", "hawthorne", "What each tape track records: cable a mic, the guitar rig, THOREAU or a MELVILLE Link sender here.",
+                     numbered ("Track ", tracks), numbers (tracks) });
+        column (p, { "MASTER OUT", "route", "Hawthorne's 2-track master playing back.", { "Hawthorne master L", "Hawthorne master R" }, lr },
+                   { "MASTER IN", "route", "What the 2-track master records: the mix (EMERSON's MIX OUT by default).",
                      { "To Hawthorne master L", "To Hawthorne master R" }, lr });
-        column (p, { "LTC", "route", "Hawthorne's timecode (LTC) out, for anything that chases tape.", { "Hawthorne LTC" }, { "LTC" } }, none);
+        column (p, { "LTC OUT", "route", "Hawthorne's timecode (LTC), for anything that chases the tape.", { "Hawthorne LTC" }, { "LTC" } },
+                   { "LTC IN", "hawthorne", "Timecode for Hawthorne to chase (SYNC > chase LTC).", { "LTC in" }, { "LTC" } });
         column (p, { "MONITOR OUT", "hawthorne", "Hawthorne's own outputs (as its ROUTING sends them): to the interface outputs by default.",
-                     numbered ("Out ", outs), numbers (outs) },
-                   { "INPUTS", "hawthorne", "Hawthorne's inputs: tracks record from these (In 1, In 2 ... in its ROUTING). From the interface inputs by default.",
-                     numbered ("In ", ins), numbers (ins) });
-        column (p, none, { "MELVILLE BUSES", "hawthorne", "Spare Hawthorne inputs that aren't the interface's: cable THOREAU, PEQUOD Host or MELVILLE Link here and pick the bus as a track's input to record it.",
-                           numbered ("MELVILLE bus ", 16), numbers (16) }); }
+                     numbered ("Out ", outs), numbers (outs) }, none); }
 
     {   auto& p = panel ("emerson", "EMERSON");
         // (its processed tracks: one set, cabled to WHITMAN, the interface for a hardware desk, or both)
