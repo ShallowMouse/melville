@@ -13,6 +13,7 @@
 #include "UI/PatchbayView.h"
 #include "UI/Taskbar.h"
 #include "Core/NetworkNode.h"
+#include "Updater.h"
 
 namespace melville
 {
@@ -75,6 +76,14 @@ public:
     std::function<bool()> isLit;                                               // the lamp (none if empty)
 
     void paintButton (juce::Graphics& g, bool over, bool down) override
+    {
+        // greyed out when there's nothing to do (UPDATE with no update)
+        if (! isEnabled()) { g.beginTransparencyLayer (0.3f); over = down = false; }
+        paintTile (g, over, down);
+        if (! isEnabled()) g.endTransparencyLayer();
+    }
+
+    void paintTile (juce::Graphics& g, bool over, bool down)
     {
         auto r = getLocalBounds().toFloat().reduced (2.0f);
         if (over || down)
@@ -191,6 +200,31 @@ public:
         netTile.onClick = [this] { if (onShowNetwork) onShowNetwork(); };
         netTile.setTooltip ("NETWORK: Hawthorne Link - audio from other PCs, onto the patchbay");
         addAndMakeVisible (netTile);
+        updateTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
+        {
+            // a download arrow into a tray
+            auto box = r.reduced (r.getWidth() * 0.12f);
+            g.setColour (Colours::panelHi);
+            g.fillRoundedRectangle (box, box.getWidth() * 0.14f);
+            g.setColour (Colours::accent);
+            const float cx = box.getCentreX(), top = box.getY() + box.getHeight() * 0.2f, tip = box.getY() + box.getHeight() * 0.62f;
+            g.drawLine (cx, top, cx, tip, 3.0f);
+            juce::Path head;
+            head.addTriangle (cx - 8.0f, tip - 7.0f, cx + 8.0f, tip - 7.0f, cx, tip + 3.0f);
+            g.fillPath (head);
+            const float tray = box.getY() + box.getHeight() * 0.8f;
+            g.drawLine (box.getX() + box.getWidth() * 0.22f, tray, box.getRight() - box.getWidth() * 0.22f, tray, 3.0f);
+        };
+        updateTile.onClick = [this] { offerUpdate(); };
+        addAndMakeVisible (updateTile);
+        updater.onChange = [this] { refreshUpdate(); };
+        updater.onStatus = [] (const juce::String& msg)
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MELVILLE update", msg);
+        };
+        refreshUpdate();
+        updater.checkSoon();
+
         patchTile.onClick = [this] { showPatchbay(); };
         audioTile.onClick = [this] { showAudio(); };
         patchTile.setTooltip ("PATCHBAY: what goes where between the parts and the interface");
@@ -199,7 +233,7 @@ public:
         addAndMakeVisible (audioTile);
 
         startTimerHz (4);
-        setSize (wordmarkWidth + (tiles.size() + 3) * (tileWidth + gap) + 26 + 260, barHeight);
+        setSize (wordmarkWidth + (tiles.size() + 4) * (tileWidth + gap) + 26 + 260, barHeight);
     }
 
     void paint (juce::Graphics& g) override
@@ -239,7 +273,7 @@ public:
         r.removeFromLeft (6);
         dividerX = r.getX();
         r.removeFromLeft (14);
-        for (auto* t : { &patchTile, &netTile, &audioTile }) { t->setBounds (r.removeFromLeft (tileWidth)); r.removeFromLeft (gap); }
+        for (auto* t : { &patchTile, &netTile, &audioTile, &updateTile }) { t->setBounds (r.removeFromLeft (tileWidth)); r.removeFromLeft (gap); }
         statusArea = r.withTrimmedLeft (10);
     }
 
@@ -270,19 +304,56 @@ public:
         o.launchAsync();
     }
 
+    void refreshUpdate()
+    {
+        const bool ready = updater.isUpdateAvailable() && ! updater.isDownloading();
+        updateTile.setEnabled (ready);
+        if (updater.isDownloading())
+        {
+            updateTile.setName (juce::String (juce::roundToInt (updater.getProgress() * 100.0f)) + "%");
+            updateTile.setTooltip ("Downloading MELVILLE " + updater.getLatestVersion() + "...");
+        }
+        else
+        {
+            updateTile.setName ("Update");
+            updateTile.setTooltip (ready ? "MELVILLE " + updater.getLatestVersion() + " is ready: click to install"
+                                         : "MELVILLE " + Updater::currentVersion() + " is up to date");
+        }
+        updateTile.repaint();
+    }
+
+    void offerUpdate()
+    {
+        if (! updater.isUpdateAvailable()) return;
+        auto notes = updater.getReleaseNotes();
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon,
+            "Update MELVILLE to " + updater.getLatestVersion() + "?",
+            (notes.isNotEmpty() ? "What's new:\n" + notes + "\n\n" : juce::String())
+                + "MELVILLE closes, installs the update and starts again. Hawthorne finishes any take first.",
+            "Install", "Not now", this,
+            juce::ModalCallbackFunction::create ([this] (int ok) { if (ok) updater.install(); }));
+    }
+
     void closePatchbay() { patchWindow = nullptr; }
     juce::Component* getPatchbayContent() { return patchWindow != nullptr ? patchWindow->getContentComponent() : nullptr; }
 
     static constexpr int barHeight = 100, tileWidth = 84, gap = 4, wordmarkWidth = 160;
 
 private:
-    void timerCallback() override { repaint(); }
+    void timerCallback() override
+    {
+        repaint();
+        if (++ticks % (4 * 60 * 30) == 0) updater.checkSoon();   // and every half hour
+    }
 
     Hub& hub;
+    Updater updater;
+    int ticks = 0;
     std::vector<std::unique_ptr<PartUI>>& parts;
     std::vector<std::unique_ptr<PartWindow>>& windows;
     juce::OwnedArray<Tile> tiles;
-    Tile patchTile { "Patchbay", {}, Colours::accent }, netTile { "Network", {}, Colours::accent }, audioTile { "Interface", {}, Colours::accent };
+    Tile patchTile { "Patchbay", {}, Colours::accent }, netTile { "Network", {}, Colours::accent }, audioTile { "Interface", {}, Colours::accent },
+         updateTile { "Update", {}, Colours::accent };
 public:
     std::function<void()> onShowNetwork;
 private:

@@ -79,7 +79,8 @@ set(MELVILLE_OWN_SOURCES
     ${CORE_SOURCES}
     Source/Main.cpp
     Source/UI/PatchbayView.cpp
-    Source/UI/Taskbar.cpp)
+    Source/UI/Taskbar.cpp
+    Source/Updater.cpp)
 target_sources(Melville PRIVATE ${MELVILLE_OWN_SOURCES})
 set_source_files_properties(${MELVILLE_OWN_SOURCES} PROPERTIES
     COMPILE_DEFINITIONS "MELVILLE_VERSION_STRING=\"${PROJECT_VERSION}\""

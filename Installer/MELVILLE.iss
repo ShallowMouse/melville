@@ -44,4 +44,6 @@ Name: "{autoprograms}\MELVILLE"; Filename: "{app}\MELVILLE.exe"
 Name: "{autodesktop}\MELVILLE"; Filename: "{app}\MELVILLE.exe"; Tasks: desktopicon
 
 [Run]
+; normal install: offer to start it; update from inside MELVILLE (silent): start it again by itself
 Filename: "{app}\MELVILLE.exe"; Description: "Start MELVILLE"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\MELVILLE.exe"; Flags: nowait; Check: WizardSilent
