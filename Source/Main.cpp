@@ -74,6 +74,7 @@ public:
 
     std::function<void (juce::Graphics&, juce::Rectangle<float>)> drawIcon;   // when there's no image
     std::function<bool()> isLit;                                               // the lamp (none if empty)
+    std::function<std::vector<bool>()> lamps;                                  // or a lamp per instance (IRVING)
     std::function<void()> onRightClick;
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -111,7 +112,18 @@ public:
         g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
         g.drawFittedText (getName().toUpperCase(), r.removeFromTop (14.0f).toNearestInt(), juce::Justification::centred, 1, 0.7f);
 
-        if (isLit)
+        if (lamps)
+        {
+            const auto on = lamps();
+            auto row = r.removeFromTop (10.0f);
+            const float pitch = 10.0f, x0 = row.getCentreX() - pitch * (float) (on.size() - 1) * 0.5f;
+            for (size_t k = 0; k < on.size(); ++k)
+            {
+                g.setColour (on[k] ? accent : Colours::lampOff);
+                g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ x0 + pitch * (float) k, row.getCentreY() }));
+            }
+        }
+        else if (isLit)
         {
             const bool on = isLit();
             auto lamp = r.removeFromTop (10.0f).withSizeKeepingCentre (6.0f, 6.0f);
@@ -341,32 +353,67 @@ public:
         for (size_t i = 0; i < parts.size(); ++i)
         {
             const auto id = parts[i]->id;
+            const bool irving = id.startsWith ("pequod");
+            if (irving && id != "pequod") continue;      // one IRVING tile for every instance
+
             auto* t = tiles.add (new Tile (parts[i]->title, loadIcon (id), Colours::forPart (id)));
-            t->isLit = [this, id] { return hub.isPartConnected (id); };
-            t->onClick = [this, id]
+            if (irving)
             {
-                for (size_t k = 0; k < parts.size(); ++k)
-                    if (parts[k]->id == id) windows[k]->show();
-            };
-            if (id.startsWith ("pequod"))
-            {
-                t->setTooltip (parts[i]->title + ": click to show it. Right-click to open another IRVING" + (id != "pequod" ? " or remove this one" : juce::String()));
-                t->onRightClick = [this, id]
+                // a dot per instance; click to bring one up, right-click for a new one
+                t->lamps = [this]
                 {
-                    juce::PopupMenu m;
-                    m.addItem (1, "Open another IRVING", onAddIrving != nullptr && canAddIrving && canAddIrving());
-                    if (id != "pequod") m.addItem (2, "Remove " + Hub::irvingTitle (id.getTrailingIntValue()));
-                    m.showMenuAsync ({}, [this, id] (int r)
-                    {
-                        if (r == 1 && onAddIrving) onAddIrving();
-                        if (r == 2 && onRemoveIrving) onRemoveIrving (id);
-                    });
+                    std::vector<bool> on;
+                    for (auto& p : parts) if (p->id.startsWith ("pequod")) on.push_back (hub.isPartConnected (p->id));
+                    return on;
+                };
+                t->setTooltip ("IRVING: click to bring it up. Right-click for a new instance");
+                t->onClick = [this] { showIrvingMenu (false); };
+                t->onRightClick = [this] { showIrvingMenu (true); };
+            }
+            else
+            {
+                t->isLit = [this, id] { return hub.isPartConnected (id); };
+                t->onClick = [this, id]
+                {
+                    for (size_t k = 0; k < parts.size(); ++k)
+                        if (parts[k]->id == id) windows[k]->show();
                 };
             }
             addAndMakeVisible (t);
         }
         setSize (wordmarkWidth + (tiles.size() + 4) * (tileWidth + gap) + 26 + 260, barHeight);
         resized();
+    }
+
+    /** Click: with one IRVING, bring it up; with several, pick one. Right-click: new instance,
+        show or remove one. */
+    void showIrvingMenu (bool full)
+    {
+        std::vector<size_t> at;
+        for (size_t k = 0; k < parts.size(); ++k) if (parts[k]->id.startsWith ("pequod")) at.push_back (k);
+        if (! full && at.size() == 1) { windows[at.front()]->show(); return; }
+
+        juce::PopupMenu m;
+        if (full)
+        {
+            m.addItem (1, "New instance", onAddIrving != nullptr && canAddIrving && canAddIrving());
+            m.addSeparator();
+        }
+        for (auto k : at)
+            m.addItem (100 + (int) k, "Show " + parts[k]->title);
+        if (full)
+        {
+            juce::PopupMenu remove;
+            for (auto k : at)
+                if (parts[k]->id != "pequod") remove.addItem (200 + (int) k, parts[k]->title);
+            if (remove.getNumItems() > 0) { m.addSeparator(); m.addSubMenu ("Remove", remove); }
+        }
+        m.showMenuAsync ({}, [this] (int r)
+        {
+            if (r == 1 && onAddIrving) onAddIrving();
+            else if (r >= 100 && r < 200 && (size_t) (r - 100) < windows.size()) windows[(size_t) (r - 100)]->show();
+            else if (r >= 200 && (size_t) (r - 200) < parts.size() && onRemoveIrving) onRemoveIrving (parts[(size_t) (r - 200)]->id);
+        });
     }
 
     std::function<void()> onAddIrving;

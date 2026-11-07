@@ -131,16 +131,21 @@ void PatchCanvas::rebuild()
         }
         if (p.sections.empty()) p.note = "No senders connected. Click MELVILLE LINK on the MELVILLE bar to connect one."; }
 
-    // IRVING, and any more IRVINGs open (a panel each)
-    for (int n = 1; n <= Hub::maxIrvings; ++n)
-    {
-        const auto id = Hub::irvingId (n);
-        if (n > 1 && ! hub.isPartConnected (id)) continue;
-        auto& p = panel (id, Hub::irvingTitle (n));
-        column (p, { "OUT", id, "This guitar rig's output: what you hear from " + Hub::irvingTitle (n) + "'s rack.", { "Out 1", "Out 2" }, lr },
-                   { "IN", id, n == 1 ? juce::String ("Into the guitar rig: your guitar (interface input 1 by default).")
-                                      : juce::String ("Into this guitar rig: cable an interface input (or anything) here."),
-                     { "In 1", "In 2" }, lr });
+    {   // IRVING: one panel, a set of jacks per instance open
+        auto& p = panel ("pequod", "IRVING");
+        int open = 0;
+        for (int n = 1; n <= Hub::maxIrvings; ++n)
+            open += (n == 1 || hub.isPartConnected (Hub::irvingId (n))) ? 1 : 0;
+        for (int n = 1; n <= Hub::maxIrvings; ++n)
+        {
+            const auto id = Hub::irvingId (n);
+            if (n > 1 && ! hub.isPartConnected (id)) continue;
+            const auto tag = open > 1 ? juce::String (n) + " " : juce::String();
+            column (p, { tag + "OUT", id, "What you hear from IRVING" + (open > 1 ? " " + juce::String (n) : juce::String()) + "'s rack.", { "Out 1", "Out 2" }, lr },
+                       { tag + "IN", id, n == 1 ? juce::String ("Into the guitar rig: your guitar (interface input 1 by default).")
+                                                : "Into IRVING " + juce::String (n) + ": cable an interface input (or anything) here.",
+                         { "In 1", "In 2" }, lr });
+        }
     }
 
     {   auto& p = panel ("thoreau", "THOREAU");
