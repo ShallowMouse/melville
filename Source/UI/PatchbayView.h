@@ -51,6 +51,8 @@ private:
     {
         juce::String title;                 // "TRACKS", "MASTER", "TO DESK"
         bool output = true;                 // top row (sources) or bottom row (destinations)
+        int column = 0;                     // outputs sit over the inputs they pair with
+        juce::String description;           // what it's for (its jacks' tooltips)
         std::vector<Jack> jacks;
         juce::Rectangle<float> titleArea, area;
     };
@@ -62,6 +64,7 @@ private:
         std::vector<Section> sections;
         juce::Rectangle<float> area;
         juce::String note;                  // shown when it has no jacks
+        int columns = 0;
     };
 
     struct Hit { int panel = -1, section = -1, jack = -1; bool titleOnly = false; };

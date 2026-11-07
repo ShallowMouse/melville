@@ -198,7 +198,7 @@ public:
             }
         };
         netTile.onClick = [this] { if (onShowNetwork) onShowNetwork(); };
-        netTile.setTooltip ("NETWORK: Hawthorne Link - audio from other PCs, onto the patchbay");
+        netTile.setTooltip ("MELVILLE LINK: audio from other PCs (THOREAU, PEQUOD Host), onto the patchbay");
         addAndMakeVisible (netTile);
         updateTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
         {
@@ -352,7 +352,7 @@ private:
     std::vector<std::unique_ptr<PartUI>>& parts;
     std::vector<std::unique_ptr<PartWindow>>& windows;
     juce::OwnedArray<Tile> tiles;
-    Tile patchTile { "Patchbay", {}, Colours::accent }, netTile { "Network", {}, Colours::accent }, audioTile { "Interface", {}, Colours::accent },
+    Tile patchTile { "Patchbay", {}, Colours::accent }, netTile { "MELVILLE Link", {}, Colours::accent }, audioTile { "Interface", {}, Colours::accent },
          updateTile { "Update", {}, Colours::accent };
 public:
     std::function<void()> onShowNetwork;
@@ -466,6 +466,9 @@ public:
                     save (b, "bar.png");
                     b->showPatchbay();
                     save (b->getPatchbayContent(), "patchbay.png");
+                    if (auto* pv = b->getPatchbayContent())
+                        for (auto* c : pv->getChildren())
+                            if (auto* vp = dynamic_cast<juce::Viewport*> (c)) save (vp->getViewedComponent(), "patchbay-full.png");
                     for (size_t i = 1; i < windows.size(); ++i)
                     {
                         windows[i]->show();

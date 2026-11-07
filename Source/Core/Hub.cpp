@@ -309,7 +309,8 @@ void Hub::timerCallback()
     for (auto& n : nodes)
         if (auto* r = dynamic_cast<RouteBridge*> (n.get()))
         {
-            const int t = r->getNumTracks();
+            static const int forced = juce::SystemStats::getEnvironmentVariable ("MELVILLE_TEST_TRACKS", "0").getIntValue();   // (tests)
+            const int t = forced > 0 ? forced : r->getNumTracks();
             const int want = t > 0 ? t : hawthorne::route::defaultTracks;
             if (want != visibleTracks)
             {

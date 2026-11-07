@@ -67,33 +67,51 @@ void PatchCanvas::rebuild()
         return panels.back();
     };
 
-    // a section of jacks: channels of one port, with the labels under them
-    auto section = [&pb] (Panel& p, const juce::String& title, bool output, const juce::String& portId,
-                          const juce::StringArray& channels, const juce::StringArray& labels)
+    // One side of a column: a section of jacks on one port
+    struct Side
+    {
+        juce::String title, portId, description;
+        juce::StringArray channels, labels;
+    };
+
+    auto makeSection = [&pb] (const Side& side, bool output, int column) -> Section
     {
         Section s;
-        s.title = title;
+        s.title = side.title;
+        s.description = side.description;
         s.output = output;
-        for (int i = 0; i < channels.size(); ++i)
+        s.column = column;
+        for (int i = 0; i < side.channels.size(); ++i)
         {
-            const int flat = output ? pb.findSource (portId, channels[i]) : pb.findDest (portId, channels[i]);
+            const int flat = output ? pb.findSource (side.portId, side.channels[i]) : pb.findDest (side.portId, side.channels[i]);
             if (flat < 0) continue;
             Jack j;
             j.flat = flat;
-            j.label = labels[i];
+            j.label = side.labels[i];
             s.jacks.push_back (j);
         }
-        if (! s.jacks.empty()) p.sections.push_back (std::move (s));
+        return s;
     };
+
+    // A column: an output section on top and the input it pairs with underneath, jack over jack
+    auto column = [&] (Panel& p, const Side& top, const Side& bottom)
+    {
+        const int c = p.columns++;
+        if (top.channels.size() > 0)    { auto s = makeSection (top, true, c);     if (! s.jacks.empty()) p.sections.push_back (std::move (s)); }
+        if (bottom.channels.size() > 0) { auto s = makeSection (bottom, false, c); if (! s.jacks.empty()) p.sections.push_back (std::move (s)); }
+    };
+    const Side none;
 
     const juce::StringArray lr { "L", "R" };
 
     {   auto& p = panel ("interface", "INTERFACE");
-        section (p, "INPUTS", true, "interface", numbered ("In ", ins), numbers (ins));
-        section (p, "OUTPUTS", false, "interface", numbered ("Out ", outs), numbers (outs)); }
+        column (p, { "INPUTS", "interface", "What comes into your audio interface (mics, instruments, line inputs). Cable it to whatever should hear it.",
+                     numbered ("In ", ins), numbers (ins) },
+                   { "OUTPUTS", "interface", "Your audio interface's outputs (monitors, headphones, outboard, a hardware desk).",
+                     numbered ("Out ", outs), numbers (outs) }); }
 
-    {   // Hawthorne Link: a block of jacks per connected sender
-        auto& p = panel ("network", "NETWORK");
+    {   // MELVILLE Link: a column of jacks per connected sender
+        auto& p = panel ("network", "MELVILLE LINK");
         auto& rx = hub.getNetwork().getReceiver();
         for (int slot = 0; slot < NetworkNode::slots; ++slot)
         {
@@ -101,47 +119,61 @@ void PatchCanvas::rebuild()
             if (st.state == hawthorne::NetReceiver::State::off || st.channels <= 0) continue;
             juce::StringArray chans;
             for (int c = 0; c < st.channels; ++c) chans.add (NetworkNode::channelName (slot, c));
-            section (p, juce::String (slot + 1) + " " + st.name.toUpperCase(), true, "network", chans, numbers (st.channels));
+            column (p, { juce::String (slot + 1) + " " + st.name.toUpperCase(), "network",
+                         "Audio from " + st.name + " on another PC, over MELVILLE Link. Senders follow Hawthorne's tape and tempo.",
+                         chans, numbers (st.channels) }, none);
         }
-        if (p.sections.empty()) p.note = "No senders connected. Click NETWORK on the MELVILLE bar to connect one."; }
+        if (p.sections.empty()) p.note = "No senders connected. Click MELVILLE LINK on the MELVILLE bar to connect one."; }
 
     {   auto& p = panel ("pequod", "PEQUOD HOST");
-        section (p, "OUT", true, "pequod", { "Out 1", "Out 2" }, lr);
-        section (p, "IN", false, "pequod", { "In 1", "In 2" }, lr); }
+        column (p, { "OUT", "pequod", "The guitar rig's output: what you hear from PEQUOD Host's rack.", { "Out 1", "Out 2" }, lr },
+                   { "IN", "pequod", "Into the guitar rig: your guitar (interface input 1 by default).", { "In 1", "In 2" }, lr }); }
 
     {   auto& p = panel ("thoreau", "THOREAU");
-        section (p, "OUT", true, "thoreau", { "Out 1", "Out 2" }, lr); }
+        column (p, { "OUT", "thoreau", "THOREAU's drums (its stereo mix).", { "Out 1", "Out 2" }, lr }, none); }
 
     {   auto& p = panel ("hawthorne", "HAWTHORNE");
-        section (p, "TRACKS", true, "route", numbered ("Hawthorne track ", tracks), numbers (tracks));
-        section (p, "MASTER", true, "route", { "Hawthorne master L", "Hawthorne master R" }, lr);
-        section (p, "LTC", true, "route", { "Hawthorne LTC" }, { "LTC" });
-        section (p, "MONITOR OUT", true, "hawthorne", numbered ("Out ", outs), numbers (outs));
-        section (p, "INPUTS", false, "hawthorne", numbered ("In ", ins), numbers (ins));
-        section (p, "MELVILLE BUSES", false, "hawthorne", numbered ("MELVILLE bus ", 16), numbers (16));
-        section (p, "ROUTE TRACKS", false, "route", numbered ("To Hawthorne track ", tracks), numbers (tracks));
-        section (p, "ROUTE MASTER", false, "route", { "To Hawthorne master L", "To Hawthorne master R" }, lr); }
+        column (p, { "TRACKS", "route", "Each tape track playing back (or what it's recording, while it monitors input). To EMERSON by default.",
+                     numbered ("Hawthorne track ", tracks), numbers (tracks) },
+                   { "TRACK RETURNS", "route", "Into each tape track's ROUTE input: pick ROUTE as the track's input in Hawthorne's ROUTING to record what's cabled here.",
+                     numbered ("To Hawthorne track ", tracks), numbers (tracks) });
+        column (p, { "MASTER", "route", "Hawthorne's 2-track master playing back.", { "Hawthorne master L", "Hawthorne master R" }, lr },
+                   { "MASTER RETURN", "route", "Into the 2-track master: the mix to print. Set the master inputs to ROUTE master L / R in Hawthorne's ROUTING.",
+                     { "To Hawthorne master L", "To Hawthorne master R" }, lr });
+        column (p, { "LTC", "route", "Hawthorne's timecode (LTC) out, for anything that chases tape.", { "Hawthorne LTC" }, { "LTC" } }, none);
+        column (p, { "MONITOR OUT", "hawthorne", "Hawthorne's own outputs (as its ROUTING sends them): to the interface outputs by default.",
+                     numbered ("Out ", outs), numbers (outs) },
+                   { "INPUTS", "hawthorne", "Hawthorne's inputs: tracks record from these (In 1, In 2 ... in its ROUTING). From the interface inputs by default.",
+                     numbered ("In ", ins), numbers (ins) });
+        column (p, none, { "MELVILLE BUSES", "hawthorne", "Spare Hawthorne inputs that aren't the interface's: cable THOREAU, PEQUOD Host or MELVILLE Link here and pick the bus as a track's input to record it.",
+                           numbered ("MELVILLE bus ", 16), numbers (16) }); }
 
     {   auto& p = panel ("emerson", "EMERSON");
-        section (p, "MIX OUT", true, "emerson", { "To Hawthorne master L", "To Hawthorne master R" }, lr);
-        // its processed tracks: one set, cabled to WHITMAN, the interface (a hardware desk) or both
-        section (p, "TRACKS OUT", true, "link", numbered ("Hawthorne track ", tracks), numbers (tracks));
-        section (p, "RETURN A", true, "link", { "EMERSON return A L", "EMERSON return A R" }, lr);
-        section (p, "RETURN B", true, "link", { "EMERSON return B L", "EMERSON return B R" }, lr);
-        section (p, "TRACKS IN", false, "emerson", numbered ("Hawthorne track ", tracks), numbers (tracks));
-        section (p, "MASTER IN", false, "emerson", { "Hawthorne master L", "Hawthorne master R" }, lr);
-        section (p, "LTC", false, "emerson", { "Hawthorne LTC" }, { "LTC" });
-        section (p, "DESK MIX", false, "link", { "To Hawthorne master L", "To Hawthorne master R" }, lr);
-        section (p, "SEND A", false, "link", { "To EMERSON send A L", "To EMERSON send A R" }, lr);
-        section (p, "SEND B", false, "link", { "To EMERSON send B L", "To EMERSON send B R" }, lr); }
+        // (its processed tracks: one set, cabled to WHITMAN, the interface for a hardware desk, or both)
+        column (p, { "TRACKS OUT", "link", "Each track after its EMERSON inserts. To WHITMAN by default; cable to interface outputs for a hardware desk.",
+                     numbered ("Hawthorne track ", tracks), numbers (tracks) },
+                   { "TRACKS IN", "emerson", "The tape tracks coming into EMERSON's inserts (from Hawthorne by default).",
+                     numbered ("Hawthorne track ", tracks), numbers (tracks) });
+        column (p, { "MIX OUT", "emerson", "The mix after EMERSON's MIX chain: to Hawthorne's 2-track master by default.",
+                     { "To Hawthorne master L", "To Hawthorne master R" }, lr },
+                   { "MIX IN", "link", "The desk's mix coming into EMERSON's MIX chain (WHITMAN's mix by default).",
+                     { "To Hawthorne master L", "To Hawthorne master R" }, lr });
+        column (p, { "RETURN A", "link", "FX return A: EMERSON's return A chain coming back to the desk.", { "EMERSON return A L", "EMERSON return A R" }, lr },
+                   { "SEND A", "link", "FX send A from the desk into EMERSON's return A chain.", { "To EMERSON send A L", "To EMERSON send A R" }, lr });
+        column (p, { "RETURN B", "link", "FX return B: EMERSON's return B chain coming back to the desk.", { "EMERSON return B L", "EMERSON return B R" }, lr },
+                   { "SEND B", "link", "FX send B from the desk into EMERSON's return B chain.", { "To EMERSON send B L", "To EMERSON send B R" }, lr });
+        column (p, none, { "MASTER IN", "emerson", "Hawthorne's master playing back, for EMERSON's meters.", { "Hawthorne master L", "Hawthorne master R" }, lr });
+        column (p, none, { "LTC IN", "emerson", "Timecode for EMERSON (from Hawthorne by default).", { "Hawthorne LTC" }, { "LTC" } }); }
 
     {   auto& p = panel ("whitman", "WHITMAN");
-        section (p, "MIX", true, "whitman", { "To Hawthorne master L", "To Hawthorne master R" }, lr);
-        section (p, "SEND A", true, "whitman", { "To EMERSON send A L", "To EMERSON send A R" }, lr);
-        section (p, "SEND B", true, "whitman", { "To EMERSON send B L", "To EMERSON send B R" }, lr);
-        section (p, "TRACKS", false, "whitman", numbered ("Hawthorne track ", tracks), numbers (tracks));
-        section (p, "RETURN A", false, "whitman", { "EMERSON return A L", "EMERSON return A R" }, lr);
-        section (p, "RETURN B", false, "whitman", { "EMERSON return B L", "EMERSON return B R" }, lr); }
+        column (p, none, { "TRACKS", "whitman", "Into WHITMAN's channel strips, one per track (EMERSON's TRACKS OUT by default).",
+                           numbered ("Hawthorne track ", tracks), numbers (tracks) });
+        column (p, { "MIX", "whitman", "The desk's stereo mix: through EMERSON's MIX chain to Hawthorne's 2-track by default.",
+                     { "To Hawthorne master L", "To Hawthorne master R" }, lr }, none);
+        column (p, { "SEND A", "whitman", "The desk's FX send A (to EMERSON's return A by default).", { "To EMERSON send A L", "To EMERSON send A R" }, lr },
+                   { "RETURN A", "whitman", "FX return A coming back onto the desk.", { "EMERSON return A L", "EMERSON return A R" }, lr });
+        column (p, { "SEND B", "whitman", "The desk's FX send B (to EMERSON's return B by default).", { "To EMERSON send B L", "To EMERSON send B R" }, lr },
+                   { "RETURN B", "whitman", "FX return B coming back onto the desk.", { "EMERSON return B L", "EMERSON return B R" }, lr }); }
 
     layOut();
     repaint();
@@ -180,34 +212,63 @@ void PatchCanvas::timerCallback()
 //==============================================================================
 void PatchCanvas::layOut()
 {
+    // Like a hardware patchbay: each column has its outputs right over the inputs they pair
+    // with, jack over jack. Long sections (up to 96 tape tracks) fold into lines of 24, each
+    // line of outputs over its line of inputs (1-24, then 25-48 ...).
+    constexpr int perLine = 24;
     const float width = (float) juce::jmax (700, getWidth());
+    const auto titleFont = font (11.0f, true);
     float y = margin;
     for (auto& p : panels)
     {
         const float left = margin + nameColumn, right = width - margin - panelPad;
-        float panelTop = y;
+        const float panelTop = y;
+        bool anyOut = false, anyIn = false;
+        for (auto& s : p.sections) (s.output ? anyOut : anyIn) = true;
+
         y += panelPad;
-        // outputs on top, inputs below; each wraps onto more lines if it must
-        for (int row = 0; row < 2; ++row)
+        float x = left, lineH = 0.0f;
+        bool lineUsed = false;
+        for (int c = 0; c < p.columns; ++c)
         {
-            const bool outputs = row == 0;
-            bool any = false;
-            float x = left;
+            int most = 0;
+            float titleW = 0.0f;
+            bool colOut = false, colIn = false;
+            for (auto& s : p.sections)
+                if (s.column == c)
+                {
+                    (s.output ? colOut : colIn) = true;
+                    most = juce::jmax (most, (int) s.jacks.size());
+                    titleW = juce::jmax (titleW, juce::GlyphArrangement::getStringWidth (titleFont, s.title) + 4.0f);
+                }
+            if (most == 0) continue;
+            const int across = juce::jmin (most, perLine);
+            const int lines = (most + perLine - 1) / perLine;
+            const float w = juce::jmax ((float) across * jackPitch, titleW);
+            // a column with only inputs (or only outputs) folds without empty rows between
+            const float colPair = rowH * (float) ((colOut ? 1 : 0) + (colIn ? 1 : 0));
+            const float firstRow = ! colOut && anyOut ? rowH : 0.0f;
+            const float h = firstRow + colPair * (float) lines + 6.0f * (float) (lines - 1);
+
+            if (lineUsed && x + w > right) { x = left; y += lineH + 6.0f; lineH = 0.0f; }
             for (auto& s : p.sections)
             {
-                if (s.output != outputs) continue;
-                const float w = juce::jmax ((float) s.jacks.size() * jackPitch, juce::GlyphArrangement::getStringWidth (font (11.0f, true), s.title) + 4.0f);
-                if (any && x + w > right) { x = left; y += rowH; }
-                s.titleArea = { x, y, w, titleH };
-                s.area = { x, y, w, rowH };
+                if (s.column != c) continue;
+                const float sy = y + (! s.output && anyOut ? rowH : 0.0f);
+                s.titleArea = { x, sy, w, titleH };
+                s.area = { x, sy, w, h };
                 for (size_t k = 0; k < s.jacks.size(); ++k)
-                    s.jacks[k].centre = { x + jackPitch * ((float) k + 0.5f), y + titleH + jackPitch * 0.5f };
-                x += w + sectionGap;
-                any = true;
+                {
+                    const int line = (int) k / perLine, at = (int) k % perLine;
+                    s.jacks[k].centre = { x + jackPitch * ((float) at + 0.5f),
+                                          sy + (colPair + 6.0f) * (float) line + titleH + jackPitch * 0.5f };
+                }
             }
-            if (any) y += rowH;
+            x += w + sectionGap;
+            lineH = juce::jmax (lineH, h);
+            lineUsed = true;
         }
-        if (p.sections.empty() && p.note.isNotEmpty()) y += rowH * 0.6f;
+        y += lineUsed ? lineH : rowH * 0.6f;
         y += panelPad - 6.0f;
         p.area = { margin, panelTop, width - margin * 2.0f, y - panelTop };
         y += panelGap;
@@ -308,14 +369,18 @@ void PatchCanvas::drawPanel (juce::Graphics& g, const Panel& p) const
     }
 
     // OUT / IN marks at the start of each row
+    juce::Array<float> marked;
     for (auto& s : p.sections)
-    {
-        if (s.titleArea.getX() > p.area.getX() + nameColumn + margin + 1.0f) continue;   // only a row's first section
-        g.setColour (inkDim);
-        g.setFont (font (10.0f, true));
-        g.drawText (s.output ? "OUT" : "IN", juce::Rectangle<float> (p.area.getX() + nameColumn - 34.0f, s.titleArea.getY() + titleH, 26.0f, jackPitch),
-                    juce::Justification::centredRight);
-    }
+        for (size_t k = 0; k < s.jacks.size(); k += 24)    // once per row of jacks
+        {
+            const float rowY = s.jacks[k].centre.y;
+            if (marked.contains (rowY)) continue;
+            marked.add (rowY);
+            g.setColour (inkDim);
+            g.setFont (font (10.0f, true));
+            g.drawText (s.output ? "OUT" : "IN", juce::Rectangle<float> (p.area.getX() + nameColumn - 34.0f, rowY - jackPitch * 0.5f, 26.0f, jackPitch),
+                        juce::Justification::centredRight);
+        }
 
     for (int si = 0; si < (int) p.sections.size(); ++si)
     {
@@ -327,7 +392,7 @@ void PatchCanvas::drawPanel (juce::Graphics& g, const Panel& p) const
         g.setFont (font (11.0f, true));
         g.drawText (s.title, s.titleArea, juce::Justification::centredLeft);
         g.setColour (ink.withAlpha (0.25f));
-        g.drawHorizontalLine ((int) s.titleArea.getBottom() - 1, s.titleArea.getX(), s.titleArea.getX() + (float) s.jacks.size() * jackPitch - 4.0f);
+        g.drawHorizontalLine ((int) s.titleArea.getBottom() - 1, s.titleArea.getX(), s.titleArea.getX() + (float) juce::jmin ((int) s.jacks.size(), 24) * jackPitch - 4.0f);
 
         for (int ji = 0; ji < (int) s.jacks.size(); ++ji)
         {
@@ -355,7 +420,9 @@ void PatchCanvas::drawCable (juce::Graphics& g, juce::Point<float> a, juce::Poin
     const float sag = 30.0f + 0.22f * a.getDistanceFrom (b);
     juce::Path path;
     path.startNewSubPath (a);
-    path.cubicTo (a.translated (0, sag), b.translated (0, sag), b);
+    // straight up and down (columns line up) it would hide the jacks between: bow it aside
+    const float bow = std::abs (a.x - b.x) < 60.0f ? 34.0f + 0.12f * std::abs (a.y - b.y) : 0.0f;
+    path.cubicTo (a.translated (bow, sag), b.translated (bow, sag), b);
     g.setColour (juce::Colours::black.withAlpha (0.55f));
     g.strokePath (path, juce::PathStrokeType (thickness + 2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     g.setColour (c);
@@ -406,7 +473,8 @@ void PatchCanvas::drawCables (juce::Graphics& g) const
         drawCable (g, a, b, grp.colour, 8.0f);
 
         const float sag = 30.0f + 0.22f * a.getDistanceFrom (b);
-        const auto mid = (a + b) * 0.5f + juce::Point<float> (0, sag * 0.75f);
+        const float bow = std::abs (a.x - b.x) < 60.0f ? 34.0f + 0.12f * std::abs (a.y - b.y) : 0.0f;
+        const auto mid = (a + b) * 0.5f + juce::Point<float> (bow * 0.75f, sag * 0.75f);
         auto tag = juce::Rectangle<float> (34.0f, 18.0f).withCentre (mid);
         g.setColour (juce::Colour (0xff141414));
         g.fillRoundedRectangle (tag, 9.0f);
@@ -435,12 +503,17 @@ void PatchCanvas::mouseMove (const juce::MouseEvent& e)
                                : "Drop an output section here to patch it in order";
             else
             {
-                const int flat = s.jacks[(size_t) h.jack].flat;
-                tip = s.output ? pb.sourceName (flat) : pb.destName (flat);
-                int n = 0;
+                const auto& j = s.jacks[(size_t) h.jack];
+                const auto& p = panels[(size_t) h.panel];
+                tip << p.title << "  " << s.title << " " << j.label << (s.output ? "  (output)" : "  (input)") << "\n" << s.description;
+                juce::StringArray to;
                 for (auto& [d, c] : pb.getAllCords())
-                    if (s.output ? c.source == flat : d == flat) ++n;
-                if (n > 0) tip << "  (" << n << (n == 1 ? " cable)" : " cables)");
+                {
+                    if (s.output && c.source == j.flat) to.add (pb.destName (d));
+                    if (! s.output && d == j.flat)      to.add (pb.sourceName (c.source));
+                }
+                tip << "\n" << (to.isEmpty() ? juce::String ("Nothing cabled.")
+                                               : (s.output ? "Cabled to: " : "Cabled from: ") + to.joinIntoString (", "));
             }
         }
         setTooltip (tip);

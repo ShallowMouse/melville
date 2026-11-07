@@ -39,7 +39,7 @@ namespace
     {
         explicit MelvilleNetworkWindow (hawthorne::NetReceiver& rx) : hawthorne::NetworkWindow (rx)
         {
-            setName ("MELVILLE \xc2\xb7 NETWORK (Hawthorne Link)");
+            setName ("MELVILLE \xc2\xb7 MELVILLE LINK");
             setLookAndFeel (&lnf);
         }
         ~MelvilleNetworkWindow() override { setLookAndFeel (nullptr); }
