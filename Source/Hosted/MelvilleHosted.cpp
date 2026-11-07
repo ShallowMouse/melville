@@ -7,13 +7,17 @@
 namespace melville
 {
 
+namespace { juce::String nextPart; }
+
 bool isHosted() noexcept { return Hub::getIfExists() != nullptr; }
+
+void setNextPart (const juce::String& partId) { nextPart = partId; }
 
 bool attach (juce::AudioDeviceManager& dm, const char* partId)
 {
     auto* hub = Hub::getIfExists();
     if (hub == nullptr) return false;
-    auto* part = hub->findPart (partId);
+    auto* part = hub->findPart (nextPart.isNotEmpty() ? nextPart : juce::String (partId));
     if (part == nullptr) { jassertfalse; return false; }
 
     part->manager = &dm;

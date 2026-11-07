@@ -131,9 +131,17 @@ void PatchCanvas::rebuild()
         }
         if (p.sections.empty()) p.note = "No senders connected. Click MELVILLE LINK on the MELVILLE bar to connect one."; }
 
-    {   auto& p = panel ("pequod", "IRVING");
-        column (p, { "OUT", "pequod", "The guitar rig's output: what you hear from IRVING's rack.", { "Out 1", "Out 2" }, lr },
-                   { "IN", "pequod", "Into the guitar rig: your guitar (interface input 1 by default).", { "In 1", "In 2" }, lr }); }
+    // IRVING, and any more IRVINGs open (a panel each)
+    for (int n = 1; n <= Hub::maxIrvings; ++n)
+    {
+        const auto id = Hub::irvingId (n);
+        if (n > 1 && ! hub.isPartConnected (id)) continue;
+        auto& p = panel (id, Hub::irvingTitle (n));
+        column (p, { "OUT", id, "This guitar rig's output: what you hear from " + Hub::irvingTitle (n) + "'s rack.", { "Out 1", "Out 2" }, lr },
+                   { "IN", id, n == 1 ? juce::String ("Into the guitar rig: your guitar (interface input 1 by default).")
+                                      : juce::String ("Into this guitar rig: cable an interface input (or anything) here."),
+                     { "In 1", "In 2" }, lr });
+    }
 
     {   auto& p = panel ("thoreau", "THOREAU");
         column (p, { "OUT", "thoreau", "THOREAU's drums (its stereo mix).", { "Out 1", "Out 2" }, lr }, none); }
@@ -194,6 +202,8 @@ juce::String PatchCanvas::networkKey() const
         const auto st = rx.getStatus (slot);
         if (st.state != hawthorne::NetReceiver::State::off) key << slot << st.name << st.channels << "|";
     }
+    for (int n = 2; n <= Hub::maxIrvings; ++n)                 // (IRVINGs opened or removed)
+        key << (hub.isPartConnected (Hub::irvingId (n)) ? "I" : "-");
     return key;
 }
 

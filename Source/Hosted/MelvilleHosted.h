@@ -27,6 +27,10 @@ namespace melville
         where it had a device selector for its MIDI inputs, it shows this instead. */
     std::unique_ptr<juce::Component> midiInputsPanel (juce::AudioDeviceManager&);
 
+    /** MELVILLE: the next app to attach takes this part instead of the one it asks for (a
+        second IRVING asks for "pequod" and gets "pequod2"). Empty: as asked. */
+    void setNextPart (const juce::String& partId);
+
     /** The part's manager is going away (call before it's destroyed). */
     void detach (juce::AudioDeviceManager&);
 }

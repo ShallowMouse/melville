@@ -41,7 +41,9 @@ Hub::Hub()
     addNode (std::make_unique<PartNode> ("emerson", "EMERSON", names::routeFromHawthorne(), names::routeToHawthorne()));
     addNode (std::make_unique<PartNode> ("whitman", "WHITMAN", names::linkToWhitman(), names::linkFromWhitman()));
     addNode (std::make_unique<PartNode> ("thoreau", "THOREAU", juce::StringArray(), names::numbered ("Out ", 16)));
-    addNode (std::make_unique<PartNode> ("pequod", "IRVING", names::numbered ("In ", 8), names::numbered ("Out ", 8)));
+    // IRVING (PEQUOD Host): up to four at once, "pequod", "pequod2" ... (each its own patch panel)
+    for (int n = 1; n <= maxIrvings; ++n)
+        addNode (std::make_unique<PartNode> (irvingId (n), irvingTitle (n), names::numbered ("In ", 8), names::numbered ("Out ", 8)));
 
     // Hawthorne Link: audio from other PCs
     auto net = std::make_unique<NetworkNode>();
@@ -67,6 +69,9 @@ Hub::Hub()
         { Step::pull,    node ("interface") },
         { Step::pull,    node ("network") },
         { Step::process, node ("pequod") },
+        { Step::process, node ("pequod2") },
+        { Step::process, node ("pequod3") },
+        { Step::process, node ("pequod4") },
         { Step::process, node ("thoreau") },
         { Step::process, node ("hawthorne") },
         { Step::pull,    node ("route") },      // Hawthorne's tracks, this block
@@ -108,6 +113,14 @@ PartNode* Hub::findPart (const juce::String& id) const
         if (auto* p = dynamic_cast<PartNode*> (n.get()))
             if (p->port.id == id) return p;
     return nullptr;
+}
+
+juce::String Hub::irvingId (int n)    { return n <= 1 ? juce::String ("pequod") : "pequod" + juce::String (n); }
+juce::String Hub::irvingTitle (int n) { return n <= 1 ? juce::String ("IRVING") : "IRVING " + juce::String (n); }
+
+void Hub::releasePart (const juce::String& id)
+{
+    if (auto* p = findPart (id)) p->manager = nullptr;
 }
 
 bool Hub::isPartConnected (const juce::String& id) const

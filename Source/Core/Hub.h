@@ -62,6 +62,13 @@ public:
     /** Has this part's app opened its device (is it running in the hub)? */
     bool isPartConnected (const juce::String& id) const;
 
+    /** IRVING can run more than once: part ids "pequod", "pequod2" ... and titles "IRVING", "IRVING 2" ... */
+    static constexpr int maxIrvings = 4;
+    static juce::String irvingId (int n);
+    static juce::String irvingTitle (int n);
+    /** An app using this part has gone (MELVILLE removed an IRVING): the part is free again. */
+    void releasePart (const juce::String& id);
+
     /** CPU load of the whole block, 0..1 (for the launcher's meter). */
     float getLoad() const noexcept { return load.load (std::memory_order_relaxed); }
 

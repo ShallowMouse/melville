@@ -74,6 +74,13 @@ public:
 
     std::function<void (juce::Graphics&, juce::Rectangle<float>)> drawIcon;   // when there's no image
     std::function<bool()> isLit;                                               // the lamp (none if empty)
+    std::function<void()> onRightClick;
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() && onRightClick) { onRightClick(); return; }
+        juce::Button::mouseDown (e);
+    }
 
     void paintButton (juce::Graphics& g, bool over, bool down) override
     {
@@ -121,11 +128,11 @@ private:
 static juce::Image loadIcon (const juce::String& id, int px = 128)
 {
     const void* data = nullptr; int size = 0;
-    if (id == "hawthorne") { data = BinaryData::hawthornelogo_png; size = BinaryData::hawthornelogo_pngSize; }
+    if (id == "hawthorne") { data = BinaryData::HAWTHORNE_png;     size = BinaryData::HAWTHORNE_pngSize; }
     if (id == "emerson")   { data = BinaryData::EMERSON_png;       size = BinaryData::EMERSON_pngSize; }
     if (id == "whitman")   { data = BinaryData::WHITMAN_png;       size = BinaryData::WHITMAN_pngSize; }
     if (id == "thoreau")   { data = BinaryData::THOREAU_png;       size = BinaryData::THOREAU_pngSize; }
-    if (id == "pequod")    { data = BinaryData::PEQUODHost_png;    size = BinaryData::PEQUODHost_pngSize; }
+    if (id.startsWith ("pequod")) { data = BinaryData::IRVING_png;        size = BinaryData::IRVING_pngSize; }      // IRVING
     if (data == nullptr) return {};
     // scaled down once, so the bar draws it crisply and cheaply
     auto big = juce::ImageCache::getFromMemory (data, size);
@@ -141,14 +148,7 @@ public:
     Bar (Hub& h, std::vector<std::unique_ptr<PartUI>>& p, std::vector<std::unique_ptr<PartWindow>>& w)
         : hub (h), parts (p), windows (w)
     {
-        for (size_t i = 0; i < parts.size(); ++i)
-        {
-            const auto id = parts[i]->id;
-            auto* t = tiles.add (new Tile (parts[i]->title, loadIcon (id), Colours::forPart (id)));
-            t->isLit = [this, id] { return hub.isPartConnected (id); };
-            t->onClick = [this, i] { windows[i]->show(); };
-            addAndMakeVisible (t);
-        }
+        rebuildTiles();
 
         patchTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
         {
@@ -334,6 +334,45 @@ public:
             juce::ModalCallbackFunction::create ([this] (int ok) { if (ok) updater.install(); }));
     }
 
+    /** A tile per part, in order (IRVINGs come and go). */
+    void rebuildTiles()
+    {
+        tiles.clear();
+        for (size_t i = 0; i < parts.size(); ++i)
+        {
+            const auto id = parts[i]->id;
+            auto* t = tiles.add (new Tile (parts[i]->title, loadIcon (id), Colours::forPart (id)));
+            t->isLit = [this, id] { return hub.isPartConnected (id); };
+            t->onClick = [this, id]
+            {
+                for (size_t k = 0; k < parts.size(); ++k)
+                    if (parts[k]->id == id) windows[k]->show();
+            };
+            if (id.startsWith ("pequod"))
+            {
+                t->setTooltip (parts[i]->title + ": click to show it. Right-click to open another IRVING" + (id != "pequod" ? " or remove this one" : juce::String()));
+                t->onRightClick = [this, id]
+                {
+                    juce::PopupMenu m;
+                    m.addItem (1, "Open another IRVING", onAddIrving != nullptr && canAddIrving && canAddIrving());
+                    if (id != "pequod") m.addItem (2, "Remove " + Hub::irvingTitle (id.getTrailingIntValue()));
+                    m.showMenuAsync ({}, [this, id] (int r)
+                    {
+                        if (r == 1 && onAddIrving) onAddIrving();
+                        if (r == 2 && onRemoveIrving) onRemoveIrving (id);
+                    });
+                };
+            }
+            addAndMakeVisible (t);
+        }
+        setSize (wordmarkWidth + (tiles.size() + 4) * (tileWidth + gap) + 26 + 260, barHeight);
+        resized();
+    }
+
+    std::function<void()> onAddIrving;
+    std::function<bool()> canAddIrving;
+    std::function<void (const juce::String&)> onRemoveIrving;
+
     void closePatchbay() { patchWindow = nullptr; }
     juce::Component* getPatchbayContent() { return patchWindow != nullptr ? patchWindow->getContentComponent() : nullptr; }
 
@@ -436,8 +475,16 @@ public:
             windows.push_back (std::make_unique<PartWindow> (*p));
             taskbar::setWindowIdentity (*windows.back(), p->id, p->title, loadIcon (p->id, 256));
         }
+        // the extra IRVINGs open last time
+        const auto testIrvings = juce::SystemStats::getEnvironmentVariable ("MELVILLE_TEST_IRVINGS", "0").getIntValue();   // (tests)
+        for (int n = 2; n <= juce::jlimit (1, Hub::maxIrvings, testIrvings > 0 ? testIrvings : props.getUserSettings()->getIntValue ("irvings", 1)); ++n)
+            addIrving (n, false);
+
         auto* barContent = new Bar (*hub, parts, windows);
         barContent->onShowNetwork = [this] { showNetwork(); };
+        barContent->canAddIrving = [this] { return nextFreeIrving() > 0; };
+        barContent->onAddIrving = [this] { if (auto n = nextFreeIrving()) { addIrving (n, true); refreshBar(); } };
+        barContent->onRemoveIrving = [this] (const juce::String& id) { removeIrving (id); };
         bar = std::make_unique<BarWindow> (barContent);
         for (size_t i = 1; i < windows.size(); ++i)
         {
@@ -519,6 +566,74 @@ public:
         hub = nullptr;
         props.closeFiles();
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
+    }
+
+    //==========================================================================
+    // More than one IRVING: each its own window, taskbar button and patch panel
+
+    int nextFreeIrving() const
+    {
+        for (int n = 2; n <= melville::Hub::maxIrvings; ++n)
+        {
+            bool used = false;
+            for (auto& p : parts) used = used || p->id == melville::Hub::irvingId (n);
+            if (! used) return n;
+        }
+        return 0;
+    }
+
+    int countIrvings() const
+    {
+        int n = 0;
+        for (auto& p : parts) n += p->id.startsWith ("pequod") ? 1 : 0;
+        return n;
+    }
+
+    void addIrving (int n, bool show)
+    {
+        using namespace melville;
+        auto ui = parts::makePequod (n);
+        // after the other IRVINGs, so they sit together on the bar and the taskbar
+        size_t at = 0;
+        for (size_t k = 0; k < parts.size(); ++k) if (parts[k]->id.startsWith ("pequod")) at = k + 1;
+        juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        auto window = std::make_unique<PartWindow> (*ui);
+        taskbar::setWindowIdentity (*window, ui->id, ui->title, loadIcon (ui->id, 256));
+        auto* w = window.get();
+        parts.insert (parts.begin() + (long) at, std::move (ui));
+        windows.insert (windows.begin() + (long) at, std::move (window));
+        if (show) w->show();
+        props.getUserSettings()->setValue ("irvings", countIrvings());
+    }
+
+    void removeIrving (const juce::String& id)
+    {
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Remove " + melville::Hub::irvingTitle (id.getTrailingIntValue()) + "?",
+            "Its rack closes and its patch panel goes. Its cables come back if you open it again.", "Remove", "Cancel", nullptr,
+            juce::ModalCallbackFunction::create ([this, id] (int ok)
+            {
+                if (! ok) return;
+                for (size_t k = 0; k < parts.size(); ++k)
+                    if (parts[k]->id == id)
+                    {
+                        windows.erase (windows.begin() + (long) k);       // the window first (it shows the part)
+                        parts.erase (parts.begin() + (long) k);           // the part closes its device
+                        break;
+                    }
+                hub->releasePart (id);
+                props.getUserSettings()->setValue ("irvings", countIrvings());
+                refreshBar();
+            }));
+    }
+
+    void refreshBar()
+    {
+        if (bar != nullptr)
+            if (auto* b = dynamic_cast<melville::Bar*> (bar->getContentComponent()))
+            {
+                b->rebuildTiles();
+                bar->setContentComponentSize (b->getWidth(), b->getHeight());
+            }
     }
 
     void showNetwork()
