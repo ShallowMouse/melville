@@ -12,7 +12,6 @@ namespace
     juce::SpinLock structureLock;    // held by the audio thread for the whole block
 
     constexpr int interfaceChannels = 64;
-    constexpr int hawthorneChannels = 64;
 }
 
 Hub& Hub::get()
@@ -37,11 +36,12 @@ Hub::Hub()
     // Hawthorne's inputs: one per tape track (what that track records), then LTC for chase
     auto hawthorneIns = names::numbered ("Track ", hawthorne::route::maxTracks);
     hawthorneIns.add ("LTC in");
-    addNode (std::make_unique<PartNode> ("hawthorne", "HAWTHORNE", hawthorneIns, names::numbered ("Out ", hawthorneChannels)));
+    // (its tracks, master and LTC leave by Hawthorne Route; its own device output is just the click)
+    addNode (std::make_unique<PartNode> ("hawthorne", "HAWTHORNE", hawthorneIns, juce::StringArray ("Click")));
     addNode (std::make_unique<PartNode> ("emerson", "EMERSON", names::routeFromHawthorne(), names::routeToHawthorne()));
     addNode (std::make_unique<PartNode> ("whitman", "WHITMAN", names::linkToWhitman(), names::linkFromWhitman()));
     addNode (std::make_unique<PartNode> ("thoreau", "THOREAU", juce::StringArray(), names::numbered ("Out ", 16)));
-    addNode (std::make_unique<PartNode> ("pequod", "PEQUOD HOST", names::numbered ("In ", 8), names::numbered ("Out ", 8)));
+    addNode (std::make_unique<PartNode> ("pequod", "IRVING", names::numbered ("In ", 8), names::numbered ("Out ", 8)));
 
     // Hawthorne Link: audio from other PCs
     auto net = std::make_unique<NetworkNode>();
@@ -121,9 +121,12 @@ void Hub::defaultPatch()
 {
     auto& pb = patchbay;
     pb.clearAll();
-    // the interface's inputs onto the first tracks, Hawthorne's monitor outs back to the interface
+    // the interface's inputs onto the first tracks; Hawthorne's master (and click) to the monitors
     pb.connectInOrder ("interface", 0, "hawthorne", 0, hawthorne::route::defaultTracks);
-    pb.connectInOrder ("hawthorne", 0, "interface", 0, hawthorneChannels);
+    pb.connect (pb.findSource ("route", "Hawthorne master L"), pb.findDest ("interface", "Out 1"));
+    pb.connect (pb.findSource ("route", "Hawthorne master R"), pb.findDest ("interface", "Out 2"));
+    pb.connect (pb.findSource ("hawthorne", "Click"), pb.findDest ("interface", "Out 1"));
+    pb.connect (pb.findSource ("hawthorne", "Click"), pb.findDest ("interface", "Out 2"));
     // Hawthorne -> EMERSON -> WHITMAN -> EMERSON -> Hawthorne, as Route and the Link do now
     pb.connectByName ("route", "emerson");
     // (EMERSON's processed tracks leave by the Link; only its mix chain goes back to Hawthorne here)
@@ -132,8 +135,8 @@ void Hub::defaultPatch()
                     pb.findDest ("route", juce::String ("To Hawthorne master ") + side));
     pb.connectByName ("link", "whitman");
     pb.connectByName ("whitman", "link");
-    // (THOREAU and PEQUOD Host: cable them onto whichever tracks should record them)
-    // the guitar: interface input 1 into PEQUOD Host
+    // (THOREAU and IRVING: cable them onto whichever tracks should record them)
+    // the guitar: interface input 1 into IRVING
     pb.connectInOrder ("interface", 0, "pequod", 0, 1);
 }
 

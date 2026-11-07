@@ -25,11 +25,11 @@ namespace Colours
     // each part's own accent, for its button and its block in the patchbay
     inline juce::Colour forPart (const juce::String& id)
     {
-        if (id == "hawthorne") return juce::Colour (0xffc9b48a);   // tape-machine cream-brown
+        if (id == "hawthorne") return juce::Colour (0xffe0a82e);   // mustard
         if (id == "emerson")   return juce::Colour (0xffe6d8b0);   // cream
         if (id == "whitman")   return juce::Colour (0xff7fb0d6);   // ink blue
         if (id == "thoreau")   return juce::Colour (0xff9fbf62);   // moss green
-        if (id == "pequod")    return juce::Colour (0xffe0a82e);   // mustard
+        if (id == "pequod")    return juce::Colour (0xffa8443a);   // IRVING: oxblood
         if (id == "interface") return juce::Colour (0xffbdbdbd);
         if (id == "network")   return juce::Colour (0xff8fa6bd);   // steel blue
         return accent;                                             // the links

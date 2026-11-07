@@ -110,6 +110,12 @@ void PatchCanvas::rebuild()
                    { "OUTPUTS", "interface", "Your audio interface's outputs (monitors, headphones, outboard, a hardware desk).",
                      numbered ("Out ", outs), numbers (outs) }); }
 
+    {   // MELVILLE itself: the transport's timecode and click
+        auto& p = panel ("melville", "MELVILLE");
+        column (p, { "LTC OUT", "route", "MELVILLE's timecode (LTC) from the transport, for anything that chases it.", { "Hawthorne LTC" }, { "LTC" } },
+                   { "LTC IN", "hawthorne", "Timecode for MELVILLE's transport to chase (SYNC > chase LTC).", { "LTC in" }, { "LTC" } });
+        column (p, { "CLICK", "hawthorne", "The click (metronome) at the transport's tempo: to the monitors by default.", { "Click" }, { "CLK" } }, none); }
+
     {   // MELVILLE Link: a column of jacks per connected sender
         auto& p = panel ("network", "MELVILLE LINK");
         auto& rx = hub.getNetwork().getReceiver();
@@ -125,8 +131,8 @@ void PatchCanvas::rebuild()
         }
         if (p.sections.empty()) p.note = "No senders connected. Click MELVILLE LINK on the MELVILLE bar to connect one."; }
 
-    {   auto& p = panel ("pequod", "PEQUOD HOST");
-        column (p, { "OUT", "pequod", "The guitar rig's output: what you hear from PEQUOD Host's rack.", { "Out 1", "Out 2" }, lr },
+    {   auto& p = panel ("pequod", "IRVING");
+        column (p, { "OUT", "pequod", "The guitar rig's output: what you hear from IRVING's rack.", { "Out 1", "Out 2" }, lr },
                    { "IN", "pequod", "Into the guitar rig: your guitar (interface input 1 by default).", { "In 1", "In 2" }, lr }); }
 
     {   auto& p = panel ("thoreau", "THOREAU");
@@ -135,15 +141,12 @@ void PatchCanvas::rebuild()
     {   auto& p = panel ("hawthorne", "HAWTHORNE");
         column (p, { "TRACK OUT", "route", "Each tape track playing back (or its input, while the track monitors input). To EMERSON by default.",
                      numbered ("Hawthorne track ", tracks), numbers (tracks) },
-                   { "TRACK IN", "hawthorne", "What each tape track records: cable a mic, the guitar rig, THOREAU or a MELVILLE Link sender here.",
+                   { "TRACK IN", "hawthorne", "What each tape track records: cable a mic, IRVING, THOREAU or a MELVILLE Link sender here.",
                      numbered ("Track ", tracks), numbers (tracks) });
-        column (p, { "MASTER OUT", "route", "Hawthorne's 2-track master playing back.", { "Hawthorne master L", "Hawthorne master R" }, lr },
+        column (p, { "MASTER OUT", "route", "Hawthorne's master: the 2-track playing back, or what's coming into it. Your monitors (interface outputs 1-2) by default.", { "Hawthorne master L", "Hawthorne master R" }, lr },
                    { "MASTER IN", "route", "What the 2-track master records: the mix (EMERSON's MIX OUT by default).",
                      { "To Hawthorne master L", "To Hawthorne master R" }, lr });
-        column (p, { "LTC OUT", "route", "Hawthorne's timecode (LTC), for anything that chases the tape.", { "Hawthorne LTC" }, { "LTC" } },
-                   { "LTC IN", "hawthorne", "Timecode for Hawthorne to chase (SYNC > chase LTC).", { "LTC in" }, { "LTC" } });
-        column (p, { "MONITOR OUT", "hawthorne", "Hawthorne's own outputs (as its ROUTING sends them): to the interface outputs by default.",
-                     numbered ("Out ", outs), numbers (outs) }, none); }
+    }
 
     {   auto& p = panel ("emerson", "EMERSON");
         // (its processed tracks: one set, cabled to WHITMAN, the interface for a hardware desk, or both)

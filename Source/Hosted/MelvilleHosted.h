@@ -12,6 +12,7 @@
 // rate and block, with the patchbay on its inputs and outputs.
 
 #include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_gui_basics/juce_gui_basics.h>
 
 namespace melville
 {
@@ -21,6 +22,10 @@ namespace melville
     /** Open the part's MELVILLE device on this manager. False if there's no hub (then
         set the device up as the app would on its own). Message thread. */
     bool attach (juce::AudioDeviceManager&, const char* partId);
+
+    /** Inside MELVILLE a part has no audio settings (MELVILLE's INTERFACE picks the device):
+        where it had a device selector for its MIDI inputs, it shows this instead. */
+    std::unique_ptr<juce::Component> midiInputsPanel (juce::AudioDeviceManager&);
 
     /** The part's manager is going away (call before it's destroyed). */
     void detach (juce::AudioDeviceManager&);

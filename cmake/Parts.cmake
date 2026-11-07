@@ -162,8 +162,8 @@ melville_part(NAME "THOREAU" DIR "${THOREAU_DIR}" MAKER MakeThoreau.cpp
         Source/KitPanel.cpp Source/SettingsPanel.cpp Source/Updater.cpp
     DEFS "${_thoreau_renames};hawthorne=thoreau_hawthorne")
 
-# PEQUOD Host: the guitar rig, and the PEQUOD engine's C++ side EMERSON uses too
-melville_part(NAME "PEQUOD Host" DIR "${PEQUOD_HOST_DIR}" MAKER MakePequod.cpp
+# IRVING (PEQUOD Host): the guitar rig, and the PEQUOD engine's C++ side EMERSON uses too
+melville_part(NAME "IRVING" DIR "${PEQUOD_HOST_DIR}" MAKER MakePequod.cpp
     SOURCES
         Source/HostEngine.cpp Source/ControlSurface.cpp Source/MainComponent.cpp Source/RackView.cpp
         Source/BrowserPanel.cpp Source/HeaderBar.cpp Source/ControlPanel.cpp Source/ChainMap.cpp
@@ -173,7 +173,7 @@ melville_part(NAME "PEQUOD Host" DIR "${PEQUOD_HOST_DIR}" MAKER MakePequod.cpp
         Source/ScreenLayout.cpp Source/ScreenEditor.cpp Source/HawthorneLink/NetSender.cpp
         Source/Modifiers.cpp Source/ModifierRow.cpp Source/SceneBar.cpp
         Source/PequodNative.cpp Source/PequodPanel.cpp Source/WorkerPool.cpp
-    DEFS "hawthorne=pequod_hawthorne")
+    DEFS "hawthorne=pequod_hawthorne;IRVING_LOOK=1")    # (inside MELVILLE it's IRVING, in oxblood)
 
 # ---------------------------------------------------------------------------
 target_compile_definitions(Melville PRIVATE ${COMMON_DEFS}

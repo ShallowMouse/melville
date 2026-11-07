@@ -84,5 +84,6 @@ if(MELVILLE_BUILD_TESTS)
         juce::juce_audio_devices
         juce::juce_events
         juce::juce_data_structures
+        juce::juce_gui_basics
         juce::juce_recommended_config_flags)
 endif()

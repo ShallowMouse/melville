@@ -1,4 +1,4 @@
-// PEQUOD Host inside MELVILLE (compiled with PEQUOD Host's settings).
+// IRVING (was PEQUOD Host) inside MELVILLE (compiled with PEQUOD Host's settings).
 #include "Parts.h"
 #include "MainComponent.h"
 #include "PequodLookAndFeel.h"
@@ -10,7 +10,7 @@ std::unique_ptr<PartUI> makePequod()
 {
     auto ui = std::make_unique<PartUI>();
     ui->id = "pequod";
-    ui->title = "PEQUOD Host";
+    ui->title = "IRVING";
     ui->background = Pequod::Colours::bg;       // (this part's own PEQUOD colours)
     ui->minWidth = 1300;
     ui->minHeight = 700;

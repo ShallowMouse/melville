@@ -198,7 +198,7 @@ public:
             }
         };
         netTile.onClick = [this] { if (onShowNetwork) onShowNetwork(); };
-        netTile.setTooltip ("MELVILLE LINK: audio from other PCs (THOREAU, PEQUOD Host), onto the patchbay");
+        netTile.setTooltip ("MELVILLE LINK: audio from other PCs (THOREAU, IRVING), onto the patchbay");
         addAndMakeVisible (netTile);
         updateTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
         {
@@ -407,7 +407,7 @@ public:
         auto audio = props.getUserSettings()->getXmlValue ("audio");
         hub->initialiseAudio (audio.get());
         if (auto patch = props.getUserSettings()->getXmlValue ("patch"))
-            if (patch->getIntAttribute ("version") >= 2)      // (older patches were for Hawthorne's old inputs)
+            if (patch->getIntAttribute ("version") >= 3)      // (older patches were for Hawthorne's old jacks)
                 hub->getPatchbay().fromXml (*patch);
 
         // Hawthorne Link, now MELVILLE's (the first time with the senders Hawthorne had)
@@ -503,7 +503,7 @@ public:
         }
         for (auto& p : parts) if (p->shutdown) p->shutdown();   // Hawthorne finishes any take first
 
-        // dialogs a part left open (PEQUOD Host's plug-in manager, say) go before the part does
+        // dialogs a part left open (IRVING's plug-in manager, say) go before the part does
         for (int i = juce::TopLevelWindow::getNumTopLevelWindows(); --i >= 0;)
             if (auto* dw = dynamic_cast<juce::DialogWindow*> (juce::TopLevelWindow::getTopLevelWindow (i)))
             {
