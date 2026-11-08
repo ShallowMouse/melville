@@ -16,11 +16,11 @@ namespace melville
 class TwainNode : public Node
 {
 public:
-    static constexpr int numCues = 16, numFeeds = 4, numSpeakers = 3;
-    enum Source { mix = 0, twoTrack, external, feed1, feed2, feed3, feed4, numSources };
+    static constexpr int numCues = 16, numFeeds = 8, numSpeakers = 3;
+    enum Source { mix = 0, twoTrack, ext1, ext2, feed1, numSources = feed1 + numFeeds };
 
     // inputs, in order
-    enum In { mixL = 0, mixR, twoTrackL, twoTrackR, extL, extR, clickIn, talkIn, cueIn0 };
+    enum In { mixL = 0, mixR, twoTrackL, twoTrackR, ext1L, ext1R, ext2L, ext2R, clickIn, talkIn, cueIn0 };
     static constexpr int numIns = cueIn0 + numCues;
 
     // settings (any thread)
@@ -46,7 +46,7 @@ public:
     {
         port.id = "twain";
         port.title = "TWAIN";
-        port.dests = { "Mix L", "Mix R", "2-track L", "2-track R", "Ext L", "Ext R", "Click", "Talkback" };
+        port.dests = { "Mix L", "Mix R", "2-track L", "2-track R", "Ext 1 L", "Ext 1 R", "Ext 2 L", "Ext 2 R", "Click", "Talkback" };
         for (int c = 1; c <= numCues; ++c) port.dests.add ("Cue " + juce::String (c));
         for (auto s : { "A", "B", "C" }) { port.sources.add ("Speakers " + juce::String (s) + " L"); port.sources.add ("Speakers " + juce::String (s) + " R"); }
         for (int f = 1; f <= numFeeds; ++f) { port.sources.add ("Phones " + juce::String (f) + " L"); port.sources.add ("Phones " + juce::String (f) + " R"); }
@@ -113,7 +113,8 @@ public:
         {
             case mix:      srcL = in[mixL];      srcR = in[mixR];      break;
             case twoTrack: srcL = in[twoTrackL]; srcR = in[twoTrackR]; break;
-            case external: srcL = in[extL];      srcR = in[extR];      break;
+            case ext1:     srcL = in[ext1L];     srcR = in[ext1R];     break;
+            case ext2:     srcL = in[ext2L];     srcR = in[ext2R];     break;
             default:
             {
                 const int f = juce::jlimit (0, numFeeds - 1, source.load (std::memory_order_relaxed) - feed1);

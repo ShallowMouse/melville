@@ -108,6 +108,8 @@ namespace melville
         std::function<juce::Component*()> view;                  // its tape library, for MELVILLE's LIBRARY window
         std::function<void()> showSheet, refresh;               // the session sheet (documentation); rescan
         std::function<juce::File()> currentReel;                // the .reel on the deck (or none)
+        /** MELVILLE's look for the library: accent, the text on it, background, panel, text, dim text, its mark. */
+        std::function<void (juce::Colour, juce::Colour, juce::Colour, juce::Colour, juce::Colour, juce::Colour, juce::Image)> style;
         // MELVILLE's
         std::function<void (const juce::File& reel)> reelLeaving, reelArrived;   // save / restore the studio with the reel
         std::function<void()> show, showDeck;                   // the LIBRARY window; Hawthorne's deck

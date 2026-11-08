@@ -65,6 +65,23 @@ inline void twainFromXml (TwainNode& t, const juce::XmlElement& x)
 }
 
 //==============================================================================
+/** What's cabled into each of TWAIN's cue inputs: "3  Hawthorne track 3" or "3  - nothing cabled". */
+inline juce::StringArray twainCueNames (Hub& hub)
+{
+    auto& pb = hub.getPatchbay();
+    juce::StringArray names;
+    const auto cords = pb.getAllCords();
+    for (int c = 0; c < TwainNode::numCues; ++c)
+    {
+        const int dest = pb.findDest ("twain", "Cue " + juce::String (c + 1));
+        juce::StringArray from;
+        for (auto& [d, cord] : cords) if (d == dest) from.add (pb.sourceName (cord.source));
+        names.add (juce::String (c + 1) + "  " + (from.isEmpty() ? juce::String ("- nothing cabled") : from.joinIntoString (" + ")));
+    }
+    return names;
+}
+
+//==============================================================================
 /** TWAIN's hardware: a monitor controller's faceplate. Machined aluminium knob for the
     control room, small black knobs for the cue mixes, illuminated push buttons, LED ladders. */
 class TwainLookAndFeel : public MelvilleLookAndFeel
@@ -200,16 +217,19 @@ public:
         const auto accent = Colours::forPart ("twain");
 
         // --- monitor source
-        const char* sourceNames[] = { "MIX", "2-TRACK", "EXT", "PH 1", "PH 2", "PH 3", "PH 4" };
         for (int s = 0; s < TwainNode::numSources; ++s)
         {
-            auto* b = sources.add (new juce::TextButton (sourceNames[s]));
+            const juce::String name = s == TwainNode::mix ? "MIX" : s == TwainNode::twoTrack ? "2-TRACK" : s == TwainNode::ext1 ? "EXT 1"
+                                    : s == TwainNode::ext2 ? "EXT 2" : "PH " + juce::String (s - TwainNode::feed1 + 1);
+            auto* b = sources.add (new juce::TextButton (name));
             b->setClickingTogglesState (true);
             b->setRadioGroupId (1);
             b->setColour (juce::TextButton::buttonOnColourId, accent.darker (0.3f));
             b->onClick = [this, s] { twain.source = s; };
-            b->setTooltip (s == 0 ? "Listen to the mix (TWAIN's MIX IN)" : s == 1 ? "Listen to the 2-track: Hawthorne's master (TWAIN's 2-TRACK IN)"
-                         : s == 2 ? "Listen to TWAIN's EXT IN" : "Listen to what headphone feed " + juce::String (s - 2) + " is hearing");
+            b->setTooltip (s == TwainNode::mix ? "Listen to the desk: the mix, live (TWAIN's MIX IN)"
+                         : s == TwainNode::twoTrack ? "Listen to the tape: Hawthorne's master tape (TWAIN's 2-TRACK IN)"
+                         : s == TwainNode::ext1 ? "Listen to TWAIN's EXT 1 IN" : s == TwainNode::ext2 ? "Listen to TWAIN's EXT 2 IN"
+                         : "Listen to what headphone feed " + juce::String (s - TwainNode::feed1 + 1) + " is hearing");
             addAndMakeVisible (b);
         }
         // --- speakers
@@ -286,7 +306,7 @@ public:
         }
 
         refresh();
-        setSize (1080, 700);
+        setSize (1500, 740);
         startTimerHz (20);
     }
 
@@ -374,6 +394,15 @@ public:
             g.setColour (r < TwainNode::numCues && rowNames[r].contains ("nothing") ? silk.withAlpha (0.35f) : silk.withAlpha (0.9f));
             g.drawFittedText (rowNames[r], rowAreas[(size_t) r].withWidth (rowLabelW - 6).reduced (6, 0), juce::Justification::centredLeft, 1);
         }
+        // where the players set their own mixes
+        if (phonesUrl)
+        {
+            const auto url = phonesUrl();
+            g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
+            g.setColour (silk.withAlpha (0.75f));
+            g.drawText (url.isNotEmpty() ? "ON A PHONE:  " + url : juce::String ("(the phones page isn't running)"),
+                        feedsArea.reduced (24, 12).removeFromTop (20), juce::Justification::centredRight);
+        }
         g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
         for (int f = 0; f < TwainNode::numFeeds; ++f)
         {
@@ -393,15 +422,15 @@ public:
         {
             auto a = roomArea.reduced (24, 12).withTrimmedTop (34);
             sourceCaption = a.removeFromTop (16);
-            auto row = a.removeFromTop (30);
-            const int w = row.getWidth() / 3;
-            for (int s = 0; s < 3; ++s) sources[s]->setBounds (row.removeFromLeft (w).reduced (2, 0));
-            a.removeFromTop (4);
-            row = a.removeFromTop (30);
-            const int w4 = row.getWidth() / 4;
-            for (int s = 3; s < TwainNode::numSources; ++s) sources[s]->setBounds (row.removeFromLeft (w4).reduced (2, 0));
+            // MIX 2-TRACK EXT 1 EXT 2, then the headphone feeds four to a row
+            juce::Rectangle<int> row;
+            for (int s = 0; s < TwainNode::numSources; ++s)
+            {
+                if (s % 4 == 0) { if (s > 0) a.removeFromTop (s == TwainNode::feed1 ? 8 : 4); row = a.removeFromTop (s < TwainNode::feed1 ? 30 : 26); }
+                sources[s]->setBounds (row.removeFromLeft (row.getWidth() / (4 - s % 4)).reduced (2, 0));
+            }
             a.removeFromTop (14);
-            auto lv = a.removeFromTop (210);
+            auto lv = a.removeFromTop (190);
             monitorMeter = lv.removeFromRight (14).reduced (0, 16);
             lv.removeFromRight (6);
             level.setBounds (lv.withSizeKeepingCentre (150, 150).translated (0, -10));
@@ -433,7 +462,7 @@ public:
             for (int f = 0; f < TwainNode::numFeeds; ++f)
             {
                 colHeads.push_back (heads.removeFromLeft (colW));
-                auto lv = levels.removeFromLeft (colW).reduced (juce::jmax (4, colW / 2 - 36), 6);
+                auto lv = levels.removeFromLeft (colW).reduced (juce::jmax (4, colW / 2 - 34), 6);
                 feedMeters.push_back (lv.removeFromRight (10));
                 feedLevels[f]->setBounds (lv.withTrimmedRight (6));
             }
@@ -455,6 +484,8 @@ public:
             }
         }
     }
+
+    std::function<juce::String()> phonesUrl;      // the players' web page (shown on the panel)
 
     void refresh()
     {
@@ -513,15 +544,7 @@ private:
     // a cue row is named after what's cabled into it
     void updateRowNames()
     {
-        auto& pb = hub.getPatchbay();
-        rowNames.clearQuick();
-        for (int c = 0; c < TwainNode::numCues; ++c)
-        {
-            const int dest = pb.findDest ("twain", "Cue " + juce::String (c + 1));
-            juce::StringArray from;
-            for (auto& [d, cord] : pb.getAllCords()) if (d == dest) from.add (pb.sourceName (cord.source));
-            rowNames.add (juce::String (c + 1) + "  " + (from.isEmpty() ? juce::String ("- nothing cabled") : from.joinIntoString (" + ")));
-        }
+        rowNames = twainCueNames (hub);
         rowNames.add ("MIX");
         rowNames.add ("CLICK");
         for (int f = 0; f < TwainNode::numFeeds; ++f)

@@ -15,6 +15,7 @@
 #include "UI/WindowFrame.h"
 #include "UI/ClockWindow.h"
 #include "UI/TwainWindow.h"
+#include "UI/PhonesServer.h"
 #include "Core/NetworkNode.h"
 #include "Updater.h"
 #include "Hosted/MelvilleHosted.h"
@@ -939,6 +940,11 @@ public:
         };
         loadClockSettings();
         if (auto tw = props.getUserSettings()->getXmlValue ("twain")) melville::twainFromXml (hub->getTwain(), *tw);
+        // the players set their own headphone mixes on their phones
+        phones = std::make_unique<melville::PhonesServer> (hub->getTwain());
+        phones->start();
+        phonesNames.f = [this] { if (phones != nullptr && hub != nullptr) phones->setCueNames (melville::twainCueNames (*hub)); };
+        phonesNames.startTimer (1000);
         mtcOut = std::make_unique<melville::MtcOut> (hub->getClock());
         {
             // MELVILLE's tempo (a reel with its own takes over while it's loaded)
@@ -1109,7 +1115,13 @@ public:
         networkWindow = nullptr;
         clockWindow = nullptr;
         twainWindow = nullptr;
-        if (libraryWindow != nullptr) { libraryWindow->clearContentComponent(); libraryWindow = nullptr; }   // (the view is Hawthorne's)
+        phonesNames.stopTimer();
+        phones = nullptr;
+        if (libraryWindow != nullptr)
+        {
+            if (auto& v = melville::library().view) if (auto* c = v()) c->setLookAndFeel (nullptr);
+            libraryWindow->clearContentComponent(); libraryWindow = nullptr;   // (the view is Hawthorne's)
+        }
         {
             auto& l = melville::library();
             l.show = l.showDeck = nullptr;
@@ -1367,6 +1379,11 @@ public:
         {
             libraryWindow = std::make_unique<melville::ToolWindow> ("MELVILLE \xc2\xb7 LIBRARY");
             auto* view = l.view();
+            // MELVILLE's look, not Hawthorne's
+            view->setLookAndFeel (&lookAndFeel);
+            if (l.style)
+                l.style (melville::Colours::accent, juce::Colour (0xff10201e), melville::Colours::bg, melville::Colours::panel,
+                         melville::Colours::text, melville::Colours::textDim, melville::loadIcon ("melville", 128));
             view->setSize (1300, 820);
             view->setVisible (true);
             melville::frameWindow (*libraryWindow, view, false, "Library", melville::Colours::accent, melville::loadIcon ("melville", 64));
@@ -1442,6 +1459,7 @@ public:
         const auto id = commandLine.fromFirstOccurrenceOf ("--show=", false, true).upToFirstOccurrenceOf (" ", false, false).unquoted().trim();
         for (size_t i = 0; id.isNotEmpty() && i < parts.size(); ++i)
             if (parts[i]->id.equalsIgnoreCase (id)) { windows[i]->show(); return true; }
+        if (id.equalsIgnoreCase ("twain")) { showTwain(); return true; }
         return false;
     }
 
@@ -1454,18 +1472,31 @@ private:
     std::vector<std::unique_ptr<melville::PartWindow>> windows;
     std::unique_ptr<melville::BarWindow> bar;
     std::unique_ptr<juce::DocumentWindow> networkWindow, clockWindow, libraryWindow, twainWindow;
+    std::unique_ptr<melville::PhonesServer> phones;
+    struct Every : juce::Timer { std::function<void()> f; void timerCallback() override { f(); } } phonesNames;
+
+    /** TWAIN is an app of its own: its own window and taskbar button; closing it puts it down there. */
+    struct TwainWindow : juce::DocumentWindow
+    {
+        TwainWindow() : DocumentWindow ("TWAIN", melville::Colours::bg, DocumentWindow::allButtons) {}
+        void closeButtonPressed() override { setMinimised (true); }
+    };
 
     void showTwain()
     {
         if (twainWindow == nullptr)
         {
-            twainWindow = std::make_unique<melville::ToolWindow> ("MELVILLE \xc2\xb7 TWAIN");
-            melville::frameWindow (*twainWindow, new melville::TwainPanel (*hub), true, "TWAIN", melville::Colours::forPart ("twain"),
+            twainWindow = std::make_unique<TwainWindow>();
+            auto* tp = new melville::TwainPanel (*hub);
+            tp->phonesUrl = [this] { return phones != nullptr ? phones->getUrl() : juce::String(); };
+            melville::frameWindow (*twainWindow, tp, true, "TWAIN", melville::Colours::forPart ("twain"),
                                    melville::loadIcon ("twain", 64));
             twainWindow->setResizable (true, false);
             twainWindow->setResizeLimits (900, 560, 3000, 2000);
             twainWindow->centreWithSize (twainWindow->getWidth(), twainWindow->getHeight());
+            melville::taskbar::setWindowIdentity (*twainWindow, "twain", "TWAIN", melville::loadIcon ("twain", 256));
         }
+        if (twainWindow->isMinimised()) twainWindow->setMinimised (false);
         twainWindow->setVisible (true);
         twainWindow->toFront (true);
     }

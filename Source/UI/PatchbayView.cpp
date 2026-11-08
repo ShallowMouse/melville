@@ -113,6 +113,31 @@ void PatchCanvas::rebuild()
 
     const juce::StringArray lr { "L", "R" };
 
+    {   // the control room
+        auto& p = panel ("twain", "TWAIN");
+        const juce::StringArray abc { "A", "B", "C" };
+        juce::StringArray spk, spkShort;
+        for (auto s : abc) { spk.add ("Speakers " + s + " L"); spk.add ("Speakers " + s + " R"); spkShort.add (s + " L"); spkShort.add (s + " R"); }
+        column (p, { "SPEAKERS", "twain", "The control room's monitor out, on the speaker set chosen in TWAIN (A, B or C): to the interface outputs your speakers are on.",
+                     spk, spkShort },
+                   { "MIX IN", "twain", "The mix (WHITMAN's, after EMERSON's MIX chain by default): a monitor source and in the headphone feeds.",
+                     { "Mix L", "Mix R" }, lr });
+        column (p, none, { "2-TRACK IN", "twain", "Hawthorne's MASTER OUT: the master tape playing back (while you print, the mix going onto it). A monitor source: 2-TRACK in TWAIN.", { "2-track L", "2-track R" }, lr });
+        column (p, none, { "EXT 1 IN", "twain", "Anything else to listen to (a phone, a reference): a monitor source.", { "Ext 1 L", "Ext 1 R" }, lr });
+        column (p, none, { "EXT 2 IN", "twain", "Anything else to listen to (a phone, a reference): a monitor source.", { "Ext 2 L", "Ext 2 R" }, lr });
+        juce::StringArray ph, phShort;
+        for (int f = 1; f <= TwainNode::numFeeds; ++f)
+        {
+            ph.add ("Phones " + juce::String (f) + " L"); ph.add ("Phones " + juce::String (f) + " R");
+            phShort.add (juce::String (f) + "L"); phShort.add (juce::String (f) + "R");
+        }
+        column (p, { "PHONES", "twain", "The players' headphone feeds, each its own mix (TWAIN): to the interface outputs the headphone amps are on.", ph, phShort },
+                   { "CLICK / TALK", "twain", "The click (into the headphone feeds) and the talkback mic (into them while TALK is held).",
+                     { "Click", "Talkback" }, { "CLK", "TB" } });
+        column (p, none, { "CUE IN", "twain", "What the players can have in their headphones: cable tracks, stems, THOREAU or IRVING here and set their levels per feed in TWAIN.",
+                           numbered ("Cue ", TwainNode::numCues), numbers (TwainNode::numCues) });
+    }
+
     {   auto& p = panel ("interface", "INTERFACE");
         column (p, { "INPUTS", "interface", "What comes into your audio interface (mics, instruments, line inputs). Cable it to whatever should hear it.",
                      numbered ("In ", ins), numbers (ins) },
@@ -201,30 +226,6 @@ void PatchCanvas::rebuild()
                    { "RETURN A", "whitman", "FX return A coming back onto the desk.", { "EMERSON return A L", "EMERSON return A R" }, lr });
         column (p, { "SEND B", "whitman", "The desk's FX send B (to EMERSON's return B by default).", { "To EMERSON send B L", "To EMERSON send B R" }, lr },
                    { "RETURN B", "whitman", "FX return B coming back onto the desk.", { "EMERSON return B L", "EMERSON return B R" }, lr }); }
-
-    {   // the control room
-        auto& p = panel ("twain", "TWAIN");
-        const juce::StringArray abc { "A", "B", "C" };
-        juce::StringArray spk, spkShort;
-        for (auto s : abc) { spk.add ("Speakers " + s + " L"); spk.add ("Speakers " + s + " R"); spkShort.add (s + " L"); spkShort.add (s + " R"); }
-        column (p, { "SPEAKERS", "twain", "The control room's monitor out, on the speaker set chosen in TWAIN (A, B or C): to the interface outputs your speakers are on.",
-                     spk, spkShort },
-                   { "MIX IN", "twain", "The mix (WHITMAN's, after EMERSON's MIX chain by default): a monitor source and in the headphone feeds.",
-                     { "Mix L", "Mix R" }, lr });
-        column (p, none, { "2-TRACK IN", "twain", "Hawthorne's master (what's going to and coming off the 2-track): a monitor source.", { "2-track L", "2-track R" }, lr });
-        column (p, none, { "EXT IN", "twain", "Anything else to listen to (a phone, a reference): a monitor source.", { "Ext L", "Ext R" }, lr });
-        juce::StringArray ph, phShort;
-        for (int f = 1; f <= TwainNode::numFeeds; ++f)
-        {
-            ph.add ("Phones " + juce::String (f) + " L"); ph.add ("Phones " + juce::String (f) + " R");
-            phShort.add (juce::String (f) + "L"); phShort.add (juce::String (f) + "R");
-        }
-        column (p, { "PHONES", "twain", "The players' headphone feeds, each its own mix (TWAIN): to the interface outputs the headphone amps are on.", ph, phShort },
-                   { "CLICK / TALK", "twain", "The click (into the headphone feeds) and the talkback mic (into them while TALK is held).",
-                     { "Click", "Talkback" }, { "CLK", "TB" } });
-        column (p, none, { "CUE IN", "twain", "What the players can have in their headphones: cable tracks, stems, THOREAU or IRVING here and set their levels per feed in TWAIN.",
-                           numbered ("Cue ", TwainNode::numCues), numbers (TwainNode::numCues) });
-    }
 
     layOut();
     repaint();
