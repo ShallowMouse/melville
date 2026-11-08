@@ -6,6 +6,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "MelvilleLookAndFeel.h"
+#include "../../Shared/PartHeader.h"
 #include "../Core/Hub.h"
 
 namespace melville
@@ -306,7 +307,7 @@ public:
         }
 
         refresh();
-        setSize (1500, 740);
+        setSize (1500, 740 + partui::headerHeight);
         startTimerHz (20);
     }
 
@@ -316,6 +317,25 @@ public:
     {
         const auto orange = TwainLookAndFeel::orange(), silk = TwainLookAndFeel::silk();
         g.fillAll (juce::Colour (0xff121314));
+
+        // the header every part has: bar, wordmark, two status lines
+        {
+            static auto courierBold = juce::Typeface::createSystemTypefaceFor (BinaryData::CourierPrimeBold_ttf, BinaryData::CourierPrimeBold_ttfSize);
+            static auto roboto = juce::Typeface::createSystemTypefaceFor (BinaryData::RobotoRegular_ttf, BinaryData::RobotoRegular_ttfSize);
+            const auto accent = Colours::forPart ("twain");
+            partui::drawBar (g, headerArea, accent);
+            partui::drawWordmark (g, headerArea.reduced (18, 0).removeFromLeft (190), "TWAIN", "CONTROL ROOM",
+                                  accent, juce::Font (juce::FontOptions (courierBold).withHeight (30.0f)));
+            auto st = headerArea.withTrimmedBottom (2).withTrimmedLeft (14 + 200).withTrimmedRight (24);
+            st = st.withSizeKeepingCentre (st.getWidth(), 40);
+            g.setFont (juce::Font (juce::FontOptions (courierBold).withHeight (13.0f)));
+            g.setColour (accent);
+            g.drawText (statusLine(), st.withHeight (st.getHeight() / 2).translated (0, 4), juce::Justification::centredLeft, true);
+            g.setFont (juce::Font (juce::FontOptions (roboto).withHeight (12.0f)));
+            g.setColour (juce::Colour (partui::dimColour()));
+            g.drawText ("The monitor, speakers, eight headphone feeds and talkback. Its jacks are on MELVILLE's PATCHBAY",
+                        st.withTrimmedTop (st.getHeight() / 2).translated (0, -2), juce::Justification::centredLeft, true);
+        }
         for (auto& [area, title] : { std::pair (roomArea, "CONTROL ROOM"), std::pair (feedsArea, "CUE  /  HEADPHONES") })
         {
             // a brushed steel faceplate, with its screws
@@ -412,9 +432,27 @@ public:
         }
     }
 
+    juce::String statusLine() const
+    {
+        const auto dot = juce::String ("  ") + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7")) + "  ";
+        const int src = twain.source.load();
+        const juce::String source = src == TwainNode::mix ? "MIX" : src == TwainNode::twoTrack ? "2-TRACK" : src == TwainNode::ext1 ? "EXT 1"
+                                  : src == TwainNode::ext2 ? "EXT 2" : "PHONES " + juce::String (src - TwainNode::feed1 + 1);
+        const float lv = twain.monitorLevel.load();
+        juce::String s = "LISTENING TO " + source + dot + "SPEAKERS " + juce::String::charToString ((juce::juce_wchar) ('A' + twain.speakers.load()))
+                       + dot + (lv <= 0.0f ? juce::String ("OFF") : juce::String (juce::Decibels::gainToDecibels (lv), 1) + " dB");
+        if (twain.mute.load()) s << dot << "MUTE";
+        else if (twain.dim.load()) s << dot << "DIM";
+        if (twain.mono.load()) s << dot << "MONO";
+        if (twain.talk.load()) s << dot << "TALKBACK";
+        return s;
+    }
+
     void resized() override
     {
-        auto r = getLocalBounds().reduced (12);
+        auto r = getLocalBounds();
+        headerArea = r.removeFromTop (partui::headerHeight);
+        r = r.reduced (12);
         roomArea = r.removeFromLeft (300);
         r.removeFromLeft (10);
         feedsArea = r;
@@ -554,6 +592,8 @@ private:
                                                                 + ". Right-click: pan");
     }
 
+    juce::Rectangle<int> headerArea;
+
     void timerCallback() override
     {
         // the meters fall back like a PPM
@@ -562,7 +602,7 @@ private:
         for (int f = 0; f < TwainNode::numFeeds; ++f) fall (shownFeed[(size_t) f], twain.feedPeak[(size_t) f]);
         repaint (monitorMeter.expanded (2));
         for (auto& m : feedMeters) repaint (m.expanded (2));
-        if (++ticks % 4 == 0) refresh();          // (levels set on a phone, or in a session, show here)
+        if (++ticks % 4 == 0) { refresh(); repaint (headerArea); }   // (levels set on a phone, or in a session, show here)
         if (ticks % 20 == 0) repaint (feedsArea);
     }
 
