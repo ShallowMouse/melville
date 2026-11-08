@@ -2,6 +2,7 @@
 #include "MelvilleLookAndFeel.h"
 #include "../Core/NetworkNode.h"
 #include "../Core/Bridges.h"
+#include "MelvilleHosted.h"
 #include <map>
 
 namespace melville
@@ -89,6 +90,13 @@ void PatchCanvas::rebuild()
             Jack j;
             j.flat = flat;
             j.label = side.labels[i];
+            {
+                // a tape track ("Track 7", "Hawthorne track 7", "To WHITMAN track 7" ...): its name and colour from the reel
+                const auto nm = side.channels[i];
+                if (nm.containsIgnoreCase ("track ") && nm.getTrailingIntValue() > 0
+                    && nm.fromLastOccurrenceOf (" ", false, false).containsOnly ("0123456789"))
+                    j.track = nm.getTrailingIntValue() - 1;
+            }
             s.jacks.push_back (j);
         }
         return s;
@@ -220,6 +228,7 @@ juce::String PatchCanvas::networkKey() const
 
 void PatchCanvas::timerCallback()
 {
+    if (const int rev = melville::tracks().rev.load(); rev != tracksRev) { tracksRev = rev; repaint(); }   // (track colours)
     int ins = 8, outs = 8;
     if (auto* dev = hub.deviceManager.getCurrentAudioDevice())
     {
@@ -429,8 +438,15 @@ void PatchCanvas::drawPanel (juce::Graphics& g, const Panel& p) const
 
             g.setColour (inkDim);
             g.setFont (font (9.5f));
-            g.drawText (j.label, juce::Rectangle<float> (jackPitch + 6.0f, labelH).withCentre ({ j.centre.x, j.centre.y + jackPitch * 0.5f + labelH * 0.5f }),
-                        juce::Justification::centred, false);
+            const auto labelArea = juce::Rectangle<float> (jackPitch + 6.0f, labelH).withCentre ({ j.centre.x, j.centre.y + jackPitch * 0.5f + labelH * 0.5f });
+            g.drawText (j.label, labelArea, juce::Justification::centred, false);
+            if (j.track >= 0)
+                if (auto& tc = melville::tracks().colour; tc != nullptr)
+                    if (const auto c = tc (j.track); ! c.isTransparent())
+                    {
+                        g.setColour (c);                // the track's colour under its number
+                        g.fillRoundedRectangle (labelArea.withSizeKeepingCentre (jackPitch * 0.6f, 3.0f).translated (0.0f, labelH * 0.5f + 1.0f), 1.5f);
+                    }
         }
     }
 }
@@ -526,7 +542,11 @@ void PatchCanvas::mouseMove (const juce::MouseEvent& e)
             {
                 const auto& j = s.jacks[(size_t) h.jack];
                 const auto& p = panels[(size_t) h.panel];
-                tip << p.title << "  " << s.title << " " << j.label << (s.output ? "  (output)" : "  (input)") << "\n" << s.description;
+                tip << p.title << "  " << s.title << " " << j.label << (s.output ? "  (output)" : "  (input)");
+                if (j.track >= 0)
+                    if (auto& tn = melville::tracks().name; tn != nullptr)
+                        if (const auto n = tn (j.track); n.isNotEmpty()) tip << "  \"" << n << "\"";
+                tip << "\n" << s.description;
                 juce::StringArray to;
                 for (auto& [d, c] : pb.getAllCords())
                 {

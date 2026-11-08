@@ -114,6 +114,20 @@ namespace melville
     };
     Library& library() noexcept;
 
+    /** The tracks' names and colours: Hawthorne's reel keeps them, every part shows them, and
+        renaming or colouring a track anywhere in MELVILLE changes it there. Message thread. */
+    struct Tracks
+    {
+        std::function<int()> count;                                   // the reel's tracks (0: no reel)
+        std::function<juce::String (int)> name;
+        std::function<juce::Colour (int)> colour;                     // transparent: none
+        std::function<void (int, const juce::String&)> rename;
+        std::function<void (int, juce::Colour)> recolour;
+        std::function<juce::Array<juce::Colour>()> palette;
+        std::atomic<int> rev { 0 };                                   // changes when any of it does
+    };
+    Tracks& tracks() noexcept;
+
     /** The folder of the reel on the deck (none: no reel): where parts keep files that belong to the song. */
     juce::File studioFolder();
 

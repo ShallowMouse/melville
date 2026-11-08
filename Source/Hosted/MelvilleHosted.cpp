@@ -128,6 +128,12 @@ std::unique_ptr<juce::Component> midiInputsPanel (juce::AudioDeviceManager& dm)
     return std::make_unique<MidiInputsPanel> (dm);
 }
 
+Tracks& tracks() noexcept
+{
+    static Tracks t;
+    return t;
+}
+
 Library& library() noexcept
 {
     static Library l;

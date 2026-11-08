@@ -44,6 +44,7 @@ private:
     {
         int flat = -1;                      // source or destination number in the patchbay
         juce::String label;                 // "7", "L", "LTC"
+        int track = -1;                     // a tape track's jack: which (its name and colour come from the reel)
         juce::Point<float> centre;
     };
 
@@ -85,7 +86,7 @@ private:
     std::vector<Panel> panels;
     bool showEveryCable = false;
     int contentHeight = 600;
-    int lastTracks = -1, lastIns = -1, lastOuts = -1;
+    int lastTracks = -1, lastIns = -1, lastOuts = -1, tracksRev = -1;
     juce::String lastNetwork;
     juce::String networkKey() const;
 
