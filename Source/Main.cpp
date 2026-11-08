@@ -656,12 +656,8 @@ public:
         g.fillAll (Colours::panel);
         auto r = getLocalBounds().reduced (14, 0);
         g.setColour (Colours::accent);
-        {
-            // the wordmark every part has (MELVILLE's bar is its own header: no sub-title)
-            static auto courierBold = juce::Typeface::createSystemTypefaceFor (BinaryData::CourierPrimeBold_ttf, BinaryData::CourierPrimeBold_ttfSize);
-            g.setFont (juce::Font (juce::FontOptions (courierBold).withHeight (30.0f)));
-            g.drawText ("MELVILLE", r.removeFromLeft (wordmarkWidth - 14), juce::Justification::centredLeft);
-        }
+        g.setFont (juce::Font (juce::FontOptions (24.0f, juce::Font::bold)));     // (MELVILLE's own: plain bold sans, unlike the parts)
+        g.drawText ("MELVILLE", r.removeFromLeft (wordmarkWidth - 14), juce::Justification::centredLeft);
 
         // a divider between the parts and the studio controls
         g.setColour (Colours::line);
