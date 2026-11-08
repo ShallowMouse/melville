@@ -41,7 +41,7 @@ public:
 private:
     std::atomic<bool> available { false }, downloading { false };
     std::atomic<float> progress { 0.0f };
-    juce::String latestVersion, notes, installerUrl, installerName, error;
+    juce::String latestVersion, notes, installerUrl, installerName, error, openInBrowser;
     juce::CriticalSection lock;
     enum class Job { none, check, download } job = Job::none;
     juce::File downloaded;

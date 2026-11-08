@@ -804,21 +804,14 @@ public:
             }
             else
             {
-                t->isLit = [this, id] { return hub.isPartConnected (id); };
+                t->isLit = [this, id] { return id == "twain" || hub.isPartConnected (id); };    // (TWAIN is MELVILLE's own: always on)
+                if (id == "twain") t->setTooltip ("TWAIN: the control room. What you listen to, on which speakers, and the players' headphone mixes");
                 t->onClick = [this, id]
                 {
                     for (size_t k = 0; k < parts.size(); ++k)
                         if (parts[k]->id == id) windows[k]->show();
                 };
             }
-            addAndMakeVisible (t);
-        }
-        {
-            // TWAIN, the control room: MELVILLE's own part
-            auto* t = tiles.add (new Tile ("TWAIN", loadIcon ("twain"), Colours::forPart ("twain")));
-            t->isLit = [] { return true; };
-            t->onClick = [this] { if (onShowTwain) onShowTwain(); };
-            t->setTooltip ("TWAIN: the control room. What you listen to, on which speakers, and the players' headphone mixes");
             addAndMakeVisible (t);
         }
         setSize (wordmarkWidth + (tiles.size() + 6) * (tileWidth + gap) + 26 + TransportStrip::preferredWidth + 28 + 200, barHeight);
@@ -996,6 +989,19 @@ public:
         }
 
         // every part, running from the start (windows open from the bar)
+        {
+            // TWAIN, the control room: MELVILLE's own part, first on the bar and the taskbar
+            auto tw = std::make_unique<PartUI>();
+            tw->id = "twain";
+            tw->title = "TWAIN";
+            tw->background = juce::Colour (0xff121314);
+            tw->minWidth = 900;
+            tw->minHeight = 560;
+            auto tp = std::make_unique<melville::TwainPanel> (*hub);
+            tp->phonesUrl = [this] { return phones != nullptr ? phones->getUrl() : juce::String(); };
+            tw->content = std::move (tp);
+            parts.push_back (std::move (tw));
+        }
         parts.push_back (parts::makeHawthorne());
         parts.push_back (parts::makeEmerson());
         parts.push_back (parts::makeWhitman());
@@ -1034,12 +1040,13 @@ public:
         barContent->onAddIrving = [this] { if (auto n = nextFreeIrving()) { addIrving (n, true); refreshBar(); } };
         barContent->onRemoveIrving = [this] (const juce::String& id) { removeIrving (id); };
         bar = std::make_unique<BarWindow> (barContent);
-        for (size_t i = 1; i < windows.size(); ++i)
+        for (size_t i = 0; i < windows.size(); ++i)
         {
+            if (parts[i]->id == "hawthorne") continue;
             windows[i]->show();
             windows[i]->setMinimised (true);
         }
-        windows.front()->show();   // Hawthorne, as you'd start the day
+        showPart ("hawthorne");    // Hawthorne, as you'd start the day
         applyClockSettings();      // (MTC out, and Hawthorne's chase)
         {
             // no reel on the deck yet: the library is the first thing you see (as it was in Hawthorne)
@@ -1079,8 +1086,6 @@ public:
                     save (clockWindow.get(), "clock-window.png");
                     showLibrary();
                     save (libraryWindow.get(), "library-window.png");
-                    showTwain();
-                    save (twainWindow.get(), "twain-window.png");
                     for (size_t i = 0; i < windows.size(); ++i)
                     {
                         windows[i]->show();
@@ -1091,7 +1096,7 @@ public:
                 int up = 0;
                 for (auto& p : parts)
                 {
-                    const bool on = hub->isPartConnected (p->id);
+                    const bool on = p->id == "twain" || hub->isPartConnected (p->id);
                     up += on ? 1 : 0;
                     std::printf ("MELVILLE smoke: %-10s %s\n", p->id.toRawUTF8(), on ? "running" : "NOT RUNNING");
                 }
@@ -1139,7 +1144,6 @@ public:
 
         networkWindow = nullptr;
         clockWindow = nullptr;
-        twainWindow = nullptr;
         phonesNames.stopTimer();
         phones = nullptr;
         if (libraryWindow != nullptr)
@@ -1322,9 +1326,8 @@ public:
         if (auto* tw = root.getChildByName ("TWAIN"))
         {
             melville::twainFromXml (hub->getTwain(), *tw);
-            if (twainWindow != nullptr)
-                if (auto* f = dynamic_cast<melville::FramedContent*> (twainWindow->getContentComponent()))
-                    if (auto* tp = dynamic_cast<melville::TwainPanel*> (f->getContent())) tp->refresh();
+            for (auto& p : parts)
+                if (auto* tp = dynamic_cast<melville::TwainPanel*> (p->content.get())) tp->refresh();
         }
 
         const auto& sessions = melville::sessionParts();
@@ -1424,7 +1427,7 @@ public:
     void showDeck()
     {
         if (libraryWindow != nullptr) libraryWindow->setVisible (false);
-        if (! windows.empty()) windows.front()->show();
+        showPart ("hawthorne");
     }
 
     void showLibraryMenu (juce::Component& target)
@@ -1484,7 +1487,6 @@ public:
         const auto id = commandLine.fromFirstOccurrenceOf ("--show=", false, true).upToFirstOccurrenceOf (" ", false, false).unquoted().trim();
         for (size_t i = 0; id.isNotEmpty() && i < parts.size(); ++i)
             if (parts[i]->id.equalsIgnoreCase (id)) { windows[i]->show(); return true; }
-        if (id.equalsIgnoreCase ("twain")) { showTwain(); return true; }
         return false;
     }
 
@@ -1496,35 +1498,19 @@ private:
     std::vector<std::unique_ptr<melville::PartUI>> parts;
     std::vector<std::unique_ptr<melville::PartWindow>> windows;
     std::unique_ptr<melville::BarWindow> bar;
-    std::unique_ptr<juce::DocumentWindow> networkWindow, clockWindow, libraryWindow, twainWindow;
+    std::unique_ptr<juce::DocumentWindow> networkWindow, clockWindow, libraryWindow;
     std::unique_ptr<melville::PhonesServer> phones;
     struct Every : juce::Timer { std::function<void()> f; void timerCallback() override { f(); } } phonesNames;
 
-    /** TWAIN is an app of its own: its own window and taskbar button; closing it puts it down there. */
-    struct TwainWindow : juce::DocumentWindow
-    {
-        TwainWindow() : DocumentWindow ("TWAIN", melville::Colours::bg, DocumentWindow::allButtons) {}
-        void closeButtonPressed() override { setMinimised (true); }
-    };
+    void showTwain() { showPart ("twain"); }
 
-    void showTwain()
+    /** A part's window, up front. */
+    void showPart (const juce::String& id)
     {
-        if (twainWindow == nullptr)
-        {
-            twainWindow = std::make_unique<TwainWindow>();
-            auto* tp = new melville::TwainPanel (*hub);
-            tp->phonesUrl = [this] { return phones != nullptr ? phones->getUrl() : juce::String(); };
-            melville::frameWindow (*twainWindow, tp, true, "TWAIN", melville::Colours::forPart ("twain"),
-                                   melville::loadIcon ("twain", 64));
-            twainWindow->setResizable (true, false);
-            twainWindow->setResizeLimits (900, 560, 3000, 2000);
-            twainWindow->centreWithSize (twainWindow->getWidth(), twainWindow->getHeight());
-            melville::taskbar::setWindowIdentity (*twainWindow, "twain", "TWAIN", melville::loadIcon ("twain", 256));
-        }
-        if (twainWindow->isMinimised()) twainWindow->setMinimised (false);
-        twainWindow->setVisible (true);
-        twainWindow->toFront (true);
+        for (size_t i = 0; i < parts.size(); ++i)
+            if (parts[i]->id == id) { windows[i]->show(); return; }
     }
+
     std::unique_ptr<melville::MtcOut> mtcOut;
     melville::ClockPanel::Settings clockSettings;
 

@@ -158,19 +158,36 @@ void Updater::doDownload()
         url = installerUrl;
         name = installerName;
     }
-    auto target = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile (name);
-    target.deleteFile();
 
+    // A fresh file each try (a leftover installer from before may still be open), up to three tries,
+    // and the reason kept if it fails
+    juce::String reason;
+    juce::File target;
     bool ok = false;
-    if (auto in = juce::URL (url).createInputStream (options (15000).withExtraHeaders ("User-Agent: MELVILLE\r\n")))
+    for (int attempt = 1; attempt <= 3 && ! ok && ! threadShouldExit(); ++attempt)
     {
-        juce::FileOutputStream out (target);
-        if (out.openedOk())
+        target = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                    .getChildFile (name.upToLastOccurrenceOf (".", false, false) + "-" + juce::String (juce::Time::currentTimeMillis()) + ".exe");
+        int status = 0;
+        auto in = juce::URL (url).createInputStream (juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
+                                                         .withExtraHeaders ("User-Agent: MELVILLE\r\nAccept: application/octet-stream\r\n")
+                                                         .withConnectionTimeoutMs (30000)
+                                                         .withNumRedirectsToFollow (10)
+                                                         .withStatusCode (&status));
+        if (in == nullptr || (status != 0 && status != 200))
         {
-            const auto total = in->getTotalLength();
+            reason = in == nullptr ? juce::String ("no connection to GitHub") : "GitHub answered " + juce::String (status);
+            wait (1500 * attempt);
+            continue;
+        }
+        const auto total = in->getTotalLength();
+        int64_t done = 0;
+        {
+            juce::FileOutputStream out (target);
+            if (! out.openedOk()) { reason = "couldn't write to " + target.getParentDirectory().getFullPathName(); continue; }
+            out.truncate();
             juce::HeapBlock<char> buf (65536);
-            int64_t done = 0;
-            while (! in->isExhausted() && ! threadShouldExit())
+            while (! threadShouldExit())
             {
                 const int n = in->read (buf, 65536);
                 if (n <= 0) break;
@@ -179,14 +196,22 @@ void Updater::doDownload()
                 if (total > 0) { progress = (float) ((double) done / (double) total); triggerAsyncUpdate(); }
             }
             out.flush();
-            ok = ! threadShouldExit() && done > 100000 && (total <= 0 || done == total);
+        }
+        ok = ! threadShouldExit() && done > 100000 && (total <= 0 || done == total);
+        if (! ok)
+        {
+            reason = "it stopped part-way (" + juce::String (done / 1024) + " of " + juce::String (juce::jmax ((juce::int64) 0, (juce::int64) total) / 1024) + " KB)";
+            target.deleteFile();
+            wait (1500 * attempt);
         }
     }
 
     {
         const juce::ScopedLock sl (lock);
         downloaded = ok ? target : juce::File();
-        error = ok ? juce::String() : "The update couldn't be downloaded - check the internet connection and try again.";
+        error = ok ? juce::String()
+                   : "The update couldn't be downloaded (" + reason + "). Opening it in your browser instead: run the installer when it's downloaded.";
+        if (! ok && ! threadShouldExit()) openInBrowser = url;
     }
     downloading = false;
     triggerAsyncUpdate();
@@ -204,8 +229,14 @@ void Updater::handleAsyncUpdate()
         error.clear();
     }
 
+    juce::String browse;
+    {
+        const juce::ScopedLock sl (lock);
+        std::swap (browse, openInBrowser);
+    }
     if (onChange) onChange();
     if (err.isNotEmpty() && onStatus) onStatus (err);
+    if (browse.isNotEmpty()) juce::URL (browse).launchInDefaultBrowser();    // (the download still happens: by the browser)
 
     if (toRun.existsAsFile())
     {
