@@ -422,6 +422,28 @@ View::View()
         }
     }
 
+    // (development: ALCOTT_GALLERY=<folder> saves every PEQUOD panel as a rack faceplate, one PNG each)
+    if (auto dir = juce::SystemStats::getEnvironmentVariable ("ALCOTT_GALLERY", {}); dir.isNotEmpty())
+    {
+        juce::File folder (dir);
+        folder.createDirectory();
+        for (auto& info : PequodNative::all())
+        {
+            PequodNative::Instance inst (info);
+            inst.prepareToPlay (48000.0, 512);
+            std::unique_ptr<juce::AudioProcessorEditor> ed (inst.createEditor());
+            if (ed == nullptr) continue;
+            const auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
+            const double u = ed->getWidth() * (44.45 / 482.6);
+            juce::PNGImageFormat png;
+            const auto f = folder.getChildFile (info.name.replaceCharacters (" /", "__") + ".png");
+            f.deleteFile();
+            if (auto os = f.createOutputStream()) png.writeImageToStream (img, *os);
+            std::printf ("ALCOTT gallery: %-22s %4d x %3d  %.2fU\n", info.name.toRawUTF8(), ed->getWidth(), ed->getHeight(), ed->getHeight() / u);
+            inst.editorBeingDeleted (ed.get());
+        }
+    }
+
     engine.onChanged = [this] { list->repaint(); };
     select (0);
     setSize (1300, 820);
