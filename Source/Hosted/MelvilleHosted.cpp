@@ -3,6 +3,7 @@
 #include "../Core/PartDevice.h"
 #include "../Core/NetworkNode.h"
 #include "MelvilleNetwork.h"
+#include "../UI/WindowFrame.h"
 
 namespace melville
 {
@@ -151,6 +152,53 @@ Transport& transport() noexcept
 {
     static Transport t;
     return t;
+}
+
+namespace
+{
+    /** A part's own small window: MELVILLE's frame, closes away. */
+    struct PanelWindow : juce::DocumentWindow
+    {
+        PanelWindow (const juce::String& t, juce::Colour bg, juce::Colour accent) : DocumentWindow (t, bg, DocumentWindow::closeButton)
+        {
+            // MELVILLE's look, in the part's colour
+            for (auto id : { (int) juce::Slider::thumbColourId, (int) juce::Slider::rotarySliderFillColourId, (int) juce::ComboBox::arrowColourId,
+                             (int) juce::ToggleButton::tickColourId, (int) juce::TextButton::buttonOnColourId, (int) juce::TextEditor::focusedOutlineColourId,
+                             (int) juce::PopupMenu::highlightedBackgroundColourId })
+                look.setColour (id, accent);
+            look.setColour (juce::Slider::trackColourId, accent.withMultipliedBrightness (0.5f));
+            setLookAndFeel (&look);
+        }
+        ~PanelWindow() override { clearContentComponent(); setLookAndFeel (nullptr); }
+        void closeButtonPressed() override { setVisible (false); }
+        MelvilleLookAndFeel look;
+    };
+    juce::OwnedArray<PanelWindow>& panels() { static juce::OwnedArray<PanelWindow> p; return p; }
+}
+
+void closePanels() { panels().clear(); }
+
+void showPanel (std::unique_ptr<juce::Component> content, const juce::String& title, const juce::String& partId)
+{
+    for (auto* w : panels())
+        if (w->getName() == title)
+        {
+            if (! w->isVisible())
+            {
+                // (asked again: its content fresh)
+                w->clearContentComponent();
+                frameWindow (*w, content.release(), true, title, Colours::forPart (partId), {}, WindowTitleBar::close);
+            }
+            w->setVisible (true);
+            w->toFront (true);
+            return;
+        }
+    auto* w = panels().add (new PanelWindow (title, Colours::panel, Colours::forPart (partId)));
+    frameWindow (*w, content.release(), true, title, Colours::forPart (partId), {}, WindowTitleBar::close);
+    w->setAlwaysOnTop (false);
+    w->centreWithSize (w->getWidth(), w->getHeight());
+    w->setVisible (true);
+    w->toFront (true);
 }
 
 namespace

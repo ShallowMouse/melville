@@ -34,6 +34,12 @@ namespace melville
         second IRVING asks for "pequod" and gets "pequod2"). Empty: as asked. */
     void setNextPart (const juce::String& partId);
 
+    /** A part's settings (or any small window of its own), in MELVILLE's window frame and the part's
+        colour. Takes the content; one window per title (asking again brings it up). Message thread. */
+    void showPanel (std::unique_ptr<juce::Component> content, const juce::String& title, const juce::String& partId);
+    /** MELVILLE, quitting: every such window goes (before the parts do). */
+    void closePanels();
+
     /** The part's manager is going away (call before it's destroyed). */
     void detach (juce::AudioDeviceManager&);
 

@@ -170,6 +170,7 @@ static void restoreState (juce::AudioPluginInstance& p, const juce::String& b64)
 std::unique_ptr<juce::XmlElement> Engine::toXml() const
 {
     auto x = std::make_unique<juce::XmlElement> ("ALCOTT");
+    x->setAttribute ("thoreauLength", thoreauLength.load());
     const juce::ScopedLock sl (chainLock);
     for (int i = 0; i < numSlots; ++i)
     {
@@ -197,6 +198,7 @@ std::unique_ptr<juce::XmlElement> Engine::toXml() const
 void Engine::fromXml (const juce::XmlElement& x)
 {
     if (! x.hasTagName ("ALCOTT")) return;
+    thoreauLength = x.getIntAttribute ("thoreauLength", 16);
     for (int i = 0; i < numSlots; ++i)
     {
         const juce::XmlElement* e = nullptr;
@@ -314,7 +316,7 @@ void Engine::process (float* const* out, int numOut, int n) noexcept
 
     // THOREAU's steps hold for a sixteenth (it sends no note-offs)
     const double bpm = juce::jmax (20.0, melville::transport().bpm.load (std::memory_order_relaxed));
-    const int gate = juce::jmax (64, (int) (sampleRate * 60.0 / bpm / 4.0 * 0.9));
+    const int gate = juce::jmax (64, (int) (sampleRate * 60.0 / bpm * 4.0 / juce::jlimit (1, 64, thoreauLength.load (std::memory_order_relaxed)) * 0.9));
 
     juce::FloatVectorOperations::clear (mix.getWritePointer (0), n);
     juce::FloatVectorOperations::clear (mix.getWritePointer (1), n);

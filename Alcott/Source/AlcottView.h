@@ -135,7 +135,7 @@ private:
     int current = 0;
 
     juce::Rectangle<int> headerArea, statusArea, controlsArea;
-    partui::Key midiKey { "MIDI inputs: which keyboards play ALCOTT", partui::Icon::midi, accent() };
+    partui::Key midiKey { "Settings: MIDI inputs, and how long THOREAU's notes hold", partui::Icon::settings, accent() };
 
     std::unique_ptr<SlotList> list;
 

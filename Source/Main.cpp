@@ -1091,6 +1091,32 @@ public:
                         windows[i]->show();
                         save (windows[i].get(), (parts[i]->id + ".png").toRawUTF8());
                     }
+                    // every part's settings window (its settings key, clicked)
+                    std::function<juce::Button* (juce::Component&)> findSettings = [&] (juce::Component& c) -> juce::Button*
+                    {
+                        if (auto* b = dynamic_cast<juce::Button*> (&c))
+                            if (b->isShowing() && (b->getTooltip().startsWithIgnoreCase ("Settings") || b->getName().equalsIgnoreCase ("Settings"))) return b;
+                        for (auto* ch : c.getChildren()) if (auto* b = findSettings (*ch)) return b;
+                        return nullptr;
+                    };
+                    for (size_t i = 0; i < windows.size(); ++i)
+                    {
+                        windows[i]->show();
+                        auto* b = findSettings (*windows[i]);
+                        std::printf ("MELVILLE smoke: %-10s settings key %s\n", parts[i]->id.toRawUTF8(), b != nullptr ? "yes" : "NONE");
+                        if (b != nullptr) b->triggerClick();
+                    }
+                    juce::Timer::callAfterDelay (700, [snaps]
+                    {
+                        for (int w = 0; w < juce::TopLevelWindow::getNumTopLevelWindows(); ++w)
+                            if (auto* tw = juce::TopLevelWindow::getTopLevelWindow (w))
+                                if (tw->isVisible() && tw->getName().containsIgnoreCase ("settings"))
+                                {
+                                    juce::FileOutputStream out (juce::File (snaps).getChildFile (tw->getName().replaceCharacter (' ', '-') + ".png"));
+                                    out.setPosition (0); out.truncate();
+                                    juce::PNGImageFormat().writeImageToStream (tw->createComponentSnapshot (tw->getLocalBounds()), out);
+                                }
+                    });
                 }
 
                 int up = 0;
@@ -1111,7 +1137,9 @@ public:
                              (int) hub->getPatchbay().getAllCords().size());
                 std::fflush (stdout);
                 setApplicationReturnValue (up == (int) parts.size() && sessionOk ? 0 : 1);
-                systemRequestedQuit();
+                // (with pictures to take: a moment for the settings windows first)
+                const bool pictures = juce::SystemStats::getEnvironmentVariable ("MELVILLE_SNAPSHOT_DIR", {}).isNotEmpty();
+                juce::Timer::callAfterDelay (pictures ? 1500 : 1, [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); });
             });
     }
 
@@ -1141,6 +1169,7 @@ public:
                 delete dw;
             }
         juce::ModalComponentManager::getInstance()->cancelAllModalComponents();
+        melville::closePanels();      // (the parts' settings windows, before the parts)
 
         networkWindow = nullptr;
         clockWindow = nullptr;

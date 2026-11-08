@@ -73,6 +73,9 @@ public:
 
     std::function<void()> onChanged;                     // message thread: anything to save
 
+    /** How long THOREAU's notes hold (it sends no note-offs): a 1/n note, 4 8 16 or 32. */
+    std::atomic<int> thoreauLength { 16 };
+
     // AudioIODeviceCallback
     void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut,
                                            int n, const juce::AudioIODeviceCallbackContext&) override;

@@ -7,6 +7,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include "MelvilleLookAndFeel.h"
 #include "../../Shared/PartHeader.h"
+#include "../Hosted/MelvilleHosted.h"
 #include "../Core/Hub.h"
 
 namespace melville
@@ -216,6 +217,8 @@ public:
     {
         setLookAndFeel (&lnf);
         const auto accent = Colours::forPart ("twain");
+        settingsKey.onClick = [this] { showSettings(); };
+        addAndMakeVisible (settingsKey);
 
         // --- monitor source
         for (int s = 0; s < TwainNode::numSources; ++s)
@@ -326,7 +329,7 @@ public:
             partui::drawBar (g, headerArea, accent);
             partui::drawWordmark (g, headerArea.reduced (18, 0).removeFromLeft (190), "TWAIN", "CONTROL ROOM",
                                   accent, juce::Font (juce::FontOptions (courierBold).withHeight (30.0f)));
-            auto st = headerArea.withTrimmedBottom (2).withTrimmedLeft (14 + 200).withTrimmedRight (24);
+            auto st = headerArea.withTrimmedBottom (2).withTrimmedLeft (14 + 200).withRight (settingsKey.getX() - 16);
             st = st.withSizeKeepingCentre (st.getWidth(), 40);
             g.setFont (juce::Font (juce::FontOptions (courierBold).withHeight (13.0f)));
             g.setColour (accent);
@@ -452,6 +455,7 @@ public:
     {
         auto r = getLocalBounds();
         headerArea = r.removeFromTop (partui::headerHeight);
+        partui::placeKeys (headerArea.withTrimmedBottom (2).reduced (14, 0), { &settingsKey });
         r = r.reduced (12);
         roomArea = r.removeFromLeft (300);
         r.removeFromLeft (10);
@@ -593,6 +597,67 @@ private:
     }
 
     juce::Rectangle<int> headerArea;
+    partui::Key settingsKey { "Settings: the dim level and each speaker set's trim", partui::Icon::settings, Colours::forPart ("twain") };
+
+    /** TWAIN's settings: how far DIM (and talkback) takes the monitor down, each speaker set's trim
+        (to match them), and where the phones page is. */
+    void showSettings()
+    {
+        struct Panel : juce::Component
+        {
+            Panel (TwainNode& t, std::function<juce::String()> url) : twain (t), phonesUrl (std::move (url))
+            {
+                auto setUp = [this] (juce::Slider& sl, double lo, double hi, double v, std::function<void (double)> f)
+                {
+                    sl.setSliderStyle (juce::Slider::LinearHorizontal);
+                    sl.setTextBoxStyle (juce::Slider::TextBoxRight, false, 70, 20);
+                    sl.setRange (lo, hi, 0.5);
+                    sl.setTextValueSuffix (" dB");
+                    sl.setValue (v, juce::dontSendNotification);
+                    sl.onValueChange = [&sl, f] { f (sl.getValue()); };
+                    addAndMakeVisible (sl);
+                };
+                setUp (dim, -40.0, -6.0, juce::Decibels::gainToDecibels (twain.dimLevel.load(), -40.0f), [this] (double v) { twain.dimLevel = juce::Decibels::decibelsToGain ((float) v); });
+                dim.setDoubleClickReturnValue (true, -20.0);
+                for (int k = 0; k < TwainNode::numSpeakers; ++k)
+                {
+                    auto& sl = trims[(size_t) k];
+                    setUp (sl, -12.0, 6.0, juce::Decibels::gainToDecibels (twain.speakerTrim[k].load(), -12.0f), [this, k] (double v) { twain.speakerTrim[k] = juce::Decibels::decibelsToGain ((float) v); });
+                    sl.setDoubleClickReturnValue (true, 0.0);
+                }
+                setSize (480, 250);
+            }
+            void paint (juce::Graphics& g) override
+            {
+                g.fillAll (Colours::panel);
+                g.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
+                g.setColour (Colours::forPart ("twain"));
+                g.drawText ("MONITOR", 18, 10, 200, 20, juce::Justification::centredLeft);
+                g.drawText ("SPEAKER TRIMS", 18, 76, 200, 20, juce::Justification::centredLeft);
+                g.setFont (juce::Font (juce::FontOptions (13.0f)));
+                g.setColour (Colours::text);
+                g.drawText ("Dim (and talkback)", 18, dim.getY(), 140, dim.getHeight(), juce::Justification::centredLeft);
+                for (int k = 0; k < TwainNode::numSpeakers; ++k)
+                    g.drawText ("Speakers " + juce::String::charToString ((juce::juce_wchar) ('A' + k)), 18, trims[(size_t) k].getY(), 140, trims[(size_t) k].getHeight(), juce::Justification::centredLeft);
+                g.setColour (Colours::textDim);
+                g.setFont (juce::Font (juce::FontOptions (12.0f)));
+                const auto url = phonesUrl ? phonesUrl() : juce::String();
+                g.drawText (url.isNotEmpty() ? "Players set their own headphone mixes at " + url + " (same network)"
+                                             : juce::String ("The phones page isn't running."),
+                            18, getHeight() - 30, getWidth() - 36, 18, juce::Justification::centredLeft);
+            }
+            void resized() override
+            {
+                dim.setBounds (160, 36, getWidth() - 178, 26);
+                for (int k = 0; k < TwainNode::numSpeakers; ++k) trims[(size_t) k].setBounds (160, 102 + 30 * k, getWidth() - 178, 26);
+            }
+            TwainNode& twain;
+            std::function<juce::String()> phonesUrl;
+            juce::Slider dim;
+            std::array<juce::Slider, TwainNode::numSpeakers> trims;
+        };
+        melville::showPanel (std::make_unique<Panel> (twain, phonesUrl), "TWAIN settings", "twain");
+    }
 
     void timerCallback() override
     {

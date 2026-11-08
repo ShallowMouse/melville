@@ -553,11 +553,39 @@ void View::showEffectMenu (int insertAt)
 
 void View::showMidiInputs()
 {
-    if (auto panel = melville::midiInputsPanel (deviceManager))
+    // ALCOTT's settings: which keyboards play it, and how long THOREAU's steps hold
+    struct Panel : juce::Component
     {
-        panel->setSize (420, 260);
-        juce::CallOutBox::launchAsynchronously (std::move (panel), midiKey.getScreenBounds(), nullptr);
-    }
+        Panel (View& v) : owner (v)
+        {
+            midi = melville::midiInputsPanel (v.deviceManager);
+            if (midi != nullptr) addAndMakeVisible (*midi);
+            for (int n : { 4, 8, 16, 32 }) length.addItem ("1/" + juce::String (n) + " note", n);
+            length.setSelectedId (owner.engine.thoreauLength.load(), juce::dontSendNotification);
+            length.onChange = [this] { owner.engine.thoreauLength = length.getSelectedId(); };
+            addAndMakeVisible (length);
+            setSize (480, 330);
+        }
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (Pequod::Colours::bg);
+            g.setFont (Pequod::heading (13.0f));
+            g.setColour (accent());
+            g.drawText ("THOREAU", 18, getHeight() - 74, 300, 20, juce::Justification::centredLeft);
+            g.setFont (Pequod::body (13.0f));
+            g.setColour (Pequod::Colours::text);
+            g.drawText ("Its steps hold for a", 18, length.getY(), 160, length.getHeight(), juce::Justification::centredLeft);
+        }
+        void resized() override
+        {
+            if (midi != nullptr) midi->setBounds (12, 6, getWidth() - 24, getHeight() - 6 - 84);
+            length.setBounds (170, getHeight() - 46, 160, 26);
+        }
+        View& owner;
+        std::unique_ptr<juce::Component> midi;
+        juce::ComboBox length;
+    };
+    melville::showPanel (std::make_unique<Panel> (*this), "ALCOTT settings", "alcott");
 }
 
 juce::String View::statusLine() const
