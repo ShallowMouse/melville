@@ -97,6 +97,10 @@ public:
     /** Latency the interface adds beyond what its driver reports (samples); reported with the input latency. */
     std::atomic<int> extraLatency { 0 };
 
+    /** Audio thread, at the start of every block (frame, samples, rate): MELVILLE's own clock.
+        Set before the interface opens. */
+    std::function<void (juce::int64, int, double)> onBlockStart;
+
     /** A PartDevice opening / closing (keeps the parts in step with the interface). */
     void partDeviceOpened (PartDevice&);
     void partDeviceClosed (PartDevice&);

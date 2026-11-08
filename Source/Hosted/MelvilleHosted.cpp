@@ -140,11 +140,72 @@ juce::int64 currentFrame() noexcept
     return hub != nullptr ? hub->getBlockFrame() : 0;
 }
 
+namespace
+{
+    // MELVILLE's own clock, for when there's no reel: rolls at the interface's rate
+    std::atomic<bool> clockRolling { false };
+    std::atomic<juce::int64> clockPos { 0 };          // samples
+    bool usingTape() { auto& t = transport(); return t.available.load() && t.reelLoaded.load(); }
+}
+
+void play()         { auto& t = transport(); if (usingTape()) { if (t.play) t.play(); } else clockRolling = true; }
+void stop()
+{
+    auto& t = transport();
+    if (usingTape()) { if (t.stop) t.stop(); return; }
+    if (! clockRolling.exchange (false)) clockPos = 0;     // stop again: back to the start
+}
+void record()       { auto& t = transport(); if (usingTape() && t.record) t.record(); }
+void returnToZero() { auto& t = transport(); if (usingTape()) { if (t.returnToZero) t.returnToZero(); } else clockPos = 0; }
+void wind (int dir) { auto& t = transport(); if (usingTape() && t.wind) t.wind (dir); }
+bool isRolling() noexcept { return usingTape() ? transport().rolling.load() : clockRolling.load(); }
+
+void setTempo (double bpm, int bpb, double barOne)
+{
+    auto& t = transport();
+    t.bpm = juce::jlimit (20.0, 400.0, bpm);
+    t.beatsPerBar = juce::jlimit (1, 16, bpb);
+    t.barOne = juce::jmax (0.0, barOne);
+    ++t.tempoRev;
+    if (usingTape() && t.writeTempo) t.writeTempo (t.bpm.load(), t.beatsPerBar.load(), t.barOne.load());
+}
+
+void reelTempo (double bpm, int bpb, double barOne)
+{
+    auto& t = transport();
+    if (bpm > 0.0)
+    {
+        // the reel's own tempo map: it belongs to the song on it
+        t.bpm = bpm; t.beatsPerBar = bpb; t.barOne = barOne;
+        ++t.tempoRev;
+    }
+    else if (t.writeTempo)
+        t.writeTempo (t.bpm.load(), t.beatsPerBar.load(), t.barOne.load());   // a blank reel gets MELVILLE's
+}
+
+void clockBlock (juce::int64 frame, int n, double sampleRate) noexcept
+{
+    auto& t = transport();
+    if (t.available.load (std::memory_order_relaxed) && t.reelLoaded.load (std::memory_order_relaxed))
+        return;                                         // the tape is the clock (Hawthorne publishes)
+    const bool rolling = clockRolling.load (std::memory_order_relaxed);
+    const auto pos = clockPos.load (std::memory_order_relaxed);
+    t.tapePos.store ((double) pos, std::memory_order_relaxed);
+    t.tapePerSample.store (rolling ? 1.0 : 0.0, std::memory_order_relaxed);
+    t.flags.store ((rolling ? 1 : 0) | 4, std::memory_order_relaxed);   // (4: a clock to follow)
+    t.publishedFrame.store (frame, std::memory_order_release);
+    t.position.store (pos, std::memory_order_relaxed);
+    t.rolling.store (rolling, std::memory_order_relaxed);
+    t.recording.store (false, std::memory_order_relaxed);
+    t.reelRate.store (sampleRate, std::memory_order_relaxed);
+    if (rolling) clockPos.store (pos + n, std::memory_order_relaxed);
+}
+
 bool tapePositionAt (juce::int64 frame, double& tapePos, double& tapePerSample, int& flags) noexcept
 {
     auto& t = transport();
     const auto at = t.publishedFrame.load (std::memory_order_acquire);
-    if (at < 0 || ! t.available.load()) return false;
+    if (at < 0) return false;
     tapePerSample = t.tapePerSample.load (std::memory_order_relaxed);
     tapePos = t.tapePos.load (std::memory_order_relaxed) + (double) (frame - at) * tapePerSample;
     flags = t.flags.load (std::memory_order_relaxed);

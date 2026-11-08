@@ -175,19 +175,17 @@ public:
             auto* b = keys.add (new Key ((Kind) k));
             addAndMakeVisible (b);
         }
-        keys[rtz]->onClick  = [] { if (auto& f = melville::transport().returnToZero) f(); };
-        keys[stop]->onClick = [] { if (auto& f = melville::transport().stop) f(); };
-        keys[play]->onClick = [] { if (auto& f = melville::transport().play) f(); };
-        keys[rec]->onClick  = [] { if (auto& f = melville::transport().record) f(); };
+        keys[rtz]->onClick  = [] { melville::returnToZero(); };
+        keys[stop]->onClick = [] { melville::stop(); };
+        keys[play]->onClick = [] { melville::play(); };
+        keys[rec]->onClick  = [] { melville::record(); };
         for (int k : { (int) rew, (int) ffw })
         {
             auto* b = keys[k];
             b->onStateChange = [b, k, held = false] () mutable
             {
-                auto& f = melville::transport().wind;
-                if (f == nullptr) return;
-                if (b->isDown() && ! held)       { held = true;  f (k == rew ? -1 : +1); }
-                else if (! b->isDown() && held)  { held = false; f (0); }
+                if (b->isDown() && ! held)       { held = true;  melville::wind (k == rew ? -1 : +1); }
+                else if (! b->isDown() && held)  { held = false; melville::wind (0); }
             };
         }
         keys[rtz]->setTooltip ("Return to zero");
@@ -202,7 +200,7 @@ public:
         tempo.setColour (juce::Label::textColourId, Colours::text);
         tempo.setColour (juce::Label::backgroundWhenEditingColourId, Colours::panelHi);
         tempo.setColour (juce::Label::textWhenEditingColourId, Colours::text);
-        tempo.setTooltip ("MELVILLE's tempo (kept on Hawthorne's reel): double-click to type one, right-click for beats per bar and bar 1. "
+        tempo.setTooltip ("MELVILLE's tempo (also kept on the reel when one is loaded): double-click to type one, right-click for beats per bar and bar 1. "
                           "THOREAU and IRVING follow it.");
         tempo.addMouseListener (this, false);
         tempo.onTextChange = [this]
@@ -211,7 +209,7 @@ public:
             if (b >= 20.0 && b <= 400.0)
                 {
                     auto& t = melville::transport();
-                    if (auto& f = t.setTempo) f (b, t.beatsPerBar.load(), t.barOne.load());
+                    melville::setTempo (b, t.beatsPerBar.load(), t.barOne.load());
                 }
             refresh();
         };
@@ -237,7 +235,7 @@ public:
         g.drawText (text, c.removeFromTop (c.getHeight() * 3 / 5), juce::Justification::centred);
         g.setFont (juce::Font (juce::FontOptions (11.0f)));
         g.setColour (Colours::textDim);
-        juce::String sub = t.available.load() ? juce::String ("TAPE") : juce::String ("NO HAWTHORNE");
+        juce::String sub = t.available.load() && t.reelLoaded.load() ? juce::String ("TAPE") : juce::String ("CLOCK");
         if (t.bpm.load() > 0.0)
         {
             const double beats = ((double) t.position.load() - t.barOne.load()) / (rate * 60.0 / t.bpm.load());
@@ -260,11 +258,11 @@ public:
     {
         if (! e.mods.isPopupMenu() && ! counterArea.contains (e.getEventRelativeTo (this).getPosition())) return;
         auto& t = melville::transport();
-        if (! t.available.load() || ! t.setTempo) return;
-        const bool have = t.reelLoaded.load();
+        juce::ignoreUnused (t);
+        const bool have = true;      // (MELVILLE keeps the tempo with or without a reel)
         const double bpm = t.bpm.load() > 0.0 ? t.bpm.load() : 120.0;
         const int bpb = juce::jmax (1, t.beatsPerBar.load());
-        auto set = [] (double b, int n, double one) { auto& tt = melville::transport(); if (auto& f = tt.setTempo) f (b, n, juce::jmax (0.0, one)); };
+        auto set = [] (double b, int n, double one) { melville::setTempo (b, n, juce::jmax (0.0, one)); };
 
         juce::PopupMenu m, sig;
         for (int n = 2; n <= 12; ++n)
@@ -277,7 +275,6 @@ public:
         const double ms = juce::jmax (1.0, t.reelRate.load()) * 0.001;
         m.addItem ("Bar 1 1 ms earlier", have, false, [set, bpm, bpb, ms] { set (bpm, bpb, melville::transport().barOne.load() - ms); });
         m.addItem ("Bar 1 1 ms later",   have, false, [set, bpm, bpb, ms] { set (bpm, bpb, melville::transport().barOne.load() + ms); });
-        if (! have) { m.addSeparator(); m.addItem ("(load a reel on Hawthorne: the tempo lives on the reel)", false, false, nullptr); }
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
     }
 
@@ -347,7 +344,8 @@ private:
         const bool rolling = t.rolling.load(), recording = t.recording.load();
         if (keys[play]->lit != rolling)  { keys[play]->lit = rolling;  keys[play]->repaint(); }
         if (keys[rec]->lit != recording) { keys[rec]->lit = recording; keys[rec]->repaint(); }
-        for (auto* k : keys) k->setEnabled (t.available.load());
+        const bool tape = t.available.load() && t.reelLoaded.load();
+        for (auto* k : keys) k->setEnabled (tape || (k != keys[rec] && k != keys[rew] && k != keys[ffw]));
         refresh();
         repaint (counterArea);
     }
@@ -861,6 +859,14 @@ public:
 
         // the hub first: the parts open their devices on it as they're made
         hub = std::make_unique<Hub>();
+        hub->onBlockStart = [] (juce::int64 frame, int n, double sr) { melville::clockBlock (frame, n, sr); };
+        {
+            // MELVILLE's tempo (a reel with its own takes over while it's loaded)
+            auto* s = props.getUserSettings();
+            auto& t = melville::transport();
+            t.bpm = s->getDoubleValue ("tempoBpm", 120.0);
+            t.beatsPerBar = s->getIntValue ("tempoBeatsPerBar", 4);
+        }
         auto audio = props.getUserSettings()->getXmlValue ("audio");
         hub->initialiseAudio (audio.get());
         if (auto patch = props.getUserSettings()->getXmlValue ("patch"))
@@ -977,6 +983,8 @@ public:
         {
             props.getUserSettings()->setValue ("patch", hub->getPatchbay().toXml().get());
             props.getUserSettings()->setValue ("latencyExtra", hub->extraLatency.load());
+            props.getUserSettings()->setValue ("tempoBpm", melville::transport().bpm.load());
+            props.getUserSettings()->setValue ("tempoBeatsPerBar", melville::transport().beatsPerBar.load());
             hub->getNetwork().saveSettings (*props.getUserSettings());
             if (auto xml = hub->deviceManager.createStateXml())
                 props.getUserSettings()->setValue ("audio", xml.get());
@@ -1116,6 +1124,13 @@ public:
         root.setAttribute ("version", 1);
         root.setAttribute ("irvings", countIrvings());
         root.addChildElement (hub->getPatchbay().toXml().release());
+        {
+            auto& t = melville::transport();
+            auto* tempo = root.createNewChildElement ("TEMPO");
+            tempo->setAttribute ("bpm", t.bpm.load());
+            tempo->setAttribute ("beatsPerBar", t.beatsPerBar.load());
+            tempo->setAttribute ("barOne", t.barOne.load());
+        }
         for (auto& [id, sp] : melville::sessionParts())
             if (sp.save)
                 if (auto x = sp.save())
@@ -1164,6 +1179,9 @@ public:
             if (it != sessions.end() && it->second.load && part->getFirstChildElement() != nullptr)
                 it->second.load (*part->getFirstChildElement());
         }
+        if (auto* tempo = root->getChildByName ("TEMPO"))
+            melville::setTempo (tempo->getDoubleAttribute ("bpm", 120.0), tempo->getIntAttribute ("beatsPerBar", 4),
+                                tempo->getDoubleAttribute ("barOne", 0.0));
         setSessionFile (f);
         return true;
     }

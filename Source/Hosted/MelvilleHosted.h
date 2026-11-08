@@ -38,22 +38,24 @@ namespace melville
     void detach (juce::AudioDeviceManager&);
 
     //==========================================================================
-    /** MELVILLE's transport. Hawthorne is the clock: it fills in the controls and publishes
-        where the tape is every block; MELVILLE's bar drives it, and THOREAU and IRVING follow
-        it directly (no network). */
+    /** MELVILLE's transport and tempo. MELVILLE owns the tempo, meter and bar 1. With a reel on
+        Hawthorne's deck the tape is the clock (Hawthorne publishes where it is every block, and
+        the tempo lives on the reel too); with no reel MELVILLE runs a clock of its own, so THOREAU
+        and IRVING still play. Everything follows it directly (no network). Use the functions
+        below (play(), setTempo() ...) rather than the hooks. */
     struct Transport
     {
-        // --- Controls (message thread), given by Hawthorne
+        // --- Hawthorne's hooks (message thread): its tape machine
         std::function<void()> play, stop, record, returnToZero;
         std::function<void (int direction)> wind;           // -1 rewind, +1 fast forward, 0 let go
-        std::function<void (double bpm, int beatsPerBar, double barOne)> setTempo;   // barOne: tape samples
+        std::function<void (double bpm, int beatsPerBar, double barOne)> writeTempo;   // onto the reel (barOne: tape samples)
 
         // --- State (any thread)
         std::atomic<bool> available { false };              // Hawthorne is there
         std::atomic<bool> rolling { false }, recording { false }, reelLoaded { false };
         std::atomic<juce::int64> position { 0 };             // tape position (reel samples), for the counter
         std::atomic<double> reelRate { 48000.0 };            // the reel's sample rate
-        std::atomic<double> bpm { 0.0 };                     // 0: the reel has no tempo
+        std::atomic<double> bpm { 120.0 };                   // MELVILLE's tempo (always set)
         std::atomic<int> beatsPerBar { 4 };
         std::atomic<double> barOne { 0.0 };                  // tape position of bar 1's downbeat
         std::atomic<int> tempoRev { 0 };                     // changes when the tempo or bar 1 changes
@@ -65,6 +67,22 @@ namespace melville
         std::atomic<int> flags { 0 };                        // 1 rolling, 2 recording, 4 reel loaded
     };
     Transport& transport() noexcept;
+
+    // MELVILLE's transport keys (message thread): the tape's with a reel on the deck,
+    // MELVILLE's own clock without one
+    void play();
+    void stop();
+    void record();
+    void returnToZero();
+    void wind (int direction);
+    bool isRolling() noexcept;
+    /** MELVILLE's tempo, meter and bar 1 (written onto the reel if there is one). */
+    void setTempo (double bpm, int beatsPerBar, double barOne);
+    /** A reel came onto the deck with this tempo (bpm 0: none): MELVILLE takes it, or puts its own on it. */
+    void reelTempo (double bpm, int beatsPerBar, double barOne);
+
+    /** Hub, audio thread, at the start of every block: MELVILLE's own clock (no reel). */
+    void clockBlock (juce::int64 frame, int numSamples, double sampleRate) noexcept;
 
     /** Audio thread: MELVILLE's frame count at the start of the block being run now (every
         part sees the same number in the same block). */

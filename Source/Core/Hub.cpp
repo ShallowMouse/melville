@@ -238,6 +238,7 @@ void Hub::audioDeviceIOCallbackWithContext (const float* const* in, int numIn, f
     }
 
     const auto t0 = juce::Time::getHighResolutionTicks();
+    if (onBlockStart) onBlockStart (blockFrame.load (std::memory_order_relaxed), n, sampleRate);
     auto* iface = static_cast<InterfaceNode*> (interfaceNode);
     iface->in = in;   iface->numIn = numIn;
     iface->out = out; iface->numOut = numOut;
