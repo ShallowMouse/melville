@@ -59,6 +59,7 @@ Hub::Hub()
     link->open();
     addNode (std::move (link));
     addNode (std::make_unique<ClockNode>());       // the click and LTC (MELVILLE's)
+    addNode (std::make_unique<TwainNode>());       // the control room
 
     auto node = [this] (const char* id) -> Node*
     {
@@ -83,6 +84,7 @@ Hub::Hub()
         { Step::process, node ("whitman") },
         { Step::push,    node ("link") },       // the mix and sends back to EMERSON
         { Step::push,    node ("route") },      // EMERSON's tracks and mix back into Hawthorne
+        { Step::process, node ("twain") },      // the control room: monitors and headphone feeds
         { Step::push,    node ("interface") },
     };
 
@@ -139,10 +141,17 @@ void Hub::defaultPatch()
     pb.clearAll();
     // the interface's inputs onto the first tracks; Hawthorne's master (and click) to the monitors
     pb.connectInOrder ("interface", 0, "hawthorne", 0, hawthorne::route::defaultTracks);
-    pb.connect (pb.findSource ("route", "Hawthorne master L"), pb.findDest ("interface", "Out 1"));
-    pb.connect (pb.findSource ("route", "Hawthorne master R"), pb.findDest ("interface", "Out 2"));
-    pb.connect (pb.findSource ("clock", "Click"), pb.findDest ("interface", "Out 1"));
-    pb.connect (pb.findSource ("clock", "Click"), pb.findDest ("interface", "Out 2"));
+    // the control room (TWAIN): Hawthorne's master (the 2-track), the desk's mix and the click in;
+    // speakers A on outputs 1-2, the first headphone feed on 3-4
+    pb.connect (pb.findSource ("route", "Hawthorne master L"), pb.findDest ("twain", "2-track L"));
+    pb.connect (pb.findSource ("route", "Hawthorne master R"), pb.findDest ("twain", "2-track R"));
+    pb.connect (pb.findSource ("emerson", "To Hawthorne master L"), pb.findDest ("twain", "Mix L"));
+    pb.connect (pb.findSource ("emerson", "To Hawthorne master R"), pb.findDest ("twain", "Mix R"));
+    pb.connect (pb.findSource ("clock", "Click"), pb.findDest ("twain", "Click"));
+    pb.connect (pb.findSource ("twain", "Speakers A L"), pb.findDest ("interface", "Out 1"));
+    pb.connect (pb.findSource ("twain", "Speakers A R"), pb.findDest ("interface", "Out 2"));
+    pb.connect (pb.findSource ("twain", "Phones 1 L"), pb.findDest ("interface", "Out 3"));
+    pb.connect (pb.findSource ("twain", "Phones 1 R"), pb.findDest ("interface", "Out 4"));
     // Hawthorne -> EMERSON -> WHITMAN -> EMERSON -> Hawthorne, as Route and the Link do now
     for (int t = 0; t < hawthorne::route::maxTracks; ++t)       // the tape tracks into EMERSON
         pb.connect (pb.findSource ("route", "Hawthorne track " + juce::String (t + 1)),

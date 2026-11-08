@@ -14,6 +14,7 @@
 #include "UI/Taskbar.h"
 #include "UI/WindowFrame.h"
 #include "UI/ClockWindow.h"
+#include "UI/TwainWindow.h"
 #include "Core/NetworkNode.h"
 #include "Updater.h"
 #include "Hosted/MelvilleHosted.h"
@@ -32,6 +33,33 @@ static juce::Image loadIcon (const juce::String& id, int px = 128)
     if (id == "thoreau")   { data = BinaryData::THOREAU_png;       size = BinaryData::THOREAU_pngSize; }
     if (id.startsWith ("pequod")) { data = BinaryData::IRVING_png;        size = BinaryData::IRVING_pngSize; }      // IRVING
     if (id == "melville")  { data = BinaryData::MELVILLE_png;      size = BinaryData::MELVILLE_pngSize; }
+    if (id == "twain")
+    {
+        // TWAIN's mark, drawn: a T whose bar is a pair of speakers and whose stem ends in headphones
+        juce::Image img (juce::Image::ARGB, px, px, true);
+        juce::Graphics g (img);
+        const float s = (float) px;
+        const auto orange = Colours::forPart ("twain");
+        g.setColour (juce::Colour (0xff1c1d1f));
+        g.fillRoundedRectangle (0.0f, 0.0f, s, s, s * 0.16f);
+        g.setColour (orange);
+        g.fillRoundedRectangle (s * 0.16f, s * 0.22f, s * 0.68f, s * 0.11f, s * 0.03f);        // the bar
+        for (float cx : { 0.24f, 0.76f })
+        {
+            g.setColour (juce::Colour (0xff1c1d1f));
+            g.fillEllipse (juce::Rectangle<float> (s * 0.26f, s * 0.26f).withCentre ({ s * cx, s * 0.275f }));
+            g.setColour (orange);
+            g.drawEllipse (juce::Rectangle<float> (s * 0.24f, s * 0.24f).withCentre ({ s * cx, s * 0.275f }), s * 0.035f);   // a speaker
+            g.fillEllipse (juce::Rectangle<float> (s * 0.08f, s * 0.08f).withCentre ({ s * cx, s * 0.275f }));
+        }
+        g.fillRect (s * 0.455f, s * 0.33f, s * 0.09f, s * 0.36f);                                // the stem
+        juce::Path band;                                                                         // headphones
+        band.addCentredArc (s * 0.5f, s * 0.80f, s * 0.17f, s * 0.13f, 0.0f, -1.3f, 1.3f, true);
+        g.strokePath (band, juce::PathStrokeType (s * 0.04f));
+        for (float cx : { 0.33f, 0.67f })
+            g.fillRoundedRectangle (juce::Rectangle<float> (s * 0.09f, s * 0.14f).withCentre ({ s * cx, s * 0.84f }), s * 0.03f);
+        return img;
+    }
     if (data == nullptr) return {};
     // scaled down once, so the bar draws it crisply and cheaply
     auto big = juce::ImageCache::getFromMemory (data, size);
@@ -760,6 +788,14 @@ public:
             }
             addAndMakeVisible (t);
         }
+        {
+            // TWAIN, the control room: MELVILLE's own part
+            auto* t = tiles.add (new Tile ("TWAIN", loadIcon ("twain"), Colours::forPart ("twain")));
+            t->isLit = [] { return true; };
+            t->onClick = [this] { if (onShowTwain) onShowTwain(); };
+            t->setTooltip ("TWAIN: the control room. What you listen to, on which speakers, and the players' headphone mixes");
+            addAndMakeVisible (t);
+        }
         setSize (wordmarkWidth + (tiles.size() + 6) * (tileWidth + gap) + 26 + TransportStrip::preferredWidth + 28 + 200, barHeight);
         resized();
     }
@@ -826,7 +862,7 @@ private:
     Tile patchTile { "Patchbay", {}, Colours::accent }, netTile { "MELVILLE Link", {}, Colours::accent }, audioTile { "Interface", {}, Colours::accent },
          updateTile { "Update", {}, Colours::accent }, sessionTile { "Library", {}, Colours::accent }, clockTile { "Clock", {}, Colours::accent };
 public:
-    std::function<void()> onShowNetwork, onShowClock;
+    std::function<void()> onShowNetwork, onShowClock, onShowTwain;
     std::function<void (juce::Component&)> onSessionMenu;
     std::function<void()> onShowLibrary;
     void setSessionName (const juce::String& n)
@@ -902,6 +938,7 @@ public:
             return s;
         };
         loadClockSettings();
+        if (auto tw = props.getUserSettings()->getXmlValue ("twain")) melville::twainFromXml (hub->getTwain(), *tw);
         mtcOut = std::make_unique<melville::MtcOut> (hub->getClock());
         {
             // MELVILLE's tempo (a reel with its own takes over while it's loaded)
@@ -951,6 +988,7 @@ public:
         auto* barContent = new Bar (*hub, parts, windows);
         barContent->onShowNetwork = [this] { showNetwork(); };
         barContent->onShowClock = [this] { showClock(); };
+        barContent->onShowTwain = [this] { showTwain(); };
         barContent->onSessionMenu = [this] (juce::Component& c) { showLibraryMenu (c); };
         barContent->onShowLibrary = [this] { showLibrary(); };
         {
@@ -1010,6 +1048,8 @@ public:
                     save (clockWindow.get(), "clock-window.png");
                     showLibrary();
                     save (libraryWindow.get(), "library-window.png");
+                    showTwain();
+                    save (twainWindow.get(), "twain-window.png");
                     for (size_t i = 0; i < windows.size(); ++i)
                     {
                         windows[i]->show();
@@ -1047,6 +1087,7 @@ public:
             props.getUserSettings()->setValue ("latencyExtra", hub->extraLatency.load());
             props.getUserSettings()->setValue ("tempoBpm", melville::transport().bpm.load());
             saveClockSettings();
+            props.getUserSettings()->setValue ("twain", melville::twainToXml (hub->getTwain()).get());
             props.getUserSettings()->setValue ("tempoBeatsPerBar", melville::transport().beatsPerBar.load());
             hub->getNetwork().saveSettings (*props.getUserSettings());
             if (auto xml = hub->deviceManager.createStateXml())
@@ -1067,6 +1108,7 @@ public:
 
         networkWindow = nullptr;
         clockWindow = nullptr;
+        twainWindow = nullptr;
         if (libraryWindow != nullptr) { libraryWindow->clearContentComponent(); libraryWindow = nullptr; }   // (the view is Hawthorne's)
         {
             auto& l = melville::library();
@@ -1210,6 +1252,7 @@ public:
             tempo->setAttribute ("clickOn", c.clickOn.load());
             tempo->setAttribute ("clickGain", (double) c.clickGain.load());
         }
+        root->addChildElement (melville::twainToXml (hub->getTwain()).release());
         for (auto& [id, sp] : melville::sessionParts())
             if (sp.save)
                 if (auto x = sp.save())
@@ -1239,6 +1282,13 @@ public:
 
         if (auto* patch = root.getChildByName ("PATCH"))
             hub->getPatchbay().fromXml (*patch);
+        if (auto* tw = root.getChildByName ("TWAIN"))
+        {
+            melville::twainFromXml (hub->getTwain(), *tw);
+            if (twainWindow != nullptr)
+                if (auto* f = dynamic_cast<melville::FramedContent*> (twainWindow->getContentComponent()))
+                    if (auto* tp = dynamic_cast<melville::TwainPanel*> (f->getContent())) tp->refresh();
+        }
 
         const auto& sessions = melville::sessionParts();
         for (auto* part : root.getChildWithTagNameIterator ("PART"))
@@ -1403,7 +1453,22 @@ private:
     std::vector<std::unique_ptr<melville::PartUI>> parts;
     std::vector<std::unique_ptr<melville::PartWindow>> windows;
     std::unique_ptr<melville::BarWindow> bar;
-    std::unique_ptr<juce::DocumentWindow> networkWindow, clockWindow, libraryWindow;
+    std::unique_ptr<juce::DocumentWindow> networkWindow, clockWindow, libraryWindow, twainWindow;
+
+    void showTwain()
+    {
+        if (twainWindow == nullptr)
+        {
+            twainWindow = std::make_unique<melville::ToolWindow> ("MELVILLE \xc2\xb7 TWAIN");
+            melville::frameWindow (*twainWindow, new melville::TwainPanel (*hub), true, "TWAIN", melville::Colours::forPart ("twain"),
+                                   melville::loadIcon ("twain", 64));
+            twainWindow->setResizable (true, false);
+            twainWindow->setResizeLimits (900, 560, 3000, 2000);
+            twainWindow->centreWithSize (twainWindow->getWidth(), twainWindow->getHeight());
+        }
+        twainWindow->setVisible (true);
+        twainWindow->toFront (true);
+    }
     std::unique_ptr<melville::MtcOut> mtcOut;
     melville::ClockPanel::Settings clockSettings;
 

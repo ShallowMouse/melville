@@ -19,6 +19,7 @@
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include "ClockNode.h"
+#include "TwainNode.h"
 #include "Patchbay.h"
 #include "Node.h"
 
@@ -103,6 +104,12 @@ public:
     std::function<void (juce::int64, int, double)> onBlockStart;
 
     /** MELVILLE's click and LTC out. */
+    TwainNode& getTwain() const
+    {
+        for (auto& n : nodes) if (auto* c = dynamic_cast<TwainNode*> (n.get())) return *c;
+        jassertfalse; static TwainNode none; return none;
+    }
+
     ClockNode& getClock() const
     {
         for (auto& n : nodes) if (auto* c = dynamic_cast<ClockNode*> (n.get())) return *c;

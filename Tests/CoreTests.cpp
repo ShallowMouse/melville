@@ -125,6 +125,7 @@ int main()
     {
         auto& p = hub.getPatchbay();
         p.disconnect (p.findSource ("clock", "Click"), p.findDest ("interface", "Out 1"));
+        p.disconnect (p.findSource ("twain", "Speakers A L"), p.findDest ("interface", "Out 1"));   // (TWAIN's monitor, by default)
         p.connect (p.findSource ("hawthorne", "Click"), p.findDest ("interface", "Out 1"));
     }
 
