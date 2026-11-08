@@ -490,22 +490,23 @@ public:
     void refresh()
     {
         const juce::ScopedValueSetter<bool> u (updating, true);
+        auto put = [] (juce::Slider& k, double v) { if (! k.isMouseButtonDown() && std::abs (k.getValue() - v) > 1.0e-4) k.setValue (v, juce::dontSendNotification); };
         for (int s = 0; s < sources.size(); ++s) sources[s]->setToggleState (twain.source.load() == s, juce::dontSendNotification);
         for (int s = 0; s < speakerButtons.size(); ++s) speakerButtons[s]->setToggleState (twain.speakers.load() == s, juce::dontSendNotification);
         dim.setToggleState (twain.dim.load(), juce::dontSendNotification);
         mute.setToggleState (twain.mute.load(), juce::dontSendNotification);
         mono.setToggleState (twain.mono.load(), juce::dontSendNotification);
-        level.setValue (twain.monitorLevel.load() <= 0.0f ? -60.0 : juce::Decibels::gainToDecibels (twain.monitorLevel.load()), juce::dontSendNotification);
-        talkLevel.setValue (twain.talkLevel.load(), juce::dontSendNotification);
+        put (level, twain.monitorLevel.load() <= 0.0f ? -60.0 : juce::Decibels::gainToDecibels (twain.monitorLevel.load()));
+        put (talkLevel, twain.talkLevel.load());
         for (int f = 0; f < TwainNode::numFeeds; ++f)
         {
             auto& fd = twain.feeds[(size_t) f];
-            for (int c = 0; c < TwainNode::numCues; ++c) cells[f * TwainNode::numCues + c]->setValue (fd.cue[c].load(), juce::dontSendNotification);
-            mixKnobs[f]->setValue (fd.mixLevel.load(), juce::dontSendNotification);
-            clickKnobs[f]->setValue (fd.clickLevel.load(), juce::dontSendNotification);
-            feedLevels[f]->setValue (fd.level.load(), juce::dontSendNotification);
+            for (int c = 0; c < TwainNode::numCues; ++c) put (*cells[f * TwainNode::numCues + c], fd.cue[c].load());
+            put (*mixKnobs[f], fd.mixLevel.load());
+            put (*clickKnobs[f], fd.clickLevel.load());
+            put (*feedLevels[f], fd.level.load());
         }
-        updateRowNames();
+        if (ticks % 20 == 0 || rowNames.isEmpty()) updateRowNames();
     }
 
 private:
@@ -561,7 +562,8 @@ private:
         for (int f = 0; f < TwainNode::numFeeds; ++f) fall (shownFeed[(size_t) f], twain.feedPeak[(size_t) f]);
         repaint (monitorMeter.expanded (2));
         for (auto& m : feedMeters) repaint (m.expanded (2));
-        if (++ticks % 20 == 0) { updateRowNames(); repaint (feedsArea); }
+        if (++ticks % 4 == 0) refresh();          // (levels set on a phone, or in a session, show here)
+        if (ticks % 20 == 0) repaint (feedsArea);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
