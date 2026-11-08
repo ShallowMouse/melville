@@ -70,7 +70,7 @@ public:
             const double spb = s.clockRate * 60.0 / s.bpm;
             const int bpb = juce::jmax (1, s.beatsPerBar);
             const float gain = clickGain.load (std::memory_order_relaxed);
-            const double speed = s.rolling ? juce::jlimit (0.25, 4.0, s.rate * s.clockRate / sr) : 1.0;
+            const double speed = s.rolling ? juce::jlimit (0.25, 4.0, std::abs (s.rate) * s.clockRate / sr) : 1.0;
             const double decay = std::exp (-speed / (0.012 * sr));
             for (int k = 0; k < n; ++k)
             {
@@ -83,9 +83,10 @@ public:
                         lastBeat = (juce::int64) std::ceil (beats - 1.0e-9) - 1;   // a start exactly on a beat clicks
                         wasRolling = true;
                     }
-                    if (b > lastBeat)
+                    if (b != lastBeat)          // a beat crossed (either way: Hawthorne can play backwards)
                     {
-                        const bool accent = ((b % bpb) + bpb) % bpb == 0;
+                        const auto beat = juce::jmax (b, lastBeat);
+                        const bool accent = ((beat % bpb) + bpb) % bpb == 0;
                         freq = accent ? 1760.0 : 1175.0;
                         phase = 0.0;
                         clickEnv = accent ? accentGain.load (std::memory_order_relaxed) : 0.7;
