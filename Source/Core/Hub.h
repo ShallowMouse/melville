@@ -18,6 +18,7 @@
 // into Hawthorne, which Hawthorne Route already allows for.
 
 #include <juce_audio_devices/juce_audio_devices.h>
+#include "ClockNode.h"
 #include "Patchbay.h"
 #include "Node.h"
 
@@ -100,6 +101,13 @@ public:
     /** Audio thread, at the start of every block (frame, samples, rate): MELVILLE's own clock.
         Set before the interface opens. */
     std::function<void (juce::int64, int, double)> onBlockStart;
+
+    /** MELVILLE's click and LTC out. */
+    ClockNode& getClock() const
+    {
+        for (auto& n : nodes) if (auto* c = dynamic_cast<ClockNode*> (n.get())) return *c;
+        jassertfalse; static ClockNode none; return none;
+    }
 
     /** A PartDevice opening / closing (keeps the parts in step with the interface). */
     void partDeviceOpened (PartDevice&);

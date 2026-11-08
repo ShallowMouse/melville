@@ -145,7 +145,7 @@ std::vector<std::pair<int, Cord>> Patchbay::getAllCords() const
 std::unique_ptr<juce::XmlElement> Patchbay::toXml() const
 {
     auto xml = std::make_unique<juce::XmlElement> ("PATCH");
-    xml->setAttribute ("version", 3);
+    xml->setAttribute ("version", 4);
     auto where = [this] (int flat, bool isSource) -> std::pair<juce::String, juce::String>
     {
         for (auto& p : ports)
@@ -172,6 +172,21 @@ std::unique_ptr<juce::XmlElement> Patchbay::toXml() const
 }
 
 void Patchbay::fromXml (const juce::XmlElement& xml)
+{
+    // (version 3: the click and LTC out were Hawthorne's and Route's; they're MELVILLE's clock's now)
+    juce::XmlElement x (xml);
+    if (x.getIntAttribute ("version") < 4)
+        for (auto* e : x.getChildWithTagNameIterator ("CORD"))
+        {
+            if (e->getStringAttribute ("fromPort") == "hawthorne" && e->getStringAttribute ("from") == "Click")
+                e->setAttribute ("fromPort", "clock");
+            if (e->getStringAttribute ("fromPort") == "route" && e->getStringAttribute ("from") == "Hawthorne LTC")
+                { e->setAttribute ("fromPort", "clock"); e->setAttribute ("from", "LTC"); }
+        }
+    fromXmlCurrent (x);
+}
+
+void Patchbay::fromXmlCurrent (const juce::XmlElement& xml)
 {
     for (auto& c : edit.into) c.clear();
     for (auto* e : xml.getChildWithTagNameIterator ("CORD"))

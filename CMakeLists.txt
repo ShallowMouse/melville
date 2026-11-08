@@ -55,6 +55,7 @@ set(CORE_SOURCES
 set(LINK_INCLUDES
     "${HAWTHORNE_DIR}/Source/Route"
     "${HAWTHORNE_DIR}/Source/Network"
+    "${HAWTHORNE_DIR}/Source/Engine"
     "${EMERSON_DIR}/Source/Link")
 
 set(COMMON_DEFS

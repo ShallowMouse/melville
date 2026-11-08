@@ -13,6 +13,7 @@
 #include "UI/PatchbayView.h"
 #include "UI/Taskbar.h"
 #include "UI/WindowFrame.h"
+#include "UI/ClockWindow.h"
 #include "Core/NetworkNode.h"
 #include "Updater.h"
 #include "Hosted/MelvilleHosted.h"
@@ -560,6 +561,26 @@ public:
         addAndMakeVisible (sessionTile);
 
         netTile.onClick = [this] { if (onShowNetwork) onShowNetwork(); };
+
+        clockTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
+        {
+            // a metronome: MELVILLE's tempo, click and timecode
+            auto b = r.reduced (r.getWidth() * 0.16f);
+            juce::Path p;
+            p.startNewSubPath (b.getX() + b.getWidth() * 0.36f, b.getY());
+            p.lineTo (b.getX() + b.getWidth() * 0.64f, b.getY());
+            p.lineTo (b.getRight() - b.getWidth() * 0.06f, b.getBottom());
+            p.lineTo (b.getX() + b.getWidth() * 0.06f, b.getBottom());
+            p.closeSubPath();
+            g.setColour (Colours::textDim);
+            g.strokePath (p, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (Colours::accent);
+            g.drawLine (b.getCentreX(), b.getBottom() - b.getHeight() * 0.2f, b.getRight() - b.getWidth() * 0.18f, b.getY() + b.getHeight() * 0.12f, 2.5f);
+            g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ b.getCentreX() + b.getWidth() * 0.16f, b.getY() + b.getHeight() * 0.42f }));
+        };
+        clockTile.onClick = [this] { if (onShowClock) onShowClock(); };
+        clockTile.setTooltip ("CLOCK: MELVILLE's tempo, click and timecode (LTC / MTC out, chase)");
+        addAndMakeVisible (clockTile);
         netTile.setTooltip ("MELVILLE LINK: audio from other PCs (THOREAU, IRVING), onto the patchbay");
         addAndMakeVisible (netTile);
         updateTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
@@ -596,7 +617,7 @@ public:
         addAndMakeVisible (transportStrip);
 
         startTimerHz (4);
-        setSize (wordmarkWidth + (tiles.size() + 5) * (tileWidth + gap) + 26 + TransportStrip::preferredWidth + 28 + 200, barHeight);
+        setSize (wordmarkWidth + (tiles.size() + 6) * (tileWidth + gap) + 26 + TransportStrip::preferredWidth + 28 + 200, barHeight);
     }
 
     void paint (juce::Graphics& g) override
@@ -641,7 +662,7 @@ public:
         r.removeFromLeft (14);
         divider2X = r.getX();
         r.removeFromLeft (14);
-        for (auto* t : { &sessionTile, &patchTile, &netTile, &audioTile, &updateTile }) { t->setBounds (r.removeFromLeft (tileWidth)); r.removeFromLeft (gap); }
+        for (auto* t : { &sessionTile, &clockTile, &patchTile, &netTile, &audioTile, &updateTile }) { t->setBounds (r.removeFromLeft (tileWidth)); r.removeFromLeft (gap); }
         statusArea = r.withTrimmedLeft (10);
     }
 
@@ -737,7 +758,7 @@ public:
             }
             addAndMakeVisible (t);
         }
-        setSize (wordmarkWidth + (tiles.size() + 5) * (tileWidth + gap) + 26 + TransportStrip::preferredWidth + 28 + 200, barHeight);
+        setSize (wordmarkWidth + (tiles.size() + 6) * (tileWidth + gap) + 26 + TransportStrip::preferredWidth + 28 + 200, barHeight);
         resized();
     }
 
@@ -801,9 +822,9 @@ private:
     std::vector<std::unique_ptr<PartWindow>>& windows;
     juce::OwnedArray<Tile> tiles;
     Tile patchTile { "Patchbay", {}, Colours::accent }, netTile { "MELVILLE Link", {}, Colours::accent }, audioTile { "Interface", {}, Colours::accent },
-         updateTile { "Update", {}, Colours::accent }, sessionTile { "Session", {}, Colours::accent };
+         updateTile { "Update", {}, Colours::accent }, sessionTile { "Session", {}, Colours::accent }, clockTile { "Clock", {}, Colours::accent };
 public:
-    std::function<void()> onShowNetwork;
+    std::function<void()> onShowNetwork, onShowClock;
     std::function<void (juce::Component&)> onSessionMenu;
     void setSessionName (const juce::String& n)
     {
@@ -860,6 +881,25 @@ public:
         // the hub first: the parts open their devices on it as they're made
         hub = std::make_unique<Hub>();
         hub->onBlockStart = [] (juce::int64 frame, int n, double sr) { melville::clockBlock (frame, n, sr); };
+        hub->getClock().getState = [&clock = hub->getClock()]
+        {
+            // MELVILLE's clock at the start of this block (the tape, or MELVILLE's own)
+            auto& t = melville::transport();
+            melville::ClockNode::State s;
+            int flags = 0;
+            s.valid = melville::tapePositionAt (melville::currentFrame(), s.pos, s.rate, flags);
+            s.rolling = (flags & 1) != 0;
+            s.clockRate = t.reelRate.load (std::memory_order_relaxed);
+            s.bpm = t.bpm.load (std::memory_order_relaxed);
+            s.beatsPerBar = t.beatsPerBar.load (std::memory_order_relaxed);
+            s.barOne = t.barOne.load (std::memory_order_relaxed);
+            clock.tcRate.store (t.tcRate.load (std::memory_order_relaxed), std::memory_order_relaxed);
+            clock.tcStart.store (t.tcStart.load (std::memory_order_relaxed), std::memory_order_relaxed);
+            clock.recording.store ((flags & 2) != 0, std::memory_order_relaxed);
+            return s;
+        };
+        loadClockSettings();
+        mtcOut = std::make_unique<melville::MtcOut> (hub->getClock());
         {
             // MELVILLE's tempo (a reel with its own takes over while it's loaded)
             auto* s = props.getUserSettings();
@@ -907,6 +947,7 @@ public:
 
         auto* barContent = new Bar (*hub, parts, windows);
         barContent->onShowNetwork = [this] { showNetwork(); };
+        barContent->onShowClock = [this] { showClock(); };
         barContent->onSessionMenu = [this] (juce::Component& c) { showSessionMenu (c); };
         barContent->setSessionName (sessionFile().getFileNameWithoutExtension());
         barContent->canAddIrving = [this] { return nextFreeIrving() > 0; };
@@ -919,6 +960,7 @@ public:
             windows[i]->setMinimised (true);
         }
         windows.front()->show();   // Hawthorne, as you'd start the day
+        applyClockSettings();      // (MTC out, and Hawthorne's chase)
         showFromCommandLine (commandLine);
 
         // Test hook (the workflow's smoke test): report which parts came up, then quit
@@ -948,6 +990,8 @@ public:
                     save (b->getPatchbayWindow(), "patchbay-window.png");
                     showNetwork();
                     save (networkWindow.get(), "link-window.png");
+                    showClock();
+                    save (clockWindow.get(), "clock-window.png");
                     for (size_t i = 0; i < windows.size(); ++i)
                     {
                         windows[i]->show();
@@ -984,6 +1028,7 @@ public:
             props.getUserSettings()->setValue ("patch", hub->getPatchbay().toXml().get());
             props.getUserSettings()->setValue ("latencyExtra", hub->extraLatency.load());
             props.getUserSettings()->setValue ("tempoBpm", melville::transport().bpm.load());
+            saveClockSettings();
             props.getUserSettings()->setValue ("tempoBeatsPerBar", melville::transport().beatsPerBar.load());
             hub->getNetwork().saveSettings (*props.getUserSettings());
             if (auto xml = hub->deviceManager.createStateXml())
@@ -1001,6 +1046,8 @@ public:
         juce::ModalComponentManager::getInstance()->cancelAllModalComponents();
 
         networkWindow = nullptr;
+        clockWindow = nullptr;
+        mtcOut = nullptr;
         bar = nullptr;
         windows.clear();
         while (! parts.empty()) parts.pop_back();               // the parts close their devices
@@ -1238,7 +1285,74 @@ private:
     std::vector<std::unique_ptr<melville::PartUI>> parts;
     std::vector<std::unique_ptr<melville::PartWindow>> windows;
     std::unique_ptr<melville::BarWindow> bar;
-    std::unique_ptr<juce::DocumentWindow> networkWindow;
+    std::unique_ptr<juce::DocumentWindow> networkWindow, clockWindow;
+    std::unique_ptr<melville::MtcOut> mtcOut;
+    melville::ClockPanel::Settings clockSettings;
+
+    void loadClockSettings()
+    {
+        auto* s = props.getUserSettings();
+        auto& c = hub->getClock();
+        auto& t = melville::transport();
+        c.clickOn = s->getBoolValue ("clickOn", false);
+        c.clickOnlyRecording = s->getBoolValue ("clickOnlyRecording", false);
+        c.accentGain = s->getBoolValue ("clickAccent", true) ? 1.0f : 0.7f;
+        c.clickGain = (float) s->getDoubleValue ("clickGain", 0.25);
+        c.ltcOn = s->getBoolValue ("ltcOn", true);
+        c.ltcGain = (float) s->getDoubleValue ("ltcGain", 0.3);
+        t.tcRate = s->getIntValue ("tcRate", 1);
+        t.tcStart = s->getDoubleValue ("tcStart", 0.0);
+        clockSettings.mtcOut = s->getValue ("mtcOut");
+        clockSettings.mtcIn = s->getValue ("mtcIn");
+        clockSettings.chase = s->getIntValue ("chase", 0);
+    }
+
+    void saveClockSettings()
+    {
+        auto* s = props.getUserSettings();
+        auto& c = hub->getClock();
+        auto& t = melville::transport();
+        s->setValue ("clickOn", c.clickOn.load());
+        s->setValue ("clickOnlyRecording", c.clickOnlyRecording.load());
+        s->setValue ("clickAccent", c.accentGain.load() > 0.85f);
+        s->setValue ("clickGain", (double) c.clickGain.load());
+        s->setValue ("ltcOn", c.ltcOn.load());
+        s->setValue ("ltcGain", (double) c.ltcGain.load());
+        s->setValue ("tcRate", t.tcRate.load());
+        s->setValue ("tcStart", t.tcStart.load());
+        s->setValue ("mtcOut", clockSettings.mtcOut);
+        s->setValue ("mtcIn", clockSettings.mtcIn);
+        s->setValue ("chase", clockSettings.chase);
+    }
+
+    void applyClockSettings()
+    {
+        if (mtcOut != nullptr && ! mtcOut->open (clockSettings.mtcOut))
+            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MELVILLE", "Couldn't open that MIDI output for MTC.");
+        if (auto& f = melville::transport().setChase) f (clockSettings.chase, clockSettings.mtcIn);
+    }
+
+    void showClock()
+    {
+        if (clockWindow == nullptr)
+        {
+            clockWindow = std::make_unique<melville::ToolWindow> ("MELVILLE \xc2\xb7 CLOCK");
+            auto* panel = new melville::ClockPanel (hub->getClock(), clockSettings);
+            panel->onSettingsChanged = [this] (const melville::ClockPanel::Settings& s)
+            {
+                clockSettings = s;
+                applyClockSettings();
+                saveClockSettings();
+                props.saveIfNeeded();
+            };
+            melville::frameWindow (*clockWindow, panel, true, "Clock", melville::Colours::accent, melville::loadIcon ("melville", 64),
+                                   melville::WindowTitleBar::minimise | melville::WindowTitleBar::close);
+            clockWindow->setResizable (false, false);
+            clockWindow->centreWithSize (clockWindow->getWidth(), clockWindow->getHeight());
+        }
+        clockWindow->setVisible (true);
+        clockWindow->toFront (true);
+    }
 };
 
 START_JUCE_APPLICATION (MelvilleApplication)

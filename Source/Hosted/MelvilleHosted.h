@@ -49,6 +49,8 @@ namespace melville
         std::function<void()> play, stop, record, returnToZero;
         std::function<void (int direction)> wind;           // -1 rewind, +1 fast forward, 0 let go
         std::function<void (double bpm, int beatsPerBar, double barOne)> writeTempo;   // onto the reel (barOne: tape samples)
+        std::function<void (int rate, double startSeconds)> writeTimecode;              // onto the reel, and for its chase
+        std::function<void (int source, const juce::String& mtcInput)> setChase;       // 0 off, 1 LTC (LTC IN jack), 2 MTC
 
         // --- State (any thread)
         std::atomic<bool> available { false };              // Hawthorne is there
@@ -59,6 +61,8 @@ namespace melville
         std::atomic<int> beatsPerBar { 4 };
         std::atomic<double> barOne { 0.0 };                  // tape position of bar 1's downbeat
         std::atomic<int> tempoRev { 0 };                     // changes when the tempo or bar 1 changes
+        std::atomic<int> tcRate { 1 };                       // timecode rate (hawthorne::timecode::Rate: 25)
+        std::atomic<double> tcStart { 0.0 };                 // timecode at zero, seconds
 
         // --- Audio thread: Hawthorne publishes, once per block, where an input sample at the
         //     start of its block lands on tape and how fast the tape goes (0 when stopped).
@@ -80,6 +84,9 @@ namespace melville
     void setTempo (double bpm, int beatsPerBar, double barOne);
     /** A reel came onto the deck with this tempo (bpm 0: none): MELVILLE takes it, or puts its own on it. */
     void reelTempo (double bpm, int beatsPerBar, double barOne);
+    /** MELVILLE's timecode format (written onto the reel); and a reel's own, coming onto the deck. */
+    void setTimecode (int rate, double startSeconds);
+    void reelTimecode (int rate, double startSeconds);
 
     /** Hub, audio thread, at the start of every block: MELVILLE's own clock (no reel). */
     void clockBlock (juce::int64 frame, int numSamples, double sampleRate) noexcept;

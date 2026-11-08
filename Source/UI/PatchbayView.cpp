@@ -113,9 +113,9 @@ void PatchCanvas::rebuild()
 
     {   // MELVILLE itself: the transport's timecode and click
         auto& p = panel ("melville", "MELVILLE");
-        column (p, { "LTC OUT", "route", "MELVILLE's timecode (LTC) from the transport, for anything that chases it.", { "Hawthorne LTC" }, { "LTC" } },
-                   { "LTC IN", "hawthorne", "Timecode for MELVILLE's transport to chase (SYNC > chase LTC).", { "LTC in" }, { "LTC" } });
-        column (p, { "CLICK", "hawthorne", "The click (metronome) at the transport's tempo: to the monitors by default.", { "Click" }, { "CLK" } }, none);
+        column (p, { "LTC OUT", "clock", "MELVILLE's timecode (LTC) from the transport, for anything that chases it (CLOCK > TIMECODE).", { "LTC" }, { "LTC" } },
+                   { "LTC IN", "hawthorne", "Timecode for MELVILLE's transport to chase (CLOCK > TIMECODE > chase LTC).", { "LTC in" }, { "LTC" } });
+        column (p, { "CLICK", "clock", "The click (metronome) at MELVILLE's tempo: to the monitors by default (CLOCK > CLICK).", { "Click" }, { "CLK" } }, none);
 
         // MELVILLE Link, to the right: a set of jacks per connected sender (THOREAU, IRVING ... on other PCs)
         auto& rx = hub.getNetwork().getReceiver();

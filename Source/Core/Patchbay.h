@@ -78,6 +78,9 @@ public:
     // Saving: cords by port id + channel name, so a patch survives ports growing.
     std::unique_ptr<juce::XmlElement> toXml() const;
     void fromXml (const juce::XmlElement&);
+private:
+    void fromXmlCurrent (const juce::XmlElement&);
+public:
 
     //--------------------------------------------------------------------------
     /** Audio thread: the current matrix (never null once a port exists). */

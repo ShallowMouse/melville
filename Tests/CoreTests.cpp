@@ -120,6 +120,13 @@ int main()
         std::copy (in[0], in[0] + nn, whSaw.begin());
     };
     whDev->start (&whitman);
+    // (the fake Hawthorne plays its track 1 back on its device output: cable that to Out 1,
+    //  where MELVILLE's click goes by default now)
+    {
+        auto& p = hub.getPatchbay();
+        p.disconnect (p.findSource ("clock", "Click"), p.findDest ("interface", "Out 1"));
+        p.connect (p.findSource ("hawthorne", "Click"), p.findDest ("interface", "Out 1"));
+    }
 
     // --- run blocks: a ramp into interface input 1
     juce::AudioBuffer<float> in (2, n), out (2, n);

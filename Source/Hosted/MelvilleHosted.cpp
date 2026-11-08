@@ -183,6 +183,21 @@ void reelTempo (double bpm, int bpb, double barOne)
         t.writeTempo (t.bpm.load(), t.beatsPerBar.load(), t.barOne.load());   // a blank reel gets MELVILLE's
 }
 
+void setTimecode (int rate, double start)
+{
+    auto& t = transport();
+    t.tcRate = juce::jlimit (0, 4, rate);
+    t.tcStart = juce::jmax (0.0, start);
+    if (usingTape() && t.writeTimecode) t.writeTimecode (t.tcRate.load(), t.tcStart.load());
+}
+
+void reelTimecode (int rate, double start)
+{
+    auto& t = transport();
+    t.tcRate = juce::jlimit (0, 4, rate);
+    t.tcStart = juce::jmax (0.0, start);
+}
+
 void clockBlock (juce::int64 frame, int n, double sampleRate) noexcept
 {
     auto& t = transport();

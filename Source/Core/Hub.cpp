@@ -58,6 +58,7 @@ Hub::Hub()
     auto link = std::make_unique<LinkBridge>();
     link->open();
     addNode (std::move (link));
+    addNode (std::make_unique<ClockNode>());       // the click and LTC (MELVILLE's)
 
     auto node = [this] (const char* id) -> Node*
     {
@@ -75,6 +76,7 @@ Hub::Hub()
         { Step::process, node ("pequod4") },
         { Step::process, node ("thoreau") },
         { Step::process, node ("hawthorne") },
+        { Step::pull,    node ("clock") },      // click and LTC from the clock (the tape published this block)
         { Step::pull,    node ("route") },      // Hawthorne's tracks, this block
         { Step::process, node ("emerson") },
         { Step::pull,    node ("link") },       // EMERSON's tracks and returns, this block
@@ -139,8 +141,8 @@ void Hub::defaultPatch()
     pb.connectInOrder ("interface", 0, "hawthorne", 0, hawthorne::route::defaultTracks);
     pb.connect (pb.findSource ("route", "Hawthorne master L"), pb.findDest ("interface", "Out 1"));
     pb.connect (pb.findSource ("route", "Hawthorne master R"), pb.findDest ("interface", "Out 2"));
-    pb.connect (pb.findSource ("hawthorne", "Click"), pb.findDest ("interface", "Out 1"));
-    pb.connect (pb.findSource ("hawthorne", "Click"), pb.findDest ("interface", "Out 2"));
+    pb.connect (pb.findSource ("clock", "Click"), pb.findDest ("interface", "Out 1"));
+    pb.connect (pb.findSource ("clock", "Click"), pb.findDest ("interface", "Out 2"));
     // Hawthorne -> EMERSON -> WHITMAN -> EMERSON -> Hawthorne, as Route and the Link do now
     for (int t = 0; t < hawthorne::route::maxTracks; ++t)       // the tape tracks into EMERSON
         pb.connect (pb.findSource ("route", "Hawthorne track " + juce::String (t + 1)),
