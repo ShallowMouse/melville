@@ -145,4 +145,13 @@ namespace melville
 
     /** MELVILLE: the parts in the session, by part id ("hawthorne", "pequod2" ...). */
     const std::map<juce::String, SessionPart>& sessionParts();
+
+    //==========================================================================
+    /** Notes between parts: THOREAU's steps play ALCOTT's instruments. Audio thread, one
+        sender and one taker (the hub runs them in turn). THOREAU sends each pad on its own
+        channel (pad 1 = channel 1) with the pad's MIDI note, `offset` samples into its block. */
+    struct NoteEvent { juce::int64 frame = 0; int offset = 0, channel = 1, note = 60; float velocity = 0.0f; };
+    void postNote (int channel, int note, float velocity, int offset) noexcept;
+    /** Every note sent since the last call (oldest first); returns how many. */
+    int takeNotes (NoteEvent* into, int max) noexcept;
 }

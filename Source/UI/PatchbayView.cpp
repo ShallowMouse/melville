@@ -192,6 +192,18 @@ void PatchCanvas::rebuild()
                                             "their levels: cable them to tape tracks or desk channels to record or mix the kit in parts. Then the overheads and room.",
                      kit, kitShort }, none); }
 
+    {   auto& p = panel ("alcott", "ALCOTT");
+        column (p, { "MIX OUT", "alcott", "ALCOTT's mix: every slot together, after its level.", { "Mix L", "Mix R" }, lr }, none);
+        juce::StringArray slotOuts, slotShort;
+        for (int k = 1; k <= 8; ++k)
+        {
+            slotOuts.addArray ({ "Slot " + juce::String (k) + " L", "Slot " + juce::String (k) + " R" });
+            slotShort.addArray ({ juce::String (k) + "L", juce::String (k) + "R" });
+        }
+        column (p, { "SLOT OUTS", "alcott", "Each of ALCOTT's slots on its own (its instrument and effects): cable them to tape tracks to record them, "
+                                           "or to TWAIN's CUE IN to put them in the headphones.",
+                     slotOuts, slotShort }, none); }
+
     {   auto& p = panel ("hawthorne", "HAWTHORNE");
         column (p, { "TRACK OUT", "route", "Each tape track playing back (or its input, while the track monitors input). To EMERSON by default.",
                      numbered ("Hawthorne track ", tracks), numbers (tracks) },

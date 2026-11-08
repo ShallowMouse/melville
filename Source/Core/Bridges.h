@@ -121,6 +121,14 @@ namespace names
         s.addArray ({ "Overheads L", "Overheads R", "Room L", "Room R" });
         return s;
     }
+    /** ALCOTT's outputs, in its device-channel order: each slot's L / R, then the mix L / R. */
+    inline juce::StringArray alcottOuts()
+    {
+        juce::StringArray s;
+        for (int k = 1; k <= 8; ++k) s.addArray ({ "Slot " + juce::String (k) + " L", "Slot " + juce::String (k) + " R" });
+        s.addArray ({ "Mix L", "Mix R" });
+        return s;
+    }
 }
 
 } // namespace melville

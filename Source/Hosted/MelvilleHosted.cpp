@@ -153,6 +153,36 @@ Transport& transport() noexcept
     return t;
 }
 
+namespace
+{
+    struct NoteBus
+    {
+        static constexpr int size = 1024;
+        juce::AbstractFifo fifo { size };
+        std::array<NoteEvent, size> events;
+    };
+    NoteBus& noteBus() noexcept { static NoteBus b; return b; }
+}
+
+void postNote (int channel, int note, float velocity, int offset) noexcept
+{
+    auto& b = noteBus();
+    const auto w = b.fifo.write (1);       // (full: the note is dropped - nobody is taking them)
+    NoteEvent e { currentFrame(), juce::jmax (0, offset), juce::jlimit (1, 16, channel), juce::jlimit (0, 127, note), velocity };
+    if (w.blockSize1 > 0) b.events[(size_t) w.startIndex1] = e;
+    else if (w.blockSize2 > 0) b.events[(size_t) w.startIndex2] = e;
+}
+
+int takeNotes (NoteEvent* into, int max) noexcept
+{
+    auto& b = noteBus();
+    const auto r = b.fifo.read (juce::jmin (max, b.fifo.getNumReady()));
+    int k = 0;
+    for (int i = 0; i < r.blockSize1; ++i) into[k++] = b.events[(size_t) (r.startIndex1 + i)];
+    for (int i = 0; i < r.blockSize2; ++i) into[k++] = b.events[(size_t) (r.startIndex2 + i)];
+    return k;
+}
+
 juce::int64 currentFrame() noexcept
 {
     auto* hub = Hub::getIfExists();

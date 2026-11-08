@@ -31,6 +31,7 @@ namespace Colours
         if (id == "thoreau")   return juce::Colour (0xff9fbf62);   // moss green
         if (id.startsWith ("pequod")) return juce::Colour (0xffa8443a);   // IRVING (each of them): oxblood
         if (id == "twain")     return juce::Colour (0xffd9875a);   // riverboat red-orange: the control room
+        if (id == "alcott")    return juce::Colour (0xffb27fc0);   // plum: the instrument rack
         if (id == "interface") return juce::Colour (0xffbdbdbd);
         if (id == "network")   return juce::Colour (0xff8fa6bd);   // steel blue
         return accent;                                             // the links

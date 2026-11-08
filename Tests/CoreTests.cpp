@@ -66,7 +66,7 @@ int main()
     // --- parts' devices show the right channels
     {
         PartDeviceType all (hub);
-        CHECK (all.getDeviceNames().size() == 4 + Hub::maxIrvings);   // (Hawthorne, EMERSON, WHITMAN, THOREAU and the IRVINGs)
+        CHECK (all.getDeviceNames().size() == 5 + Hub::maxIrvings);   // (Hawthorne, EMERSON, WHITMAN, THOREAU, ALCOTT and the IRVINGs)
         PartDeviceType one (hub, "emerson");
         CHECK (one.getDeviceNames() == juce::StringArray ("Hawthorne Route (MELVILLE)"));
     }

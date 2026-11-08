@@ -8,7 +8,7 @@
 //
 // Order in a block (Hub::buildSteps):
 //
-//   interface in, network in -> PEQUOD Host -> THOREAU -> Hawthorne
+//   interface in, network in -> PEQUOD Host -> THOREAU -> ALCOTT -> Hawthorne
 //     -> Route bridge (Hawthorne's tracks out)  -> EMERSON -> Route bridge (back into Hawthorne)
 //     -> Link bridge (EMERSON to the desk)      -> WHITMAN -> Link bridge (the mix and sends back)
 //     -> interface out

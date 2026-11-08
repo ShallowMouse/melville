@@ -61,6 +61,30 @@ static juce::Image loadIcon (const juce::String& id, int px = 128)
             g.fillRoundedRectangle (juce::Rectangle<float> (s * 0.09f, s * 0.14f).withCentre ({ s * cx, s * 0.84f }), s * 0.03f);
         return img;
     }
+    if (id == "alcott")
+    {
+        // ALCOTT's mark, drawn: a keyboard (two octaves' worth of keys) under a music-stand arch
+        juce::Image img (juce::Image::ARGB, px, px, true);
+        juce::Graphics g (img);
+        const float s = (float) px;
+        const auto plum = Colours::forPart ("alcott");
+        g.setColour (juce::Colour (0xff1c1d1f));
+        g.fillRoundedRectangle (0.0f, 0.0f, s, s, s * 0.16f);
+        g.setColour (plum);
+        juce::Path arch;
+        arch.addCentredArc (s * 0.5f, s * 0.46f, s * 0.30f, s * 0.22f, 0.0f, -1.45f, 1.45f, true);
+        g.strokePath (arch, juce::PathStrokeType (s * 0.045f));
+        const juce::Rectangle<float> kb (s * 0.16f, s * 0.46f, s * 0.68f, s * 0.34f);
+        g.fillRoundedRectangle (kb, s * 0.03f);
+        const int whites = 7;
+        const float kw = kb.getWidth() / (float) whites;
+        g.setColour (juce::Colour (0xff1c1d1f));
+        for (int k = 1; k < whites; ++k)
+            g.fillRect (kb.getX() + kw * (float) k - s * 0.006f, kb.getY(), s * 0.012f, kb.getHeight());
+        for (int k : { 1, 2, 4, 5, 6 })
+            g.fillRect (kb.getX() + kw * (float) k - kw * 0.3f, kb.getY(), kw * 0.6f, kb.getHeight() * 0.58f);
+        return img;
+    }
     if (data == nullptr) return {};
     // scaled down once, so the bar draws it crisply and cheaply
     auto big = juce::ImageCache::getFromMemory (data, size);
@@ -977,6 +1001,7 @@ public:
         parts.push_back (parts::makeWhitman());
         parts.push_back (parts::makeThoreau());
         parts.push_back (parts::makePequod());
+        parts.push_back (parts::makeAlcott());
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);   // (Hawthorne sets its own as the default)
 
         // every part gets its own taskbar button and icon, in the same order every time:

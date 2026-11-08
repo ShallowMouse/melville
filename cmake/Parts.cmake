@@ -176,6 +176,13 @@ melville_part(NAME "IRVING" DIR "${PEQUOD_HOST_DIR}" MAKER MakePequod.cpp
         Source/PequodNative.cpp Source/PequodPanel.cpp Source/WorkerPool.cpp
     DEFS "hawthorne=pequod_hawthorne;IRVING_LOOK=1")    # (inside MELVILLE it's IRVING, in oxblood)
 
+# ALCOTT: MELVILLE's instrument rack (its own code, on IRVING's PEQUOD engine and look)
+melville_part(NAME "ALCOTT" DIR "${CMAKE_CURRENT_SOURCE_DIR}/Alcott" MAKER MakeAlcott.cpp
+    SOURCES
+        Source/AlcottEngine.cpp Source/AlcottView.cpp
+    DEFS "hawthorne=pequod_hawthorne;IRVING_LOOK=1"
+    INCLUDES "${PEQUOD_HOST_DIR}/Source")
+
 # ---------------------------------------------------------------------------
 target_compile_definitions(Melville PRIVATE ${COMMON_DEFS}
     JUCE_ASIO=1

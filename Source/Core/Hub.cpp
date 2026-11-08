@@ -42,6 +42,7 @@ Hub::Hub()
     addNode (std::make_unique<PartNode> ("emerson", "EMERSON", names::routeFromHawthorne(), names::routeToHawthorne()));
     addNode (std::make_unique<PartNode> ("whitman", "WHITMAN", names::linkToWhitman(), names::linkFromWhitman()));
     addNode (std::make_unique<PartNode> ("thoreau", "THOREAU", juce::StringArray(), names::thoreauOuts()));
+    addNode (std::make_unique<PartNode> ("alcott", "ALCOTT", juce::StringArray(), names::alcottOuts()));
     // IRVING (PEQUOD Host): up to four at once, "pequod", "pequod2" ... (each its own patch panel)
     for (int n = 1; n <= maxIrvings; ++n)
         addNode (std::make_unique<PartNode> (irvingId (n), irvingTitle (n), names::numbered ("In ", 8), names::numbered ("Out ", 8)));
@@ -76,6 +77,7 @@ Hub::Hub()
         { Step::process, node ("pequod3") },
         { Step::process, node ("pequod4") },
         { Step::process, node ("thoreau") },
+        { Step::process, node ("alcott") },     // (after THOREAU: its steps play ALCOTT in the same block)
         { Step::process, node ("hawthorne") },
         { Step::pull,    node ("clock") },      // click and LTC from the clock (the tape published this block)
         { Step::pull,    node ("route") },      // Hawthorne's tracks, this block
