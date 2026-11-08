@@ -16,7 +16,7 @@ std::unique_ptr<PartUI> makeAlcott()
     ui->minWidth = 1100;
     ui->minHeight = 640;
     ui->fullScreen = false;
-    ui->lookAndFeel = std::make_unique<PequodLookAndFeel>();
+    ui->lookAndFeel = std::make_unique<alcott::LookAndFeel>();     // (PEQUOD's, in plum)
     ui->content = std::make_unique<alcott::View>();
     return ui;
 }

@@ -264,7 +264,7 @@ private:
     View& owner;
     Engine::Unit& unit;
     const bool instrument;
-    PowerButton power;
+    PowerLight power;
     juce::TextButton up { juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xb2")) },
                      down { juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbc")) },
                      remove { juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) };
