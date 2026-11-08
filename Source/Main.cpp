@@ -12,6 +12,7 @@
 #include "UI/MelvilleLookAndFeel.h"
 #include "UI/PatchbayView.h"
 #include "UI/Taskbar.h"
+#include "UI/WindowFrame.h"
 #include "Core/NetworkNode.h"
 #include "Updater.h"
 #include "Hosted/MelvilleHosted.h"
@@ -21,6 +22,29 @@ namespace melville
 
 //==============================================================================
 /** A part's own window. */
+static juce::Image loadIcon (const juce::String& id, int px = 128)
+{
+    const void* data = nullptr; int size = 0;
+    if (id == "hawthorne") { data = BinaryData::HAWTHORNE_png;     size = BinaryData::HAWTHORNE_pngSize; }
+    if (id == "emerson")   { data = BinaryData::EMERSON_png;       size = BinaryData::EMERSON_pngSize; }
+    if (id == "whitman")   { data = BinaryData::WHITMAN_png;       size = BinaryData::WHITMAN_pngSize; }
+    if (id == "thoreau")   { data = BinaryData::THOREAU_png;       size = BinaryData::THOREAU_pngSize; }
+    if (id.startsWith ("pequod")) { data = BinaryData::IRVING_png;        size = BinaryData::IRVING_pngSize; }      // IRVING
+    if (id == "melville")  { data = BinaryData::MELVILLE_png;      size = BinaryData::MELVILLE_pngSize; }
+    if (data == nullptr) return {};
+    // scaled down once, so the bar draws it crisply and cheaply
+    auto big = juce::ImageCache::getFromMemory (data, size);
+    return big.isValid() ? big.rescaled (px, px, juce::Graphics::highResamplingQuality) : big;
+}
+
+/** One of MELVILLE's own windows (patchbay, interface): closing hides it. */
+class ToolWindow : public juce::DocumentWindow
+{
+public:
+    explicit ToolWindow (const juce::String& name) : DocumentWindow (name, Colours::bg, DocumentWindow::allButtons) {}
+    void closeButtonPressed() override { setVisible (false); }
+};
+
 class PartWindow : public juce::DocumentWindow
 {
 public:
@@ -28,11 +52,10 @@ public:
         : DocumentWindow ("MELVILLE \xc2\xb7 " + p.title, p.background, DocumentWindow::allButtons), part (p)
     {
         if (part.lookAndFeel != nullptr) setLookAndFeel (part.lookAndFeel.get());
-        setUsingNativeTitleBar (part.nativeTitleBar);
-        if (! part.nativeTitleBar) setTitleBarHeight (0);
-        setContentNonOwned (part.content.get(), true);
-        setResizable (true, true);
-        setResizeLimits (part.minWidth, part.minHeight, 10000, 10000);
+        // MELVILLE's own window bar, in the part's colour
+        frameWindow (*this, part.content.get(), false, part.title, Colours::forPart (part.id), loadIcon (part.id, 64));
+        setResizable (true, false);
+        setResizeLimits (part.minWidth, part.minHeight + WindowTitleBar::height, 10000, 10000);
         centreWithSize (juce::jmax (getWidth(), part.minWidth), juce::jmax (getHeight(), part.minHeight));
     }
 
@@ -138,19 +161,6 @@ private:
     juce::Colour accent;
 };
 
-static juce::Image loadIcon (const juce::String& id, int px = 128)
-{
-    const void* data = nullptr; int size = 0;
-    if (id == "hawthorne") { data = BinaryData::HAWTHORNE_png;     size = BinaryData::HAWTHORNE_pngSize; }
-    if (id == "emerson")   { data = BinaryData::EMERSON_png;       size = BinaryData::EMERSON_pngSize; }
-    if (id == "whitman")   { data = BinaryData::WHITMAN_png;       size = BinaryData::WHITMAN_pngSize; }
-    if (id == "thoreau")   { data = BinaryData::THOREAU_png;       size = BinaryData::THOREAU_pngSize; }
-    if (id.startsWith ("pequod")) { data = BinaryData::IRVING_png;        size = BinaryData::IRVING_pngSize; }      // IRVING
-    if (data == nullptr) return {};
-    // scaled down once, so the bar draws it crisply and cheaply
-    auto big = juce::ImageCache::getFromMemory (data, size);
-    return big.isValid() ? big.rescaled (px, px, juce::Graphics::highResamplingQuality) : big;
-}
 
 //==============================================================================
 /** MELVILLE's transport on the bar: RTZ, REW, FFW, STOP, PLAY, REC, the counter and the
@@ -232,7 +242,10 @@ public:
         {
             const double beats = ((double) t.position.load() - t.barOne.load()) / (rate * 60.0 / t.bpm.load());
             const int bpb = juce::jmax (1, t.beatsPerBar.load());
-            const int bar = (int) std::floor (beats / bpb) + 1, beat = (int) std::floor (std::fmod (std::fmod (beats, (double) bpb) + bpb, (double) bpb)) + 1;
+            // as Hawthorne counts: ... bar -2, bar -1 (the count-in), bar 1, bar 2 ... (no bar 0)
+            const auto b = (juce::int64) std::floor (beats + 1.0e-9);
+            const auto barIdx = b >= 0 ? b / bpb : -((-b + bpb - 1) / bpb);
+            const int bar = (int) (barIdx + (barIdx >= 0 ? 1 : 0)), beat = (int) (b - barIdx * bpb) + 1;
             sub = "BAR " + juce::String (bar) + "  BEAT " + juce::String (beat);
         }
         g.drawText (sub, c, juce::Justification::centred);
@@ -258,6 +271,7 @@ public:
             sig.addItem (juce::String (n) + "/4", have, n == bpb, [set, bpm, n] { set (bpm, n, melville::transport().barOne.load()); });
         m.addSubMenu ("Beats per bar", sig, have);
         m.addSeparator();
+        m.addItem ("Bar 1 at the start of the tape", have && t.barOne.load() != 0.0, false, [set, bpm, bpb] { set (bpm, bpb, 0.0); });
         m.addItem ("Bar 1 here (where the tape is now)", have, false, [set, bpm, bpb]
                    { set (bpm, bpb, std::round ((double) melville::transport().position.load())); });
         const double ms = juce::jmax (1.0, t.reelRate.load()) * 0.001;
@@ -637,9 +651,8 @@ public:
     {
         if (patchWindow == nullptr)
         {
-            patchWindow = std::make_unique<juce::DocumentWindow> ("MELVILLE \xc2\xb7 PATCHBAY", Colours::bg, juce::DocumentWindow::allButtons);
-            patchWindow->setUsingNativeTitleBar (true);
-            patchWindow->setContentOwned (new PatchbayView (hub), true);
+            patchWindow = std::make_unique<ToolWindow> ("MELVILLE \xc2\xb7 PATCHBAY");
+            frameWindow (*patchWindow, new PatchbayView (hub), true, "Patchbay", Colours::accent, loadIcon ("melville", 64));
             patchWindow->setResizable (true, false);
             patchWindow->centreWithSize (patchWindow->getWidth(), patchWindow->getHeight());
         }
@@ -649,13 +662,16 @@ public:
 
     void showAudio()
     {
-        juce::DialogWindow::LaunchOptions o;
-        o.content.setOwned (new InterfacePanel (hub));
-        o.dialogTitle = "MELVILLE \xc2\xb7 INTERFACE";
-        o.dialogBackgroundColour = Colours::bg;
-        o.useNativeTitleBar = true;
-        o.resizable = false;
-        o.launchAsync();
+        if (interfaceWindow == nullptr)
+        {
+            interfaceWindow = std::make_unique<ToolWindow> ("MELVILLE \xc2\xb7 INTERFACE");
+            frameWindow (*interfaceWindow, new InterfacePanel (hub), true, "Interface", Colours::accent, loadIcon ("melville", 64),
+                         WindowTitleBar::minimise | WindowTitleBar::close);
+            interfaceWindow->setResizable (false, false);
+            interfaceWindow->centreWithSize (interfaceWindow->getWidth(), interfaceWindow->getHeight());
+        }
+        interfaceWindow->setVisible (true);
+        interfaceWindow->toFront (true);
     }
 
     void refreshUpdate()
@@ -763,7 +779,13 @@ public:
     std::function<void (const juce::String&)> onRemoveIrving;
 
     void closePatchbay() { patchWindow = nullptr; }
-    juce::Component* getPatchbayContent() { return patchWindow != nullptr ? patchWindow->getContentComponent() : nullptr; }
+    juce::Component* getPatchbayContent()
+    {
+        if (patchWindow == nullptr) return nullptr;
+        auto* f = dynamic_cast<FramedContent*> (patchWindow->getContentComponent());
+        return f != nullptr ? f->getContent() : patchWindow->getContentComponent();
+    }
+    juce::DocumentWindow* getPatchbayWindow() { return patchWindow.get(); }
 
     static constexpr int barHeight = 100, tileWidth = 84, gap = 4, wordmarkWidth = 160;
 
@@ -794,7 +816,7 @@ private:
     juce::Rectangle<int> statusArea;
     int dividerX = 0, divider2X = 0;
     TransportStrip transportStrip;
-    std::unique_ptr<juce::DocumentWindow> patchWindow;
+    std::unique_ptr<juce::DocumentWindow> patchWindow, interfaceWindow;
 };
 
 class BarWindow : public juce::DocumentWindow
@@ -802,8 +824,8 @@ class BarWindow : public juce::DocumentWindow
 public:
     explicit BarWindow (Bar* bar) : DocumentWindow ("MELVILLE", Colours::panel, DocumentWindow::minimiseButton | DocumentWindow::closeButton)
     {
-        setUsingNativeTitleBar (true);
-        setContentOwned (bar, true);
+        frameWindow (*this, bar, true, "MELVILLE", Colours::accent, loadIcon ("melville", 64),
+                     WindowTitleBar::minimise | WindowTitleBar::close);
         setResizable (false, false);
         // at the top centre of the main screen
         auto area = juce::Rectangle<int> (0, 0, 1920, 1080);
@@ -909,17 +931,21 @@ public:
                         out.setPosition (0); out.truncate();
                         juce::PNGImageFormat().writeImageToStream (c->createComponentSnapshot (c->getLocalBounds()), out);
                     };
-                    auto* b = dynamic_cast<melville::Bar*> (bar->getContentComponent());
+                    auto* b = this->barContent();
                     save (b, "bar.png");
                     b->showPatchbay();
                     save (b->getPatchbayContent(), "patchbay.png");
                     if (auto* pv = b->getPatchbayContent())
                         for (auto* c : pv->getChildren())
                             if (auto* vp = dynamic_cast<juce::Viewport*> (c)) save (vp->getViewedComponent(), "patchbay-full.png");
-                    for (size_t i = 1; i < windows.size(); ++i)
+                    save (bar.get(), "bar-window.png");
+                    save (b->getPatchbayWindow(), "patchbay-window.png");
+                    showNetwork();
+                    save (networkWindow.get(), "link-window.png");
+                    for (size_t i = 0; i < windows.size(); ++i)
                     {
                         windows[i]->show();
-                        save (parts[i]->content.get(), (parts[i]->id + ".png").toRawUTF8());
+                        save (windows[i].get(), (parts[i]->id + ".png").toRawUTF8());
                     }
                 }
 
@@ -1053,7 +1079,7 @@ public:
     {
         props.getUserSettings()->setValue ("session", f.getFullPathName());
         if (bar != nullptr)
-            if (auto* b = dynamic_cast<melville::Bar*> (bar->getContentComponent())) b->setSessionName (f.getFileNameWithoutExtension());
+            if (auto* b = barContent()) b->setSessionName (f.getFileNameWithoutExtension());
     }
 
     void showSessionMenu (juce::Component& target)
@@ -1145,7 +1171,7 @@ public:
     void refreshBar()
     {
         if (bar != nullptr)
-            if (auto* b = dynamic_cast<melville::Bar*> (bar->getContentComponent()))
+            if (auto* b = barContent())
             {
                 b->rebuildTiles();
                 bar->setContentComponentSize (b->getWidth(), b->getHeight());
@@ -1162,6 +1188,13 @@ public:
             });
         networkWindow->setVisible (true);
         networkWindow->toFront (true);
+    }
+
+    melville::Bar* barContent() const
+    {
+        if (bar == nullptr) return nullptr;
+        auto* f = dynamic_cast<melville::FramedContent*> (bar->getContentComponent());
+        return dynamic_cast<melville::Bar*> (f != nullptr ? f->getContent() : bar->getContentComponent());
     }
 
     void systemRequestedQuit() override { quit(); }
