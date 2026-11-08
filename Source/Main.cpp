@@ -192,7 +192,9 @@ public:
         tempo.setColour (juce::Label::textColourId, Colours::text);
         tempo.setColour (juce::Label::backgroundWhenEditingColourId, Colours::panelHi);
         tempo.setColour (juce::Label::textWhenEditingColourId, Colours::text);
-        tempo.setTooltip ("The tempo (the reel's): double-click to type one. THOREAU and IRVING follow it.");
+        tempo.setTooltip ("MELVILLE's tempo (kept on Hawthorne's reel): double-click to type one, right-click for beats per bar and bar 1. "
+                          "THOREAU and IRVING follow it.");
+        tempo.addMouseListener (this, false);
         tempo.onTextChange = [this]
         {
             const double b = tempo.getText().retainCharacters ("0123456789.").getDoubleValue();
@@ -237,7 +239,32 @@ public:
 
         g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
         g.setColour (Colours::textDim);
-        g.drawText ("TEMPO", tempoCaption, juce::Justification::centred);
+        g.drawText (t.bpm.load() > 0.0 ? "TEMPO  " + juce::String (t.beatsPerBar.load()) + "/4" : juce::String ("TEMPO"),
+                    tempoCaption, juce::Justification::centred);
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (! e.mods.isPopupMenu() && ! counterArea.contains (e.getEventRelativeTo (this).getPosition())) return;
+        auto& t = melville::transport();
+        if (! t.available.load() || ! t.setTempo) return;
+        const bool have = t.reelLoaded.load();
+        const double bpm = t.bpm.load() > 0.0 ? t.bpm.load() : 120.0;
+        const int bpb = juce::jmax (1, t.beatsPerBar.load());
+        auto set = [] (double b, int n, double one) { auto& tt = melville::transport(); if (auto& f = tt.setTempo) f (b, n, juce::jmax (0.0, one)); };
+
+        juce::PopupMenu m, sig;
+        for (int n = 2; n <= 12; ++n)
+            sig.addItem (juce::String (n) + "/4", have, n == bpb, [set, bpm, n] { set (bpm, n, melville::transport().barOne.load()); });
+        m.addSubMenu ("Beats per bar", sig, have);
+        m.addSeparator();
+        m.addItem ("Bar 1 here (where the tape is now)", have, false, [set, bpm, bpb]
+                   { set (bpm, bpb, std::round ((double) melville::transport().position.load())); });
+        const double ms = juce::jmax (1.0, t.reelRate.load()) * 0.001;
+        m.addItem ("Bar 1 1 ms earlier", have, false, [set, bpm, bpb, ms] { set (bpm, bpb, melville::transport().barOne.load() - ms); });
+        m.addItem ("Bar 1 1 ms later",   have, false, [set, bpm, bpb, ms] { set (bpm, bpb, melville::transport().barOne.load() + ms); });
+        if (! have) { m.addSeparator(); m.addItem ("(load a reel on Hawthorne: the tempo lives on the reel)", false, false, nullptr); }
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition());
     }
 
     void resized() override

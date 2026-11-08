@@ -115,8 +115,11 @@ namespace names
     /** THOREAU's outputs, in its device-channel order: mix L/R, the 12 drums, overheads L/R, room L/R. */
     inline juce::StringArray thoreauOuts()
     {
-        return { "Mix L", "Mix R", "Kick", "Snare", "Clap", "Rim", "Closed hat", "Open hat", "Low tom", "Mid tom",
-                 "High tom", "Crash", "Ride", "Cowbell", "Overheads L", "Overheads R", "Room L", "Room R" };
+        // the pads by number: each kit names its pads its own way (pad 1 is the kick in every kit)
+        juce::StringArray s { "Mix L", "Mix R" };
+        for (int p = 1; p <= 12; ++p) s.add ("Pad " + juce::String (p));
+        s.addArray ({ "Overheads L", "Overheads R", "Room L", "Room R" });
+        return s;
     }
 }
 

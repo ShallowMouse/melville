@@ -153,8 +153,10 @@ void PatchCanvas::rebuild()
         juce::StringArray kit, kitShort;
         const auto all = names::thoreauOuts();
         for (int i = 2; i < all.size(); ++i) kit.add (all[i]);
-        kitShort.addArray ({ "BD", "SD", "CP", "RS", "CH", "OH", "LT", "MT", "HT", "CY", "RD", "CB", "OVL", "OVR", "RML", "RMR" });
-        column (p, { "KIT OUTS", "thoreau", "Each drum on its own, after its level: cable them to tape tracks or desk channels to record or mix the kit in parts. Then the overheads and room.",
+        for (int i = 1; i <= 12; ++i) kitShort.add (juce::String (i));
+        kitShort.addArray ({ "OVL", "OVR", "RML", "RMR" });
+        column (p, { "KIT OUTS", "thoreau", "THOREAU's pads 1-12 each on their own, in the order of its pattern rows (pad 1 is the kick), after "
+                                            "their levels: cable them to tape tracks or desk channels to record or mix the kit in parts. Then the overheads and room.",
                      kit, kitShort }, none); }
 
     {   auto& p = panel ("hawthorne", "HAWTHORNE");
