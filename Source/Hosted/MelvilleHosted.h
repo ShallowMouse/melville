@@ -100,6 +100,24 @@ namespace melville
     bool tapePositionAt (juce::int64 frame, double& tapePos, double& tapePerSample, int& flags) noexcept;
 
     //==========================================================================
+    /** MELVILLE's library: Hawthorne's sessions and reels, shown and run by MELVILLE. Each reel
+        keeps the whole studio with it (MELVILLE.studio in its folder) and its session sheet. */
+    struct Library
+    {
+        // Hawthorne's (message thread)
+        std::function<juce::Component*()> view;                  // its tape library, for MELVILLE's LIBRARY window
+        std::function<void()> showSheet, refresh;               // the session sheet (documentation); rescan
+        std::function<juce::File()> currentReel;                // the .reel on the deck (or none)
+        // MELVILLE's
+        std::function<void (const juce::File& reel)> reelLeaving, reelArrived;   // save / restore the studio with the reel
+        std::function<void()> show, showDeck;                   // the LIBRARY window; Hawthorne's deck
+    };
+    Library& library() noexcept;
+
+    /** The folder of the reel on the deck (none: no reel): where parts keep files that belong to the song. */
+    juce::File studioFolder();
+
+    //==========================================================================
     /** MELVILLE's session file: one file for the whole studio. Each part (after attach) says
         how to put its state in it and take it back. Message thread. */
     struct SessionPart

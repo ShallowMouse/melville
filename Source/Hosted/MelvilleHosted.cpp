@@ -128,6 +128,19 @@ std::unique_ptr<juce::Component> midiInputsPanel (juce::AudioDeviceManager& dm)
     return std::make_unique<MidiInputsPanel> (dm);
 }
 
+Library& library() noexcept
+{
+    static Library l;
+    return l;
+}
+
+juce::File studioFolder()
+{
+    auto& l = library();
+    const auto reel = l.currentReel ? l.currentReel() : juce::File();
+    return reel.existsAsFile() ? reel.getParentDirectory() : juce::File();
+}
+
 Transport& transport() noexcept
 {
     static Transport t;

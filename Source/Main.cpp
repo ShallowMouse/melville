@@ -556,8 +556,10 @@ public:
             g.fillEllipse (reelArea.withSizeKeepingCentre (d * 0.22f, d * 0.22f));
             g.fillRect (box.getX() + box.getWidth() * 0.2f, box.getBottom() - box.getHeight() * 0.18f, box.getWidth() * 0.6f, 3.0f);
         };
-        sessionTile.onClick = [this] { if (onSessionMenu) onSessionMenu (sessionTile); };
-        sessionTile.setTooltip ("SESSION: save or open the whole studio in one file (the reel, racks, mix, drums, IRVINGs and patch)");
+        sessionTile.onClick = [this] { if (onShowLibrary) onShowLibrary(); };
+        sessionTile.onRightClick = [this] { if (onSessionMenu) onSessionMenu (sessionTile); };
+        sessionTile.setTooltip ("LIBRARY: your sessions and reels. Each reel keeps the whole studio with it (racks, mix, drums, IRVINGs, patch, tempo) "
+                                "and its session sheet. Right-click: session sheet, save, export");
         addAndMakeVisible (sessionTile);
 
         netTile.onClick = [this] { if (onShowNetwork) onShowNetwork(); };
@@ -822,14 +824,15 @@ private:
     std::vector<std::unique_ptr<PartWindow>>& windows;
     juce::OwnedArray<Tile> tiles;
     Tile patchTile { "Patchbay", {}, Colours::accent }, netTile { "MELVILLE Link", {}, Colours::accent }, audioTile { "Interface", {}, Colours::accent },
-         updateTile { "Update", {}, Colours::accent }, sessionTile { "Session", {}, Colours::accent }, clockTile { "Clock", {}, Colours::accent };
+         updateTile { "Update", {}, Colours::accent }, sessionTile { "Library", {}, Colours::accent }, clockTile { "Clock", {}, Colours::accent };
 public:
     std::function<void()> onShowNetwork, onShowClock;
     std::function<void (juce::Component&)> onSessionMenu;
+    std::function<void()> onShowLibrary;
     void setSessionName (const juce::String& n)
     {
-        sessionTile.setTooltip ("SESSION" + (n.isNotEmpty() ? " \"" + n + "\"" : juce::String())
-                                + ": save or open the whole studio in one file (the reel, racks, mix, drums, IRVINGs and patch)");
+        sessionTile.setTooltip ("LIBRARY" + (n.isNotEmpty() ? " - on the deck: " + n : juce::String())
+                                + ". Each reel keeps the whole studio with it. Right-click: session sheet, save, export");
     }
 private:
     juce::Rectangle<int> statusArea;
@@ -948,7 +951,15 @@ public:
         auto* barContent = new Bar (*hub, parts, windows);
         barContent->onShowNetwork = [this] { showNetwork(); };
         barContent->onShowClock = [this] { showClock(); };
-        barContent->onSessionMenu = [this] (juce::Component& c) { showSessionMenu (c); };
+        barContent->onSessionMenu = [this] (juce::Component& c) { showLibraryMenu (c); };
+        barContent->onShowLibrary = [this] { showLibrary(); };
+        {
+            auto& l = melville::library();
+            l.show = [this] { showLibrary(); };
+            l.showDeck = [this] { showDeck(); };
+            l.reelLeaving = [this] (const juce::File& f) { saveStudioWith (f); };
+            l.reelArrived = [this] (const juce::File& f) { studioArrived (f); };
+        }
         barContent->setSessionName (sessionFile().getFileNameWithoutExtension());
         barContent->canAddIrving = [this] { return nextFreeIrving() > 0; };
         barContent->onAddIrving = [this] { if (auto n = nextFreeIrving()) { addIrving (n, true); refreshBar(); } };
@@ -961,6 +972,11 @@ public:
         }
         windows.front()->show();   // Hawthorne, as you'd start the day
         applyClockSettings();      // (MTC out, and Hawthorne's chase)
+        {
+            // no reel on the deck yet: the library is the first thing you see (as it was in Hawthorne)
+            auto& l = melville::library();
+            if (l.currentReel && ! l.currentReel().existsAsFile()) showLibrary();
+        }
         showFromCommandLine (commandLine);
 
         // Test hook (the workflow's smoke test): report which parts came up, then quit
@@ -992,6 +1008,8 @@ public:
                     save (networkWindow.get(), "link-window.png");
                     showClock();
                     save (clockWindow.get(), "clock-window.png");
+                    showLibrary();
+                    save (libraryWindow.get(), "library-window.png");
                     for (size_t i = 0; i < windows.size(); ++i)
                     {
                         windows[i]->show();
@@ -1034,6 +1052,8 @@ public:
             if (auto xml = hub->deviceManager.createStateXml())
                 props.getUserSettings()->setValue ("audio", xml.get());
         }
+        // the studio goes back with the reel on the deck
+        if (auto& f = melville::library().currentReel) saveStudioWith (f());
         for (auto& p : parts) if (p->shutdown) p->shutdown();   // Hawthorne finishes any take first
 
         // dialogs a part left open (IRVING's plug-in manager, say) go before the part does
@@ -1047,6 +1067,12 @@ public:
 
         networkWindow = nullptr;
         clockWindow = nullptr;
+        if (libraryWindow != nullptr) { libraryWindow->clearContentComponent(); libraryWindow = nullptr; }   // (the view is Hawthorne's)
+        {
+            auto& l = melville::library();
+            l.show = l.showDeck = nullptr;
+            l.reelLeaving = l.reelArrived = nullptr;
+        }
         mtcOut = nullptr;
         bar = nullptr;
         windows.clear();
@@ -1165,28 +1191,79 @@ public:
         });
     }
 
-    bool saveSession (const juce::File& f)
+    /** The whole studio as XML: tempo and timecode, the patch, and every part's state. */
+    std::unique_ptr<juce::XmlElement> studioXml()
     {
-        juce::XmlElement root ("MELVILLE_SESSION");
-        root.setAttribute ("version", 1);
-        root.setAttribute ("irvings", countIrvings());
-        root.addChildElement (hub->getPatchbay().toXml().release());
+        auto root = std::make_unique<juce::XmlElement> ("MELVILLE_SESSION");
+        root->setAttribute ("version", 1);
+        root->setAttribute ("irvings", countIrvings());
+        root->addChildElement (hub->getPatchbay().toXml().release());
         {
             auto& t = melville::transport();
-            auto* tempo = root.createNewChildElement ("TEMPO");
+            auto& c = hub->getClock();
+            auto* tempo = root->createNewChildElement ("TEMPO");
             tempo->setAttribute ("bpm", t.bpm.load());
             tempo->setAttribute ("beatsPerBar", t.beatsPerBar.load());
             tempo->setAttribute ("barOne", t.barOne.load());
+            tempo->setAttribute ("tcRate", t.tcRate.load());
+            tempo->setAttribute ("tcStart", t.tcStart.load());
+            tempo->setAttribute ("clickOn", c.clickOn.load());
+            tempo->setAttribute ("clickGain", (double) c.clickGain.load());
         }
         for (auto& [id, sp] : melville::sessionParts())
             if (sp.save)
                 if (auto x = sp.save())
                 {
-                    auto* part = root.createNewChildElement ("PART");
+                    auto* part = root->createNewChildElement ("PART");
                     part->setAttribute ("id", id);
                     part->addChildElement (x.release());
                 }
-        if (! root.writeTo (f))
+        return root;
+    }
+
+    /** Puts the studio back as it was saved. withReel: also put that reel on Hawthorne's deck. */
+    void applyStudio (const juce::XmlElement& root, bool withReel)
+    {
+        // the IRVINGs it had (their racks come back below)
+        bool added = false;
+        for (auto* part : root.getChildWithTagNameIterator ("PART"))
+        {
+            const auto id = part->getStringAttribute ("id");
+            const int n = id.getTrailingIntValue();
+            if (! id.startsWith ("pequod") || n < 2 || n > melville::Hub::maxIrvings) continue;
+            bool have = false;
+            for (auto& p : parts) have = have || p->id == id;
+            if (! have) { addIrving (n, false); added = true; }
+        }
+        if (added) refreshBar();
+
+        if (auto* patch = root.getChildByName ("PATCH"))
+            hub->getPatchbay().fromXml (*patch);
+
+        const auto& sessions = melville::sessionParts();
+        for (auto* part : root.getChildWithTagNameIterator ("PART"))
+        {
+            const auto id = part->getStringAttribute ("id");
+            if (id == "hawthorne" && ! withReel) continue;
+            auto it = sessions.find (id);
+            if (it != sessions.end() && it->second.load && part->getFirstChildElement() != nullptr)
+                it->second.load (*part->getFirstChildElement());
+        }
+        if (auto* tempo = root.getChildByName ("TEMPO"))
+        {
+            melville::setTempo (tempo->getDoubleAttribute ("bpm", 120.0), tempo->getIntAttribute ("beatsPerBar", 4),
+                                tempo->getDoubleAttribute ("barOne", 0.0));
+            melville::setTimecode (tempo->getIntAttribute ("tcRate", melville::transport().tcRate.load()),
+                                   tempo->getDoubleAttribute ("tcStart", melville::transport().tcStart.load()));
+            auto& c = hub->getClock();
+            c.clickOn = tempo->getBoolAttribute ("clickOn", c.clickOn.load());
+            c.clickGain = (float) tempo->getDoubleAttribute ("clickGain", c.clickGain.load());
+        }
+    }
+
+    bool saveSession (const juce::File& f)
+    {
+        if (! studioXml()->writeTo (f))
         {
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MELVILLE", "Couldn't save " + f.getFullPathName());
             return false;
@@ -1203,34 +1280,75 @@ public:
             juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MELVILLE", f.getFileName() + " isn't a MELVILLE session.");
             return false;
         }
-        // the IRVINGs it had (their racks come back below)
-        bool added = false;
-        for (auto* part : root->getChildWithTagNameIterator ("PART"))
-        {
-            const auto id = part->getStringAttribute ("id");
-            const int n = id.getTrailingIntValue();
-            if (! id.startsWith ("pequod") || n < 2 || n > melville::Hub::maxIrvings) continue;
-            bool have = false;
-            for (auto& p : parts) have = have || p->id == id;
-            if (! have) { addIrving (n, false); added = true; }
-        }
-        if (added) refreshBar();
-
-        if (auto* patch = root->getChildByName ("PATCH"))
-            hub->getPatchbay().fromXml (*patch);
-
-        const auto& sessions = melville::sessionParts();
-        for (auto* part : root->getChildWithTagNameIterator ("PART"))
-        {
-            auto it = sessions.find (part->getStringAttribute ("id"));
-            if (it != sessions.end() && it->second.load && part->getFirstChildElement() != nullptr)
-                it->second.load (*part->getFirstChildElement());
-        }
-        if (auto* tempo = root->getChildByName ("TEMPO"))
-            melville::setTempo (tempo->getDoubleAttribute ("bpm", 120.0), tempo->getIntAttribute ("beatsPerBar", 4),
-                                tempo->getDoubleAttribute ("barOne", 0.0));
+        applyStudio (*root, true);
         setSessionFile (f);
         return true;
+    }
+
+    //==========================================================================
+    // The library: each reel keeps the whole studio with it
+
+    static constexpr const char* studioFileName = "MELVILLE.studio";
+
+    void saveStudioWith (const juce::File& reelFile)
+    {
+        if (! reelFile.existsAsFile()) return;
+        auto x = studioXml();
+        x->setAttribute ("reel", reelFile.getFileName());
+        x->writeTo (reelFile.getParentDirectory().getChildFile (studioFileName));
+    }
+
+    void studioArrived (const juce::File& reelFile)
+    {
+        // a reel that has a studio saved with it brings it back; a new one keeps the studio as it is
+        if (auto x = juce::XmlDocument::parse (reelFile.getParentDirectory().getChildFile (studioFileName)))
+            if (x->hasTagName ("MELVILLE_SESSION"))
+                applyStudio (*x, false);
+        if (bar != nullptr)
+            if (auto* b = barContent()) b->setSessionName (reelFile.getParentDirectory().getParentDirectory().getFileName()
+                                                            + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + reelFile.getFileNameWithoutExtension());
+    }
+
+    void showLibrary()
+    {
+        auto& l = melville::library();
+        if (! l.view) return;
+        if (libraryWindow == nullptr)
+        {
+            libraryWindow = std::make_unique<melville::ToolWindow> ("MELVILLE \xc2\xb7 LIBRARY");
+            auto* view = l.view();
+            view->setSize (1300, 820);
+            view->setVisible (true);
+            melville::frameWindow (*libraryWindow, view, false, "Library", melville::Colours::accent, melville::loadIcon ("melville", 64));
+            libraryWindow->setResizable (true, false);
+            libraryWindow->setResizeLimits (900, 560, 6000, 4000);
+            libraryWindow->centreWithSize (libraryWindow->getWidth(), libraryWindow->getHeight());
+        }
+        if (l.refresh) l.refresh();
+        libraryWindow->setVisible (true);
+        libraryWindow->toFront (true);
+    }
+
+    void showDeck()
+    {
+        if (libraryWindow != nullptr) libraryWindow->setVisible (false);
+        if (! windows.empty()) windows.front()->show();
+    }
+
+    void showLibraryMenu (juce::Component& target)
+    {
+        juce::PopupMenu m;
+        auto& l = melville::library();
+        const auto reel = l.currentReel ? l.currentReel() : juce::File();
+        m.addItem ("Open the library", [this] { showLibrary(); });
+        m.addItem ("Session sheet (notes, track sheet, take log, photos)", reel.existsAsFile(), false, [] { if (auto& f = melville::library().showSheet) f(); });
+        m.addSeparator();
+        m.addItem ("Save the studio with \"" + (reel.existsAsFile() ? reel.getFileNameWithoutExtension() : juce::String ("the reel")) + "\"",
+                   reel.existsAsFile(), false, [this, reel] { saveStudioWith (reel); });
+        m.addSeparator();
+        m.addItem ("Export the studio to a file...", [this] { chooseSession (true); });
+        m.addItem ("Import a studio file...",       [this] { chooseSession (false); });
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target));
     }
 
     void refreshBar()
@@ -1285,7 +1403,7 @@ private:
     std::vector<std::unique_ptr<melville::PartUI>> parts;
     std::vector<std::unique_ptr<melville::PartWindow>> windows;
     std::unique_ptr<melville::BarWindow> bar;
-    std::unique_ptr<juce::DocumentWindow> networkWindow, clockWindow;
+    std::unique_ptr<juce::DocumentWindow> networkWindow, clockWindow, libraryWindow;
     std::unique_ptr<melville::MtcOut> mtcOut;
     melville::ClockPanel::Settings clockSettings;
 
