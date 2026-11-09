@@ -40,7 +40,7 @@ namespace
     {
         explicit MelvilleNetworkWindow (hawthorne::NetReceiver& rx) : hawthorne::NetworkWindow (rx)
         {
-            setName ("MELVILLE \xc2\xb7 MELVILLE LINK");
+            setName (juce::String (juce::CharPointer_UTF8 ("MELVILLE \xc2\xb7 MELVILLE LINK")));
             setLookAndFeel (&lnf);
             // MELVILLE's bar and colour (it's MELVILLE's link, not Hawthorne's)
             getPanel().setAccent (melville::Colours::accent, melville::Colours::accentLo);

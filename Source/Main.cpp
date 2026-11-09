@@ -103,7 +103,7 @@ class PartWindow : public juce::DocumentWindow
 {
 public:
     explicit PartWindow (PartUI& p)
-        : DocumentWindow ("MELVILLE \xc2\xb7 " + p.title, p.background, DocumentWindow::allButtons), part (p)
+        : DocumentWindow (juce::String (juce::CharPointer_UTF8 ("MELVILLE \xc2\xb7 ")) + p.title, p.background, DocumentWindow::allButtons), part (p)
     {
         if (part.lookAndFeel != nullptr) setLookAndFeel (part.lookAndFeel.get());
         // MELVILLE's own window bar, in the part's colour
@@ -615,6 +615,31 @@ public:
                                 "and its session sheet. Right-click: session sheet, save, export");
         addAndMakeVisible (sessionTile);
 
+        sheetTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
+        {
+            // a clipboard: the session sheet (notes, track sheet, take log, photos)
+            auto box = r.reduced (r.getWidth() * 0.2f, r.getHeight() * 0.1f);
+            g.setColour (Colours::panelHi);
+            g.fillRoundedRectangle (box, 3.0f);
+            g.setColour (Colours::textDim);
+            g.drawRoundedRectangle (box, 3.0f, 1.5f);
+            g.setColour (Colours::accent);
+            g.fillRoundedRectangle (juce::Rectangle<float> (box.getWidth() * 0.44f, box.getHeight() * 0.12f)
+                                        .withCentre ({ box.getCentreX(), box.getY() + 1.0f }), 2.0f);
+            for (int k = 0; k < 4; ++k)
+                g.fillRect (box.getX() + box.getWidth() * 0.18f, box.getY() + box.getHeight() * (0.3f + 0.16f * (float) k),
+                            box.getWidth() * (k == 3 ? 0.4f : 0.64f), 2.0f);
+        };
+        sheetTile.onClick = []
+        {
+            auto& l = melville::library();
+            const bool onDeck = l.currentReel && l.currentReel().existsAsFile();
+            if (onDeck) { if (l.showSheet) l.showSheet(); }
+            else if (l.show) l.show();       // (no reel on the deck: the Library, to pick one)
+        };
+        sheetTile.setTooltip ("SESSION SHEET: the reel on the deck's notes, track sheet, take log and photos");
+        addAndMakeVisible (sheetTile);
+
         netTile.onClick = [this] { if (onShowNetwork) onShowNetwork(); };
 
         clockTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
@@ -672,7 +697,7 @@ public:
         addAndMakeVisible (transportStrip);
 
         startTimerHz (4);
-        setSize (wordmarkWidth + (tiles.size() + 6) * (tileWidth + gap) + 26 + TransportStrip::preferredWidth + 28 + 200, barHeight);
+        setSize (wordmarkWidth + (tiles.size() + 7) * (tileWidth + gap) + 26 + TransportStrip::preferredWidth + 28 + 200, barHeight);
     }
 
     void paint (juce::Graphics& g) override
@@ -698,8 +723,8 @@ public:
             else
             {
                 lines.add (dev->getName().toUpperCase());
-                lines.add (juce::String (dev->getCurrentSampleRate() / 1000.0, 1) + " kHz  \xc2\xb7  " + juce::String (dev->getCurrentBufferSizeSamples())
-                           + "  \xc2\xb7  CPU " + juce::String (juce::roundToInt (hub.getLoad() * 100.0f)) + "%");
+                lines.add (juce::String (dev->getCurrentSampleRate() / 1000.0, 1) + juce::String (juce::CharPointer_UTF8 (" kHz  \xc2\xb7  ")) + juce::String (dev->getCurrentBufferSizeSamples())
+                           + juce::String (juce::CharPointer_UTF8 ("  \xc2\xb7  CPU ")) + juce::String (juce::roundToInt (hub.getLoad() * 100.0f)) + "%");
             }
             g.drawFittedText (lines.joinIntoString ("\n"), statusArea, juce::Justification::centredRight, 2);
         }
@@ -717,7 +742,7 @@ public:
         r.removeFromLeft (14);
         divider2X = r.getX();
         r.removeFromLeft (14);
-        for (auto* t : { &sessionTile, &clockTile, &patchTile, &netTile, &audioTile, &updateTile }) { t->setBounds (r.removeFromLeft (tileWidth)); r.removeFromLeft (gap); }
+        for (auto* t : { &sessionTile, &sheetTile, &clockTile, &patchTile, &netTile, &audioTile, &updateTile }) { t->setBounds (r.removeFromLeft (tileWidth)); r.removeFromLeft (gap); }
         statusArea = r.withTrimmedLeft (10);
     }
 
@@ -725,7 +750,7 @@ public:
     {
         if (patchWindow == nullptr)
         {
-            patchWindow = std::make_unique<ToolWindow> ("MELVILLE \xc2\xb7 PATCHBAY");
+            patchWindow = std::make_unique<ToolWindow> (juce::String (juce::CharPointer_UTF8 ("MELVILLE \xc2\xb7 PATCHBAY")));
             frameWindow (*patchWindow, new PatchbayView (hub), true, "Patchbay", Colours::accent, loadIcon ("melville", 64));
             patchWindow->setResizable (true, false);
             patchWindow->centreWithSize (patchWindow->getWidth(), patchWindow->getHeight());
@@ -738,7 +763,7 @@ public:
     {
         if (interfaceWindow == nullptr)
         {
-            interfaceWindow = std::make_unique<ToolWindow> ("MELVILLE \xc2\xb7 INTERFACE");
+            interfaceWindow = std::make_unique<ToolWindow> (juce::String (juce::CharPointer_UTF8 ("MELVILLE \xc2\xb7 INTERFACE")));
             frameWindow (*interfaceWindow, new InterfacePanel (hub), true, "Interface", Colours::accent, loadIcon ("melville", 64),
                          WindowTitleBar::minimise | WindowTitleBar::close);
             interfaceWindow->setResizable (false, false);
@@ -814,7 +839,7 @@ public:
             }
             addAndMakeVisible (t);
         }
-        setSize (wordmarkWidth + (tiles.size() + 6) * (tileWidth + gap) + 26 + TransportStrip::preferredWidth + 28 + 200, barHeight);
+        setSize (wordmarkWidth + (tiles.size() + 7) * (tileWidth + gap) + 26 + TransportStrip::preferredWidth + 28 + 200, barHeight);
         resized();
     }
 
@@ -878,7 +903,7 @@ private:
     std::vector<std::unique_ptr<PartWindow>>& windows;
     juce::OwnedArray<Tile> tiles;
     Tile patchTile { "Patchbay", {}, Colours::accent }, netTile { "MELVILLE Link", {}, Colours::accent }, audioTile { "Interface", {}, Colours::accent },
-         updateTile { "Update", {}, Colours::accent }, sessionTile { "Library", {}, Colours::accent }, clockTile { "Clock", {}, Colours::accent };
+         updateTile { "Update", {}, Colours::accent }, sessionTile { "Library", {}, Colours::accent }, sheetTile { "Sheet", {}, Colours::accent }, clockTile { "Clock", {}, Colours::accent };
 public:
     std::function<void()> onShowNetwork, onShowClock, onShowTwain;
     std::function<void (juce::Component&)> onSessionMenu;
@@ -1434,7 +1459,7 @@ public:
         if (! l.view) return;
         if (libraryWindow == nullptr)
         {
-            libraryWindow = std::make_unique<melville::ToolWindow> ("MELVILLE \xc2\xb7 LIBRARY");
+            libraryWindow = std::make_unique<melville::ToolWindow> (juce::String (juce::CharPointer_UTF8 ("MELVILLE \xc2\xb7 LIBRARY")));
             auto* view = l.view();
             // MELVILLE's look, not Hawthorne's
             view->setLookAndFeel (&lookAndFeel);
@@ -1590,7 +1615,7 @@ private:
     {
         if (clockWindow == nullptr)
         {
-            clockWindow = std::make_unique<melville::ToolWindow> ("MELVILLE \xc2\xb7 CLOCK");
+            clockWindow = std::make_unique<melville::ToolWindow> (juce::String (juce::CharPointer_UTF8 ("MELVILLE \xc2\xb7 CLOCK")));
             auto* panel = new melville::ClockPanel (hub->getClock(), clockSettings);
             panel->onSettingsChanged = [this] (const melville::ClockPanel::Settings& s)
             {
