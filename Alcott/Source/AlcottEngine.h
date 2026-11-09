@@ -1,7 +1,8 @@
 #pragma once
 
 // ALCOTT: MELVILLE's instrument rack. Eight slots, each a PEQUOD instrument with a chain of
-// PEQUOD effects after it, played from a MIDI keyboard and / or THOREAU's steps. Every slot
+// PEQUOD effects after it, played by whatever is cabled into its MIDI IN on MELVILLE's patchbay
+// (keyboards, THOREAU's steps, the clock). Every slot
 // has its own stereo output on the patchbay, and there's a mix of them all.
 
 #include <JuceHeader.h>
@@ -22,8 +23,6 @@ public:
     /** Outputs: slot 1 L / R ... slot 8 L / R, then the mix L / R. */
     static constexpr int numOutputs = 2 * numSlots + 2;
 
-    enum Source { none = 0, keyboard, thoreau, both };
-
     /** One PEQUOD plugin in a slot (the instrument, or an effect after it). */
     struct Unit
     {
@@ -39,7 +38,7 @@ public:
         juce::String name;                                   // (empty: the instrument's name)
         std::unique_ptr<Unit> instrument;
         std::vector<std::unique_ptr<Unit>> effects;
-        std::atomic<int> source { both }, channel { 0 };    // channel 0: any
+        std::atomic<int> channel { 0 };                      // only notes on this MIDI channel (0: any)
         std::atomic<float> levelDb { 0.0f };
         std::atomic<bool> mute { false };
         std::atomic<float> peak { 0.0f };                    // (audio -> UI)
@@ -52,6 +51,7 @@ public:
     ~Engine() override;
 
     Slot& slot (int i) { return slots[(size_t) juce::jlimit (0, numSlots - 1, i)]; }
+    int jack (int i) const noexcept { return jacks[(size_t) juce::jlimit (0, numSlots - 1, i)]; }
 
     /** The PEQUOD instruments and effects. */
     static std::vector<const PequodNative::Info*> instruments();
@@ -111,7 +111,8 @@ private:
     juce::AudioBuffer<float> work, mix;
     juce::MidiBuffer keyBlock;
     std::array<juce::MidiBuffer, numSlots> slotMidi;
-    std::array<std::array<int, 128>, numSlots> thoreauOff {};    // samples until THOREAU's note lets go (-1: not held)
+    std::array<int, numSlots> jacks {};              // each slot's MIDI IN on the patchbay
+    juce::MidiBuffer cabled;
     std::unique_ptr<PlayHead> playHead;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Engine)

@@ -62,6 +62,9 @@ public:
 
     //--------------------------------------------------------------------------
     // Patching (message thread). Each call publishes a new matrix to the audio thread.
+    /** The MIDI patch bay's jacks (MIDI goes only to MIDI). */
+    bool isMidiSource (int source) const;
+    bool isMidiDest (int dest) const;
     bool isConnected (int source, int dest) const;
     void connect (int source, int dest, float gain = 1.0f);
     void disconnect (int source, int dest);
@@ -94,6 +97,8 @@ public:
 
     /** Changes (for the UI). */
     std::function<void()> onChange;
+    /** A patch from before MIDI was on the patchbay was loaded (the hub adds MIDI's usual cords). */
+    std::function<void()> onOlderPatch;
 
 private:
     void publish();

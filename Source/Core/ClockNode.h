@@ -1,6 +1,7 @@
 #pragma once
 
-// MELVILLE's clock outputs: the click and LTC, made from MELVILLE's transport (the tape when a
+// MELVILLE's clock outputs: the click, LTC and MIDI clock (24 a beat, with start / stop / continue
+// and song position, as drum machines and sequencers have taken since 1983), made from MELVILLE's transport (the tape when a
 // reel is loaded, MELVILLE's own clock when not), so they work with or without Hawthorne
 // rolling. Its jacks are CLICK and LTC OUT on the MELVILLE panel.
 
@@ -31,6 +32,9 @@ public:
     std::atomic<double> tcStart { 0.0 };        // timecode at clock zero, seconds
     std::atomic<bool> recording { false };      // (set by whoever knows: for "only while recording")
 
+    /** Where MIDI clock goes (the MIDI patch bay's CLOCK jack; cleared each block by it). */
+    juce::MidiBuffer* midiClock = nullptr;
+
     ClockNode()
     {
         port.id = "clock";
@@ -44,6 +48,7 @@ public:
         ltc.prepare (sampleRate);
         clickEnv = 0.0;
         wasRolling = false;
+        midiRolling = false;
     }
 
     /** Timecode frames at a clock position. */
@@ -60,7 +65,8 @@ public:
         juce::FloatVectorOperations::clear (click, n);
         juce::FloatVectorOperations::clear (lt, n);
         const auto s = getState ? getState() : State();
-        if (! s.valid) { wasRolling = false; ltc.reset(); return; }
+        if (! s.valid) { wasRolling = false; ltc.reset(); midiClockBlock (s, n); return; }
+        midiClockBlock (s, n);
 
         // --- Click: every beat, the bar's first higher and louder (its pitch follows the tape speed)
         const bool clicking = clickOn.load (std::memory_order_relaxed) && s.bpm > 0.0
@@ -116,6 +122,44 @@ public:
     }
 
 private:
+    /** MIDI clock: 24 pulses a beat while rolling forwards; song position and continue (start
+        at the top) when it rolls, stop when it stops. */
+    void midiClockBlock (const State& s, int n) noexcept
+    {
+        if (midiClock == nullptr) return;
+        const bool rolling = s.valid && s.rolling && s.bpm > 0.0 && s.rate > 0.0;
+        if (! rolling)
+        {
+            if (midiRolling) midiClock->addEvent (juce::MidiMessage::midiStop(), 0);
+            midiRolling = false;
+            return;
+        }
+        const double spb = s.clockRate * 60.0 / s.bpm;
+        const double beats0 = (s.pos - s.barOne) / spb;
+        if (! midiRolling)
+        {
+            const int sixteenths = juce::jmax (0, (int) std::floor (beats0 * 4.0 + 1.0e-6));
+            midiClock->addEvent (juce::MidiMessage::songPositionPointer (sixteenths), 0);
+            midiClock->addEvent (sixteenths == 0 ? juce::MidiMessage::midiStart() : juce::MidiMessage::midiContinue(), 0);
+            midiTick = (juce::int64) std::ceil (beats0 * 24.0 - 1.0e-9) - 1;
+            midiRolling = true;
+        }
+        for (int k = 0; k < n; ++k)
+        {
+            const auto t = (juce::int64) std::floor ((s.pos + k * s.rate - s.barOne) / spb * 24.0);
+            if (t > midiTick + 24 || t < midiTick - 24)
+            {
+                // a locate while rolling: tell them where we are now
+                midiClock->addEvent (juce::MidiMessage::songPositionPointer (juce::jmax (0, (int) (t / 6))), k);
+                midiClock->addEvent (juce::MidiMessage::midiContinue(), k);
+                midiTick = t;
+            }
+            else if (t > midiTick) { midiClock->addEvent (juce::MidiMessage::midiClock(), k); midiTick = t; }
+        }
+    }
+
+    bool midiRolling = false;
+    juce::int64 midiTick = 0;
     double sr = 48000.0, phase = 0.0, freq = 1000.0, clickEnv = 0.0;
     juce::int64 lastBeat = 0;
     bool wasRolling = false;

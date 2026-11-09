@@ -135,11 +135,11 @@ private:
     int current = 0;
 
     juce::Rectangle<int> headerArea, statusArea, controlsArea;
-    partui::Key midiKey { "Settings: MIDI inputs, and how long THOREAU's notes hold", partui::Icon::settings, accent() };
+    partui::Key midiKey { "Settings: how long THOREAU's steps hold (MIDI is cabled on MELVILLE's PATCHBAY)", partui::Icon::settings, accent() };
 
     std::unique_ptr<SlotList> list;
 
-    juce::ComboBox source, channel;
+    juce::ComboBox channel;
     juce::Slider level;
     juce::TextButton mute { "MUTE" }, clear { "CLEAR" };
 

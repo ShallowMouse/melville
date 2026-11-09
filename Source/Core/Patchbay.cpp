@@ -66,9 +66,22 @@ bool Patchbay::isConnected (int source, int dest) const
     return false;
 }
 
+bool Patchbay::isMidiSource (int s) const
+{
+    for (auto& p : ports) if (s >= p.firstSource && s < p.firstSource + p.sources.size()) return p.id == "midi";
+    return false;
+}
+
+bool Patchbay::isMidiDest (int d) const
+{
+    for (auto& p : ports) if (d >= p.firstDest && d < p.firstDest + p.dests.size()) return p.id == "midi";
+    return false;
+}
+
 void Patchbay::connect (int source, int dest, float gain)
 {
     if (! juce::isPositiveAndBelow (source, numSources) || ! juce::isPositiveAndBelow (dest, numDests)) return;
+    if (isMidiSource (source) != isMidiDest (dest)) return;       // (MIDI only to MIDI, audio only to audio)
     auto& cords = edit.into[(size_t) dest];
     for (auto& c : cords)
         if (c.source == source) { c.gain = gain; publish(); return; }
@@ -102,6 +115,7 @@ int Patchbay::connectByName (const juce::String& fromPort, const juce::String& t
     auto* a = findPort (fromPort);
     auto* b = findPort (toPort);
     if (a == nullptr || b == nullptr) return 0;
+    if ((a->id == "midi") != (b->id == "midi")) return 0;          // (MIDI only to MIDI)
     int made = 0;
     for (int i = 0; i < a->sources.size(); ++i)
         if (const int j = b->dests.indexOf (a->sources[i]); j >= 0)
@@ -121,6 +135,7 @@ int Patchbay::connectInOrder (const juce::String& fromPort, int fromOffset, cons
     auto* a = findPort (fromPort);
     auto* b = findPort (toPort);
     if (a == nullptr || b == nullptr) return 0;
+    if ((a->id == "midi") != (b->id == "midi")) return 0;          // (MIDI only to MIDI)
     n = juce::jmin (n, a->sources.size() - fromOffset, b->dests.size() - toOffset);
     for (int k = 0; k < n; ++k)
     {
@@ -145,7 +160,7 @@ std::vector<std::pair<int, Cord>> Patchbay::getAllCords() const
 std::unique_ptr<juce::XmlElement> Patchbay::toXml() const
 {
     auto xml = std::make_unique<juce::XmlElement> ("PATCH");
-    xml->setAttribute ("version", 4);
+    xml->setAttribute ("version", 5);
     auto where = [this] (int flat, bool isSource) -> std::pair<juce::String, juce::String>
     {
         for (auto& p : ports)
@@ -184,6 +199,8 @@ void Patchbay::fromXml (const juce::XmlElement& xml)
                 { e->setAttribute ("fromPort", "clock"); e->setAttribute ("from", "LTC"); }
         }
     fromXmlCurrent (x);
+    // (before version 5 there was no MIDI on the patchbay: its usual cords, so nothing goes quiet)
+    if (x.getIntAttribute ("version") < 5 && onOlderPatch) onOlderPatch();
 }
 
 void Patchbay::fromXmlCurrent (const juce::XmlElement& xml)
@@ -193,7 +210,7 @@ void Patchbay::fromXmlCurrent (const juce::XmlElement& xml)
     {
         const int s = findSource (e->getStringAttribute ("fromPort"), e->getStringAttribute ("from"));
         const int d = findDest (e->getStringAttribute ("toPort"), e->getStringAttribute ("to"));
-        if (s >= 0 && d >= 0)
+        if (s >= 0 && d >= 0 && isMidiSource (s) == isMidiDest (d))
             edit.into[(size_t) d].push_back ({ s, (float) e->getDoubleAttribute ("gain", 1.0) });
     }
     publish();

@@ -61,6 +61,17 @@ Hub::Hub()
     addNode (std::move (link));
     addNode (std::make_unique<ClockNode>());       // the click and LTC (MELVILLE's)
     addNode (std::make_unique<TwainNode>());       // the control room
+    {
+        // the MIDI patch bay: keyboards, THOREAU's steps and the clock out; ALCOTT's slots and the MIDI outs in
+        auto m = std::make_unique<MidiNode>();
+        midi = m.get();
+        midi->patchbay = &patchbay;
+        addNode (std::move (m));
+        auto* clock = &getClock();
+        clock->midiClock = &midi->source (midi->clock());
+        midi->getBpm = [clock] { if (clock->getState) { const auto s = clock->getState(); if (s.valid && s.bpm > 0.0) return s.bpm; } return 120.0; };
+        patchbay.onOlderPatch = [this] { midiDefaults(); };
+    }
 
     auto node = [this] (const char* id) -> Node*
     {
@@ -70,6 +81,7 @@ Hub::Hub()
 
     // the running order (see Hub.h)
     steps = {
+        { Step::pull,    node ("midi") },       // the keyboards' MIDI, ready for everyone
         { Step::pull,    node ("interface") },
         { Step::pull,    node ("network") },
         { Step::process, node ("pequod") },
@@ -88,6 +100,7 @@ Hub::Hub()
         { Step::push,    node ("route") },      // EMERSON's tracks and mix back into Hawthorne
         { Step::process, node ("twain") },      // the control room: monitors and headphone feeds
         { Step::push,    node ("interface") },
+        { Step::push,    node ("midi") },       // the MIDI outs (everything patched to them this block)
     };
 
     findPart ("emerson")->deviceName = "Hawthorne Route (MELVILLE)";
@@ -167,6 +180,14 @@ void Hub::defaultPatch()
     // (THOREAU and IRVING: cable them onto whichever tracks should record them)
     // the guitar: interface input 1 into IRVING
     pb.connectInOrder ("interface", 0, "pequod", 0, 1);
+    midiDefaults();
+}
+
+void Hub::midiDefaults()
+{
+    if (midi == nullptr) return;
+    for (int k = 1; k <= MidiNode::numAlcottSlots; ++k)
+        patchbay.connect (patchbay.findSource ("midi", "Keyboards"), patchbay.findDest ("midi", "ALCOTT slot " + juce::String (k)));
 }
 
 //==============================================================================
@@ -385,6 +406,7 @@ void Hub::reopenPart (PartNode& p)
 void Hub::timerCallback()
 {
     patchbay.collectGarbage (running.load());
+    if (midi != nullptr) midi->openWhatsCabled();       // (MIDI devices open while something's cabled to them)
 
     // EMERSON and WHITMAN show the reel's tracks, like Hawthorne Route
     for (auto& n : nodes)

@@ -90,6 +90,7 @@ void PatchCanvas::rebuild()
             Jack j;
             j.flat = flat;
             j.label = side.labels[i];
+            j.midi = side.portId == "midi";
             {
                 // a tape track ("Track 7", "Hawthorne track 7", "To WHITMAN track 7" ...): its name and colour from the reel
                 const auto nm = side.channels[i];
@@ -144,11 +145,34 @@ void PatchCanvas::rebuild()
                    { "OUTPUTS", "interface", "Your audio interface's outputs (monitors, headphones, outboard, a hardware desk).",
                      numbered ("Out ", outs), numbers (outs) }); }
 
+    {   // the MIDI patch bay: 5-pin DIN, one cable carries all sixteen channels
+        auto& p = panel ("midi", "MIDI");
+        if (const auto* mp = pb.findPort ("midi"))
+        {
+            juce::StringArray ins, inShort, outs, outShort;
+            int k = 0;
+            for (auto& nm : mp->sources)
+                if (nm == "Keyboards" || nm.startsWith ("In: ")) { ins.add (nm); inShort.add (nm == "Keyboards" ? "ALL" : juce::String (++k)); }
+            k = 0;
+            for (auto& nm : mp->dests)
+                if (nm.startsWith ("Out: ")) { outs.add (nm); outShort.add (juce::String (++k)); }
+            column (p, { "MIDI IN", "midi", "Your MIDI keyboards and controllers: ALL is every one of them at once, then each on its own ("
+                                            + ins.joinIntoString (", ").replace ("In: ", "") + "). A MIDI device opens while something's cabled to it.",
+                         ins, inShort },
+                       { "MIDI OUT", "midi", outs.isEmpty() ? juce::String ("Your MIDI interface's outputs (none found): to drum machines, synths and sequencers.")
+                                                            : "Your MIDI outputs (" + outs.joinIntoString (", ").replace ("Out: ", "") + "): to drum machines, synths and sequencers.",
+                         outs, outShort });
+        }
+    }
+
     {   // MELVILLE itself: the transport's timecode and click
         auto& p = panel ("melville", "MELVILLE");
         column (p, { "LTC OUT", "clock", "MELVILLE's timecode (LTC) from the transport, for anything that chases it (CLOCK > TIMECODE).", { "LTC" }, { "LTC" } },
                    { "LTC IN", "hawthorne", "Timecode for MELVILLE's transport to chase (CLOCK > TIMECODE > chase LTC).", { "LTC in" }, { "LTC" } });
         column (p, { "CLICK", "clock", "The click (metronome) at MELVILLE's tempo: to the monitors by default (CLOCK > CLICK).", { "Click" }, { "CLK" } }, none);
+        column (p, { "MIDI CLOCK", "midi", "MIDI clock at MELVILLE's tempo, 24 a beat, with start, stop, continue and song position as the transport "
+                                          "rolls and locates: to a MIDI OUT for a drum machine or sequencer to follow, or to ALCOTT for its arpeggiators.",
+                     { "Clock" }, { "CLK" } }, none);
 
         // MELVILLE Link, to the right: a set of jacks per connected sender (THOREAU, IRVING ... on other PCs)
         auto& rx = hub.getNetwork().getReceiver();
@@ -190,7 +214,10 @@ void PatchCanvas::rebuild()
         kitShort.addArray ({ "OVL", "OVR", "RML", "RMR" });
         column (p, { "KIT OUTS", "thoreau", "THOREAU's pads 1-12 each on their own, in the order of its pattern rows (pad 1 is the kick), after "
                                             "their levels: cable them to tape tracks or desk channels to record or mix the kit in parts. Then the overheads and room.",
-                     kit, kitShort }, none); }
+                     kit, kitShort }, none);
+        column (p, { "MIDI OUT", "midi", "THOREAU's steps as MIDI, as it plays them: pad 1 on channel 1, pad 2 on channel 2 ..., each with its pad's MIDI note. "
+                                        "Cable them to ALCOTT's slots, or a MIDI OUT for a drum module.",
+                     { "THOREAU steps" }, { "STEPS" } }, none); }
 
     {   auto& p = panel ("alcott", "ALCOTT");
         column (p, { "MIX OUT", "alcott", "ALCOTT's mix: every slot together, after its level.", { "Mix L", "Mix R" }, lr }, none);
@@ -202,7 +229,12 @@ void PatchCanvas::rebuild()
         }
         column (p, { "SLOT OUTS", "alcott", "Each of ALCOTT's slots on its own (its instrument and effects): cable them to tape tracks to record them, "
                                            "or to TWAIN's CUE IN to put them in the headphones.",
-                     slotOuts, slotShort }, none); }
+                     slotOuts, slotShort }, none);
+        juce::StringArray slotIns, slotInShort;
+        for (int k = 1; k <= MidiNode::numAlcottSlots; ++k) { slotIns.add ("ALCOTT slot " + juce::String (k)); slotInShort.add (juce::String (k)); }
+        column (p, none, { "MIDI IN", "midi", "Each slot's MIDI in: what plays its instrument. A keyboard, THOREAU's steps (pick its pad by the slot's channel), "
+                                              "the clock for arpeggiators. Several into one slot merge.",
+                           slotIns, slotInShort }); }
 
     {   auto& p = panel ("hawthorne", "HAWTHORNE");
         column (p, { "TRACK OUT", "route", "Each tape track playing back (or its input, while the track monitors input). To EMERSON by default.",
@@ -466,12 +498,34 @@ void PatchCanvas::drawPanel (juce::Graphics& g, const Panel& p) const
             const auto& j = s.jacks[(size_t) ji];
             const bool lit = ! hover.titleOnly && hover.jack == ji && hover.section == si && &panels[(size_t) hover.panel] == &p;
             auto r = juce::Rectangle<float> (jackRadius * 2.0f, jackRadius * 2.0f).withCentre (j.centre);
+            if (j.midi)
+            {
+                // a 5-pin DIN socket: metal ring, black insert, five pins in a half circle, the key notch
+                const auto din = r.expanded (2.0f);
+                g.setColour (juce::Colour (0xffb9b6ae));
+                g.fillEllipse (din.expanded (1.5f));
+                g.setColour (juce::Colour (0xff141414));
+                g.fillEllipse (din);
+                g.setColour (juce::Colour (0xffd9d4c7));
+                for (int k = 0; k < 5; ++k)
+                {
+                    const float a = juce::MathConstants<float>::pi * (0.75f + 0.125f * (float) k * 2.0f);   // 135..315 degrees, the top half
+                    const auto pin = j.centre + juce::Point<float> (std::cos (a), std::sin (a)) * (din.getWidth() * 0.3f);
+                    g.fillEllipse (juce::Rectangle<float> (1.8f, 1.8f).withCentre (pin));
+                }
+                g.fillRect (juce::Rectangle<float> (2.0f, 2.5f).withCentre ({ j.centre.x, din.getBottom() - 1.8f }));
+                g.setColour (lit ? Colours::accent : face.darker (0.2f));
+                g.drawEllipse (din.expanded (1.5f), lit ? 2.0f : 1.0f);
+            }
+            else
+            {
             g.setColour (face.darker (0.5f));
             g.fillEllipse (r.expanded (2.5f));                 // the nut
             g.setColour (juce::Colour (0xff141414));
             g.fillEllipse (r);                                 // the hole
             g.setColour (lit ? Colours::accent : face.darker (0.2f));
             g.drawEllipse (r.expanded (2.5f), lit ? 2.0f : 1.0f);
+            }
 
             g.setColour (inkDim);
             g.setFont (font (9.5f));
@@ -514,6 +568,7 @@ void PatchCanvas::drawCable (juce::Graphics& g, juce::Point<float> a, juce::Poin
 void PatchCanvas::drawCables (juce::Graphics& g) const
 {
     multicores.clear();
+    const juce::Colour midiCable (0xff1e1e20);
     struct Group { std::vector<std::pair<juce::Point<float>, juce::Point<float>>> ends; juce::Colour colour; };
     std::map<std::tuple<int, int, int, int>, Group> groups;
 
@@ -528,7 +583,7 @@ void PatchCanvas::drawCables (juce::Graphics& g) const
         const int ssi = (int) (ss - panels[(size_t) sp].sections.data());
         const int dsi = (int) (ds - panels[(size_t) dp].sections.data());
         auto& grp = groups[{ sp, ssi, dp, dsi }];
-        grp.colour = panels[(size_t) sp].colour;
+        grp.colour = sj->midi ? midiCable : panels[(size_t) sp].colour;       // (MIDI: black 5-pin cable)
         grp.ends.push_back ({ sj->centre, dj->centre });
     }
 
@@ -552,7 +607,7 @@ void PatchCanvas::drawCables (juce::Graphics& g) const
         auto tag = juce::Rectangle<float> (34.0f, 18.0f).withCentre (mid);
         g.setColour (juce::Colour (0xff141414));
         g.fillRoundedRectangle (tag, 9.0f);
-        g.setColour (grp.colour);
+        g.setColour (grp.colour == midiCable ? juce::Colour (0xffb9b6ae) : grp.colour);
         g.drawRoundedRectangle (tag, 9.0f, 1.5f);
         g.setFont (font (11.0f, true));
         g.drawText (juce::String ((int) grp.ends.size()), tag, juce::Justification::centred);

@@ -153,34 +153,49 @@ Transport& transport() noexcept
     return t;
 }
 
-namespace
-{
-    struct NoteBus
-    {
-        static constexpr int size = 1024;
-        juce::AbstractFifo fifo { size };
-        std::array<NoteEvent, size> events;
-    };
-    NoteBus& noteBus() noexcept { static NoteBus b; return b; }
-}
-
 void postNote (int channel, int note, float velocity, int offset) noexcept
 {
-    auto& b = noteBus();
-    const auto w = b.fifo.write (1);       // (full: the note is dropped - nobody is taking them)
-    NoteEvent e { currentFrame(), juce::jmax (0, offset), juce::jlimit (1, 16, channel), juce::jlimit (0, 127, note), velocity };
-    if (w.blockSize1 > 0) b.events[(size_t) w.startIndex1] = e;
-    else if (w.blockSize2 > 0) b.events[(size_t) w.startIndex2] = e;
+    if (auto* h = Hub::getIfExists())
+        if (auto* m = h->getMidi()) m->postStep (channel, note, velocity, offset);
 }
 
-int takeNotes (NoteEvent* into, int max) noexcept
+int midiJack (const juce::String& name)
 {
-    auto& b = noteBus();
-    const auto r = b.fifo.read (juce::jmin (max, b.fifo.getNumReady()));
-    int k = 0;
-    for (int i = 0; i < r.blockSize1; ++i) into[k++] = b.events[(size_t) (r.startIndex1 + i)];
-    for (int i = 0; i < r.blockSize2; ++i) into[k++] = b.events[(size_t) (r.startIndex2 + i)];
-    return k;
+    if (auto* h = Hub::getIfExists())
+        if (auto* p = h->getPatchbay().findPort ("midi"))
+            return p->dests.indexOf (name);
+    return -1;
+}
+
+void takeMidi (int jack, juce::MidiBuffer& into) noexcept
+{
+    if (jack < 0) return;
+    if (auto* h = Hub::getIfExists())
+        if (auto* m = h->getMidi()) m->take (jack, into);
+}
+
+juce::String midiCabledInto (int jack)
+{
+    juce::StringArray from;
+    if (auto* h = Hub::getIfExists())
+        if (auto* p = h->getPatchbay().findPort ("midi"); p != nullptr && jack >= 0)
+            for (auto& [d, c] : h->getPatchbay().getAllCords())
+                if (d == p->firstDest + jack && c.source >= p->firstSource && c.source < p->firstSource + p->sources.size())
+                    from.add (p->sources[c.source - p->firstSource].replace ("In: ", ""));
+    return from.joinIntoString (", ");
+}
+
+void setStepLength (int n)
+{
+    if (auto* h = Hub::getIfExists())
+        if (auto* m = h->getMidi()) m->stepLength = juce::jlimit (1, 64, n);
+}
+
+int getStepLength()
+{
+    if (auto* h = Hub::getIfExists())
+        if (auto* m = h->getMidi()) return m->stepLength.load();
+    return 16;
 }
 
 juce::int64 currentFrame() noexcept

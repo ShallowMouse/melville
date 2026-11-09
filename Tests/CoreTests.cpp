@@ -203,6 +203,69 @@ int main()
 
     whDev->close(); emDev->close(); hawDev->close();
 
+    // --- the MIDI patch bay: MIDI goes only to MIDI; THOREAU's steps reach only what they're cabled to,
+    //     and let go a step later; MIDI clock is 24 a beat, with start
+    {
+        auto& mpb = hub.getPatchbay();
+        auto* midi = hub.getMidi();
+        CHECK (midi != nullptr);
+        const int steps = mpb.findSource ("midi", "THOREAU steps"), clk = mpb.findSource ("midi", "Clock");
+        const int slot3 = mpb.findDest ("midi", "ALCOTT slot 3"), slot4 = mpb.findDest ("midi", "ALCOTT slot 4");
+        CHECK (steps >= 0 && clk >= 0 && slot3 >= 0 && slot4 >= 0);
+        CHECK (mpb.isConnected (mpb.findSource ("midi", "Keyboards"), slot3));      // (the usual cords)
+        const auto cordsBefore = mpb.getAllCords().size();
+        mpb.connect (steps, mpb.findDest ("hawthorne", "Track 1"));                   // MIDI into audio: refused
+        mpb.connect (mpb.findSource ("interface", "In 1"), slot4);                     // audio into MIDI: refused
+        CHECK (mpb.getAllCords().size() == cordsBefore);
+        mpb.connect (steps, slot3);
+
+        const int block = 512;
+        juce::AudioBuffer<float> silence (juce::jmax (1, midi->port.sources.size()), block);
+        auto pullBlock = [&] { midi->pull (silence.getArrayOfWritePointers(), block); };
+        pullBlock();
+        midi->postStep (3, 38, 0.9f, 10);
+        juce::MidiBuffer into3, into4;
+        midi->take (slot3 - mpb.findPort ("midi")->firstDest, into3);
+        midi->take (slot4 - mpb.findPort ("midi")->firstDest, into4);
+        int ons = 0, at = -1, ch = 0;
+        for (const auto meta : into3) if (meta.getMessage().isNoteOn()) { ++ons; at = meta.samplePosition; ch = meta.getMessage().getChannel(); }
+        CHECK (ons == 1 && at == 10 && ch == 3);
+        int ons4 = 0;
+        for (const auto meta : into4) if (meta.getMessage().isNoteOn()) ++ons4;
+        CHECK (ons4 == 0);
+        // the note-off: a sixteenth at the tempo (120 by default) later, a little short of it
+        int offAt = -1;
+        for (int b = 1; b < 40 && offAt < 0; ++b)
+        {
+            pullBlock();
+            juce::MidiBuffer m;
+            midi->take (slot3 - mpb.findPort ("midi")->firstDest, m);
+            for (const auto meta : m) if (meta.getMessage().isNoteOff()) offAt = b * block + meta.samplePosition;
+        }
+        CHECK (offAt > 4000 && offAt < 6000);
+        std::printf ("    MIDI: THOREAU step on channel 3 at 10, its note-off %d samples on\n", offAt);
+
+        // MIDI clock: one second rolling at 120 = 2 beats = 48 clocks, after a start
+        auto& clock = hub.getClock();
+        const auto oldState = clock.getState;
+        clock.getState = [] { ClockNode::State st; st.valid = true; st.rolling = true; st.pos = 0.0; st.rate = 1.0; st.clockRate = 48000.0; st.bpm = 120.0; return st; };
+        juce::AudioBuffer<float> clockOut (2, 48000);
+        midi->pull (silence.getArrayOfWritePointers(), block);
+        clock.prepare (48000.0, 48000);
+        clock.pull (clockOut.getArrayOfWritePointers(), 48000);
+        int ticks = 0, starts = 0;
+        for (const auto meta : midi->source (midi->clock()))
+        {
+            const auto m = meta.getMessage();
+            if (m.isMidiClock()) ++ticks;
+            if (m.isMidiStart()) ++starts;
+        }
+        CHECK (starts == 1);
+        CHECK (ticks == 47 || ticks == 48);
+        std::printf ("    MIDI: clock %d ticks in a second at 120, %d start\n", ticks, starts);
+        clock.getState = oldState;
+    }
+
     std::printf (failures == 0 ? "MELVILLE core: all tests passed\n" : "MELVILLE core: %d failure(s)\n", failures);
     return failures == 0 ? 0 : 1;
 }

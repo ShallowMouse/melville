@@ -27,7 +27,8 @@ public:
 //==============================================================================
 Engine::Engine() : playHead (std::make_unique<PlayHead>())
 {
-    for (auto& v : thoreauOff) v.fill (-1);
+    for (int k = 0; k < numSlots; ++k) jacks[(size_t) k] = melville::midiJack ("ALCOTT slot " + juce::String (k + 1));
+    cabled.ensureSize (4096);
     work.setSize (2, 4096);
     mix.setSize (2, 4096);
     keyBlock.ensureSize (4096);
@@ -178,7 +179,6 @@ std::unique_ptr<juce::XmlElement> Engine::toXml() const
         auto* e = x->createNewChildElement ("SLOT");
         e->setAttribute ("index", i);
         e->setAttribute ("name", s.name);
-        e->setAttribute ("source", s.source.load());
         e->setAttribute ("channel", s.channel.load());
         e->setAttribute ("level", s.levelDb.load());
         e->setAttribute ("mute", s.mute.load());
@@ -199,6 +199,7 @@ void Engine::fromXml (const juce::XmlElement& x)
 {
     if (! x.hasTagName ("ALCOTT")) return;
     thoreauLength = x.getIntAttribute ("thoreauLength", 16);
+    melville::setStepLength (thoreauLength.load());
     for (int i = 0; i < numSlots; ++i)
     {
         const juce::XmlElement* e = nullptr;
@@ -225,7 +226,6 @@ void Engine::fromXml (const juce::XmlElement& x)
             std::swap (s.effects, fx);
             s.name = e != nullptr ? e->getStringAttribute ("name") : juce::String();
         }
-        s.source = e != nullptr ? e->getIntAttribute ("source", both) : (int) both;
         s.channel = e != nullptr ? e->getIntAttribute ("channel", 0) : 0;
         s.levelDb = e != nullptr ? (float) e->getDoubleAttribute ("level", 0.0) : 0.0f;
         s.mute = e != nullptr && e->getBoolAttribute ("mute", false);
@@ -287,12 +287,9 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const*, int, float* 
 
 void Engine::process (float* const* out, int numOut, int n) noexcept
 {
-    // the keyboards' notes for this block, THOREAU's, and the window's
+    // (the test keys: straight into every slot; inside MELVILLE nothing plays them)
     keyBlock.clear();
     keys.removeNextBlockOfMessages (keyBlock, n);
-    std::array<melville::NoteEvent, 256> fromThoreau;
-    const int numThoreau = melville::takeNotes (fromThoreau.data(), (int) fromThoreau.size());
-    const auto frame = melville::currentFrame();
 
     const juce::ScopedTryLock sl (chainLock);
     if (! sl.isLocked()) return;          // (a slot's chain is being changed: a block of silence)
@@ -314,10 +311,6 @@ void Engine::process (float* const* out, int numOut, int n) noexcept
         take (r.startIndex2, r.blockSize2);
     }
 
-    // THOREAU's steps hold for a sixteenth (it sends no note-offs)
-    const double bpm = juce::jmax (20.0, melville::transport().bpm.load (std::memory_order_relaxed));
-    const int gate = juce::jmax (64, (int) (sampleRate * 60.0 / bpm * 4.0 / juce::jlimit (1, 64, thoreauLength.load (std::memory_order_relaxed)) * 0.9));
-
     juce::FloatVectorOperations::clear (mix.getWritePointer (0), n);
     juce::FloatVectorOperations::clear (mix.getWritePointer (1), n);
 
@@ -325,36 +318,27 @@ void Engine::process (float* const* out, int numOut, int n) noexcept
     {
         auto& s = slots[(size_t) i];
         auto& midi = slotMidi[(size_t) i];
-        const int src = s.source.load (std::memory_order_relaxed), ch = s.channel.load (std::memory_order_relaxed);
+        const int ch = s.channel.load (std::memory_order_relaxed);
         bool any = ! midi.isEmpty();
 
-        if (src == keyboard || src == both)
-            for (const auto meta : keyBlock)
+        // whatever is cabled into this slot's MIDI IN on the patchbay (and the test keys), on its channel
+        cabled.clear();
+        melville::takeMidi (jacks[(size_t) i], cabled);
+        cabled.addEvents (keyBlock, 0, n, 0);
+        for (const auto meta : cabled)
+        {
+            const auto m = meta.getMessage();
+            if (m.isMidiClock() || m.isSongPositionPointer() || m.isMidiStart() || m.isMidiStop() || m.isMidiContinue())
             {
-                const auto m = meta.getMessage();
-                if (ch == 0 || m.getChannel() == ch || m.getChannel() == 0) { midi.addEvent (m, meta.samplePosition); any = true; }
+                midi.addEvent (m, meta.samplePosition);    // (clock for arpeggiators: whatever the channel)
+                continue;
             }
-
-        // THOREAU's held notes letting go in this block
-        auto& offs = thoreauOff[(size_t) i];
-        for (int note = 0; note < 128; ++note)
-            if (offs[(size_t) note] >= 0)
+            if (ch == 0 || m.getChannel() == ch || m.getChannel() == 0)
             {
-                if (offs[(size_t) note] < n) { midi.addEvent (juce::MidiMessage::noteOff (1, note), offs[(size_t) note]); offs[(size_t) note] = -1; }
-                else offs[(size_t) note] -= n;
+                midi.addEvent (m, juce::jlimit (0, n - 1, meta.samplePosition));
+                if (m.isNoteOn()) any = true;
             }
-        if (src == thoreau || src == both)
-            for (int k = 0; k < numThoreau; ++k)
-            {
-                const auto& e = fromThoreau[(size_t) k];
-                if (ch != 0 && e.channel != ch) continue;
-                if (e.frame < frame - 4 * (juce::int64) n) continue;        // (stale: from before ALCOTT was listening)
-                const int at = e.frame == frame ? juce::jlimit (0, n - 1, e.offset) : 0;
-                if (offs[(size_t) e.note] >= 0) midi.addEvent (juce::MidiMessage::noteOff (1, e.note), at);   // (a repeat: let the last one go)
-                midi.addEvent (juce::MidiMessage::noteOn (1, e.note, juce::jlimit (0.05f, 1.0f, e.velocity)), at);
-                offs[(size_t) e.note] = at + gate;
-                any = true;
-            }
+        }
         if (any) s.noteLamp.store (1.0f, std::memory_order_relaxed);
 
         if (s.instrument == nullptr) { midi.clear(); continue; }

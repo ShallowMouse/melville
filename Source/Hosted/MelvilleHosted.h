@@ -153,11 +153,17 @@ namespace melville
     const std::map<juce::String, SessionPart>& sessionParts();
 
     //==========================================================================
-    /** Notes between parts: THOREAU's steps play ALCOTT's instruments. Audio thread, one
-        sender and one taker (the hub runs them in turn). THOREAU sends each pad on its own
-        channel (pad 1 = channel 1) with the pad's MIDI note, `offset` samples into its block. */
-    struct NoteEvent { juce::int64 frame = 0; int offset = 0, channel = 1, note = 60; float velocity = 0.0f; };
+    /** MIDI on the patchbay (MELVILLE's MIDI patch bay). THOREAU sends each step played into its
+        THOREAU STEPS jack: pad k on channel k, with the pad's MIDI note, `offset` samples into its
+        block (audio thread; the patch bay lets the note go a step later). */
     void postNote (int channel, int note, float velocity, int offset) noexcept;
-    /** Every note sent since the last call (oldest first); returns how many. */
-    int takeNotes (NoteEvent* into, int max) noexcept;
+    /** A MIDI input jack on the patch bay by name ("ALCOTT slot 3"); -1 if there's none. Message thread. */
+    int midiJack (const juce::String& name);
+    /** Everything cabled into that jack this block (audio thread, in the part's turn). */
+    void takeMidi (int jack, juce::MidiBuffer& into) noexcept;
+    /** What's cabled into that jack, by name ("Keyboards, THOREAU steps"); empty if nothing. Message thread. */
+    juce::String midiCabledInto (int jack);
+    /** How long THOREAU's steps hold (a 1/n note: 4, 8, 16, 32). */
+    void setStepLength (int n);
+    int getStepLength();
 }

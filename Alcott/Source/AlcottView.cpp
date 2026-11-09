@@ -10,9 +10,10 @@ static constexpr double rackWidthMm = 482.6, unitMm = 44.45, earMm = 15.88, hole
 static int earFor (int width)     { return juce::roundToInt (width * (earMm / rackWidthMm)); }
 static double unitFor (int width) { return width * (unitMm / rackWidthMm); }
 
-static juce::String sourceText (int s)
+static juce::String midiFrom (Engine& e, int slot)
 {
-    return s == Engine::keyboard ? "MIDI keyboard" : s == Engine::thoreau ? "THOREAU" : s == Engine::both ? "Keyboard + THOREAU" : "No notes";
+    const auto from = melville::midiCabledInto (e.jack (slot));
+    return from.isNotEmpty() ? "MIDI from " + from : juce::String ("No MIDI cabled in");
 }
 
 //==============================================================================
@@ -60,7 +61,7 @@ public:
             g.setFont (Pequod::body (11.5f));
             g.setColour (Pequod::Colours::textDim);
             juce::String sub = s.instrument == nullptr ? juce::String ("Click to choose an instrument")
-                             : sourceText (s.source.load()) + (s.channel.load() > 0 ? "  ch " + juce::String (s.channel.load()) : juce::String())
+                             : midiFrom (owner.engine, i) + (s.channel.load() > 0 ? "  ch " + juce::String (s.channel.load()) : juce::String())
                                + (s.effects.empty() ? juce::String() : "  +" + juce::String ((int) s.effects.size()) + " fx")
                                + (s.mute.load() ? juce::String ("  MUTED") : juce::String());
             g.drawText (sub, r, juce::Justification::centredLeft, true);
@@ -317,10 +318,6 @@ View::View()
     addAndMakeVisible (midiKey);
     midiKey.onClick = [this] { showMidiInputs(); };
 
-    for (int s : { Engine::none, Engine::keyboard, Engine::thoreau, Engine::both })
-        source.addItem (sourceText (s), s + 1);
-    source.setTooltip ("Where this slot's notes come from: your MIDI keyboards (MIDI key, top right), THOREAU's steps (each pad on its own channel: pad 1 = channel 1), or both");
-    source.onChange = [this] { engine.slot (current).source = source.getSelectedId() - 1; changed(); };
     channel.addItem ("Any channel / pad", 1);
     for (int c = 1; c <= 16; ++c) channel.addItem ("Channel " + juce::String (c) + (c <= 12 ? "  /  pad " + juce::String (c) : juce::String()), c + 1);
     channel.setTooltip ("Only notes on this MIDI channel play the slot. THOREAU sends pad 1 on channel 1, pad 2 on channel 2 ...");
@@ -335,7 +332,7 @@ View::View()
     mute.onClick = [this] { engine.slot (current).mute = mute.getToggleState(); changed(); };
     clear.setTooltip ("Take the instrument and its effects out of this slot");
     clear.onClick = [this] { units.clear(); engine.clearSlot (current); rebuildRack(); };
-    for (juce::Component* c : { (juce::Component*) &source, (juce::Component*) &channel, (juce::Component*) &level,
+    for (juce::Component* c : { (juce::Component*) &channel, (juce::Component*) &level,
                                 (juce::Component*) &mute, (juce::Component*) &clear })
     {
         c->setWantsKeyboardFocus (false);
@@ -354,9 +351,6 @@ View::View()
     // the audio: MELVILLE's ALCOTT device (its outputs on the patchbay); every MIDI input plays it
     melville::attach (deviceManager, "alcott");
     deviceManager.addAudioCallback (&engine);
-    for (auto& d : juce::MidiInput::getAvailableDevices())
-        deviceManager.setMidiInputDeviceEnabled (d.identifier, true);
-    deviceManager.addMidiInputDeviceCallback ({}, &engine);
     melville::addToSession (deviceManager, {
         [this] { return engine.toXml(); },
         [this] (const juce::XmlElement& x) { units.clear(); engine.fromXml (x); rebuildRack(); list->repaint(); } });
@@ -390,7 +384,6 @@ View::View()
         for (auto* info : Engine::instruments())
         {
             t.setInstrument (0, PequodNative::describe (*info).fileOrIdentifier);
-            t.slot (0).source = Engine::keyboard;
             float peak = 0.0f, mixPeak = 0.0f;
             for (int b = 0; b < 120; ++b)        // 1.3 s: a note held for half a second, then let go
             {
@@ -405,43 +398,6 @@ View::View()
             std::printf ("ALCOTT test: %-18s slot out %.3f  mix %.3f%s\n", info->name.toRawUTF8(), peak, mixPeak, peak < 1.0e-3f ? "  SILENT" : "");
         }
         std::printf ("ALCOTT test: %d instruments, %d silent\n", (int) Engine::instruments().size(), silent);
-        // THOREAU's steps: pad 3 (channel 3) plays a slot listening to channel 3, not one on channel 4
-        for (int ch : { 3, 4 })
-        {
-            t.slot (0).source = Engine::thoreau;
-            t.slot (0).channel = ch;
-            float peak = 0.0f;
-            for (int b = 0; b < 60; ++b)
-            {
-                if (b == 2) melville::postNote (3, 48, 0.9f, 100);
-                t.processForTest (out.getArrayOfWritePointers(), Engine::numOutputs, 512);
-                peak = juce::jmax (peak, out.getMagnitude (0, 0, 512));
-            }
-            std::printf ("ALCOTT test: THOREAU pad 3 -> slot on channel %d: %.3f (%s)\n", ch, peak,
-                         (ch == 3) == (peak > 1.0e-3f) ? "right" : "WRONG");
-        }
-    }
-
-    // (development: ALCOTT_GALLERY=<folder> saves every PEQUOD panel as a rack faceplate, one PNG each)
-    if (auto dir = juce::SystemStats::getEnvironmentVariable ("ALCOTT_GALLERY", {}); dir.isNotEmpty())
-    {
-        juce::File folder (dir);
-        folder.createDirectory();
-        for (auto& info : PequodNative::all())
-        {
-            PequodNative::Instance inst (info);
-            inst.prepareToPlay (48000.0, 512);
-            std::unique_ptr<juce::AudioProcessorEditor> ed (inst.createEditor());
-            if (ed == nullptr) continue;
-            const auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
-            const double u = ed->getWidth() * (44.45 / 482.6);
-            juce::PNGImageFormat png;
-            const auto f = folder.getChildFile (info.name.replaceCharacters (" /", "__") + ".png");
-            f.deleteFile();
-            if (auto os = f.createOutputStream()) png.writeImageToStream (img, *os);
-            std::printf ("ALCOTT gallery: %-22s %4d x %3d  %.2fU\n", info.name.toRawUTF8(), ed->getWidth(), ed->getHeight(), ed->getHeight() / u);
-            inst.editorBeingDeleted (ed.get());
-        }
     }
 
     engine.onChanged = [this] { list->repaint(); };
@@ -454,7 +410,6 @@ View::~View()
 {
     stopTimer();
     units.clear();                       // (the panels go before their plugins)
-    deviceManager.removeMidiInputDeviceCallback ({}, &engine);
     deviceManager.removeAudioCallback (&engine);
     melville::detach (deviceManager);
 }
@@ -477,7 +432,6 @@ void View::select (int s)
 void View::refreshControls()
 {
     auto& s = engine.slot (current);
-    source.setSelectedId (s.source.load() + 1, juce::dontSendNotification);
     channel.setSelectedId (s.channel.load() + 1, juce::dontSendNotification);
     level.setValue (s.levelDb.load(), juce::dontSendNotification);
     mute.setToggleState (s.mute.load(), juce::dontSendNotification);
@@ -558,31 +512,33 @@ void View::showMidiInputs()
     {
         Panel (View& v) : owner (v)
         {
-            midi = melville::midiInputsPanel (v.deviceManager);
-            if (midi != nullptr) addAndMakeVisible (*midi);
             for (int n : { 4, 8, 16, 32 }) length.addItem ("1/" + juce::String (n) + " note", n);
             length.setSelectedId (owner.engine.thoreauLength.load(), juce::dontSendNotification);
-            length.onChange = [this] { owner.engine.thoreauLength = length.getSelectedId(); };
+            length.onChange = [this] { owner.engine.thoreauLength = length.getSelectedId(); melville::setStepLength (length.getSelectedId()); };
             addAndMakeVisible (length);
-            setSize (480, 330);
+            setSize (480, 200);
         }
         void paint (juce::Graphics& g) override
         {
             g.fillAll (Pequod::Colours::bg);
             g.setFont (Pequod::heading (13.0f));
             g.setColour (accent());
+            g.drawText ("MIDI", 18, 12, 300, 20, juce::Justification::centredLeft);
             g.drawText ("THOREAU", 18, getHeight() - 74, 300, 20, juce::Justification::centredLeft);
+            g.setFont (Pequod::body (12.5f));
+            g.setColour (Pequod::Colours::textDim);
+            g.drawFittedText ("Each slot plays what's cabled into its MIDI IN on MELVILLE's PATCHBAY: KEYBOARDS (every MIDI input), "
+                              "one keyboard on its own, THOREAU's steps, the CLOCK for arpeggiators.",
+                              18, 34, getWidth() - 36, 50, juce::Justification::topLeft, 3);
             g.setFont (Pequod::body (13.0f));
             g.setColour (Pequod::Colours::text);
             g.drawText ("Its steps hold for a", 18, length.getY(), 160, length.getHeight(), juce::Justification::centredLeft);
         }
         void resized() override
         {
-            if (midi != nullptr) midi->setBounds (12, 6, getWidth() - 24, getHeight() - 6 - 84);
             length.setBounds (170, getHeight() - 46, 160, 26);
         }
         View& owner;
-        std::unique_ptr<juce::Component> midi;
         juce::ComboBox length;
     };
     melville::showPanel (std::make_unique<Panel> (*this), "ALCOTT settings", "alcott");
@@ -616,7 +572,7 @@ void View::paint (juce::Graphics& g)
     g.drawText (statusLine(), statusArea.withHeight (statusArea.getHeight() / 2).translated (0, 4), juce::Justification::centredLeft, true);
     g.setFont (Pequod::body (12.0f));
     g.setColour (Pequod::Colours::textDim);
-    g.drawText ("PEQUOD instruments, played from MIDI keyboards and THOREAU's steps. Each slot's outs and the mix are on MELVILLE's PATCHBAY",
+    g.drawText ("PEQUOD instruments, played by whatever's cabled to their MIDI IN on MELVILLE's PATCHBAY. Their outs and the mix are there too",
                 statusArea.withTrimmedTop (statusArea.getHeight() / 2).translated (0, -2), juce::Justification::centredLeft, true);
 
     // the list's heading, and the slot's
@@ -627,7 +583,7 @@ void View::paint (juce::Graphics& g)
     g.setColour (accent());
     auto& s = const_cast<Engine&> (engine).slot (current);
     g.drawText ("SLOT " + juce::String (current + 1) + (s.shownName().isNotEmpty() ? "   " + s.shownName().toUpperCase() : juce::String()),
-                controlsArea.withWidth (source.getX() - controlsArea.getX() - 10), juce::Justification::centredLeft, true);
+                controlsArea.withWidth (channel.getX() - controlsArea.getX() - 10), juce::Justification::centredLeft, true);
 }
 
 void View::resized()
@@ -654,8 +610,6 @@ void View::resized()
     level.setBounds (c.removeFromRight (230));
     c.removeFromRight (10);
     channel.setBounds (c.removeFromRight (190));
-    c.removeFromRight (6);
-    source.setBounds (c.removeFromRight (180));
     r.removeFromTop (4);
     rackView.setBounds (r);
     layoutRack();

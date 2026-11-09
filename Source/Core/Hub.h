@@ -20,6 +20,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include "ClockNode.h"
 #include "TwainNode.h"
+#include "MidiNode.h"
 #include "Patchbay.h"
 #include "Node.h"
 
@@ -110,6 +111,11 @@ public:
         jassertfalse; static TwainNode none; return none;
     }
 
+    /** The MIDI patch bay (null in a hub without one). */
+    MidiNode* getMidi() const noexcept { return midi; }
+    /** MIDI's usual cords: every keyboard to every ALCOTT slot. */
+    void midiDefaults();
+
     ClockNode& getClock() const
     {
         for (auto& n : nodes) if (auto* c = dynamic_cast<ClockNode*> (n.get())) return *c;
@@ -161,6 +167,7 @@ private:
     std::atomic<juce::int64> blockFrame { 0 };
     LatencyTest latencyTest;
     void runLatencyTest (const float* const* in, int numIn, float* const* out, int numOut, int n);
+    MidiNode* midi = nullptr;
 };
 
 } // namespace melville
