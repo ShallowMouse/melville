@@ -28,6 +28,7 @@ public:
 
     void rebuild();                  // the panels (when the reel or interface changes)
     void setShowEveryCable (bool);
+    void setMidiView (bool);            // the MIDI tab: the MIDI jacks (else the audio ones)
 
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -85,7 +86,7 @@ private:
 
     Hub& hub;
     std::vector<Panel> panels;
-    bool showEveryCable = false;
+    bool showEveryCable = false, midiView = false;
     int contentHeight = 600;
     int lastTracks = -1, lastIns = -1, lastOuts = -1, tracksRev = -1;
     juce::String lastNetwork;
@@ -123,6 +124,7 @@ private:
     Hub& hub;
     juce::TextButton defaultButton { "DEFAULT" }, clearButton { "PULL ALL" }, saveButton { "SAVE" }, openButton { "OPEN" };
     juce::ToggleButton everyCable { "SHOW EVERY CABLE" };
+    juce::TextButton audioTab { "AUDIO" }, midiTab { "MIDI" };
     PatchCanvas canvas;
     juce::Viewport viewport;
     std::unique_ptr<juce::FileChooser> chooser;

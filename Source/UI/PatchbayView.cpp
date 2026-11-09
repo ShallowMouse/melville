@@ -104,8 +104,13 @@ void PatchCanvas::rebuild()
     };
 
     // A column: an output section on top and the input it pairs with underneath, jack over jack
-    auto column = [&] (Panel& p, const Side& top, const Side& bottom)
+    auto column = [&] (Panel& p, const Side& topSide, const Side& bottomSide)
     {
+        // the AUDIO tab shows the audio jacks, the MIDI tab the MIDI ones (same panels, same order)
+        const Side none;
+        const auto& top = (topSide.portId == "midi") == midiView ? topSide : none;
+        const auto& bottom = (bottomSide.portId == "midi") == midiView ? bottomSide : none;
+        if (top.channels.isEmpty() && bottom.channels.isEmpty()) return;
         const int c = p.columns++;
         if (top.channels.size() > 0)    { auto s = makeSection (top, true, c);     if (! s.jacks.empty()) p.sections.push_back (std::move (s)); }
         if (bottom.channels.size() > 0) { auto s = makeSection (bottom, false, c); if (! s.jacks.empty()) p.sections.push_back (std::move (s)); }
@@ -145,8 +150,8 @@ void PatchCanvas::rebuild()
                    { "OUTPUTS", "interface", "Your audio interface's outputs (monitors, headphones, outboard, a hardware desk).",
                      numbered ("Out ", outs), numbers (outs) }); }
 
-    {   // the MIDI patch bay: 5-pin DIN, one cable carries all sixteen channels
-        auto& p = panel ("midi", "MIDI");
+    {   // ... and its MIDI side: the keyboards and MIDI interface (5-pin DIN; one cable carries all sixteen channels)
+        auto& p = panels.back();
         if (const auto* mp = pb.findPort ("midi"))
         {
             juce::StringArray ins, inShort, outs, outShort;
@@ -271,8 +276,20 @@ void PatchCanvas::rebuild()
         column (p, { "SEND B", "whitman", "The desk's FX send B (to EMERSON's return B by default).", { "To EMERSON send B L", "To EMERSON send B R" }, lr },
                    { "RETURN B", "whitman", "FX return B coming back onto the desk.", { "EMERSON return B L", "EMERSON return B R" }, lr }); }
 
+    for (auto& p : panels)
+        if (p.sections.empty() && p.note.isEmpty())
+            p.note = midiView ? "No MIDI" : "No audio";
+
     layOut();
     repaint();
+}
+
+void PatchCanvas::setMidiView (bool b)
+{
+    if (midiView == b) return;
+    midiView = b;
+    hover = {};
+    rebuild();
 }
 
 void PatchCanvas::setShowEveryCable (bool b)
@@ -855,6 +872,24 @@ PatchbayView::PatchbayView (Hub& h) : hub (h), canvas (h)
     everyCable.onClick = [this] { canvas.setShowEveryCable (everyCable.getToggleState()); };
     canvas.onShowEveryCable = [this] { everyCable.setToggleState (true, juce::dontSendNotification); };
     for (auto* b : { &defaultButton, &clearButton, &saveButton, &openButton }) addAndMakeVisible (b);
+
+    // AUDIO and MIDI: the same panels, in the same order, each with its own jacks
+    for (auto* t : { &audioTab, &midiTab })
+    {
+        t->setRadioGroupId (0x6d69);
+        t->setClickingTogglesState (true);
+        t->setColour (juce::TextButton::buttonOnColourId, Colours::accent);
+        t->setColour (juce::TextButton::textColourOnId, Colours::bg);
+        t->setWantsKeyboardFocus (false);
+        addAndMakeVisible (t);
+    }
+    audioTab.setConnectedEdges (juce::Button::ConnectedOnRight);
+    midiTab.setConnectedEdges (juce::Button::ConnectedOnLeft);
+    audioTab.setToggleState (true, juce::dontSendNotification);
+    audioTab.setTooltip ("The audio patchbay");
+    midiTab.setTooltip ("The MIDI patchbay: 5-pin DIN, one cable carries all sixteen channels");
+    audioTab.onClick = [this] { if (audioTab.getToggleState()) { canvas.setMidiView (false); resized(); repaint(); } };
+    midiTab.onClick  = [this] { if (midiTab.getToggleState())  { canvas.setMidiView (true);  resized(); repaint(); } };
     addAndMakeVisible (everyCable);
 
     viewport.setViewedComponent (&canvas, false);
@@ -873,14 +908,18 @@ void PatchbayView::paint (juce::Graphics& g)
     g.fillRect (bar);
     g.setColour (Colours::textDim);
     g.setFont (font (12.0f));
-    g.drawText ("Drag from an OUT jack to an IN jack. Drag a plug out of an IN jack to move or pull it. Drag a section's name to patch the whole section.",
-                bar.reduced (14, 0).withTrimmedRight (520), juce::Justification::centredLeft, true);
+    g.drawText (midiTab.getToggleState()
+                    ? "MIDI: drag from a MIDI OUT to a MIDI IN. One cable carries all sixteen channels; several into one IN merge."
+                    : "Drag from an OUT jack to an IN jack. Drag a plug out of an IN jack to move or pull it. Drag a section's name to patch the whole section.",
+                bar.reduced (14, 0).withTrimmedLeft (170).withTrimmedRight (520), juce::Justification::centredLeft, true);
 }
 
 void PatchbayView::resized()
 {
     auto r = getLocalBounds();
     auto bar = r.removeFromTop (46).reduced (10, 9);
+    audioTab.setBounds (bar.removeFromLeft (76));
+    midiTab.setBounds (bar.removeFromLeft (76));
     for (auto* b : { &openButton, &saveButton, &clearButton, &defaultButton })
     {
         b->setBounds (bar.removeFromRight (b == &clearButton ? 96 : 80));

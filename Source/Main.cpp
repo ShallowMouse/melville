@@ -1102,7 +1102,23 @@ public:
                     save (b->getPatchbayContent(), "patchbay.png");
                     if (auto* pv = b->getPatchbayContent())
                         for (auto* c : pv->getChildren())
-                            if (auto* vp = dynamic_cast<juce::Viewport*> (c)) save (vp->getViewedComponent(), "patchbay-full.png");
+                            if (auto* vp = dynamic_cast<juce::Viewport*> (c))
+                            {
+                                save (vp->getViewedComponent(), "patchbay-full.png");
+                                // and the MIDI tab
+                                for (auto* t : pv->getChildren())
+                                    if (auto* tb = dynamic_cast<juce::TextButton*> (t); tb != nullptr && tb->getButtonText() == "MIDI")
+                                    {
+                                        tb->triggerClick();
+                                        juce::Timer::callAfterDelay (300, [snaps, sp = juce::Component::SafePointer<juce::Component> (vp->getViewedComponent())]
+                                        {
+                                            if (sp == nullptr) return;
+                                            juce::FileOutputStream out (juce::File (snaps).getChildFile ("patchbay-midi.png"));
+                                            out.setPosition (0); out.truncate();
+                                            juce::PNGImageFormat().writeImageToStream (sp->createComponentSnapshot (sp->getLocalBounds()), out);
+                                        });
+                                    }
+                            }
                     save (bar.get(), "bar-window.png");
                     save (b->getPatchbayWindow(), "patchbay-window.png");
                     showNetwork();
