@@ -79,6 +79,7 @@ juce_generate_juce_header(Melville)
 set(MELVILLE_OWN_SOURCES
     ${CORE_SOURCES}
     Source/Main.cpp
+    Source/Hosted/MelvillePanels.cpp
     Source/UI/PatchbayView.cpp
     Source/UI/Taskbar.cpp
     Source/Updater.cpp)
