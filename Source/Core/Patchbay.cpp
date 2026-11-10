@@ -233,6 +233,47 @@ void Patchbay::clearNormals()
     if (! wiringNormals) publish();
 }
 
+int Patchbay::cablesToNormals (int* kept)
+{
+    int wired = 0, left = 0;
+    for (int d = 0; d < numDests; ++d)
+    {
+        auto& cords = edit.into[(size_t) d];
+        if (cords.empty()) continue;
+        if (cords.size() == 1 && std::abs (cords.front().gain - 1.0f) < 1.0e-4f)
+        {
+            normals[(size_t) d] = { cords.front().source, normals[(size_t) d].source == cords.front().source && normals[(size_t) d].full };
+            cords.clear();
+            ++wired;
+        }
+        else ++left;
+    }
+    if (kept != nullptr) *kept = left;
+    publish();
+    return wired;
+}
+
+std::unique_ptr<juce::XmlElement> Patchbay::normalsToXml() const
+{
+    auto xml = toXml();
+    xml->setTagName ("NORMALS");
+    xml->deleteAllChildElementsWithTagName ("CORD");
+    return xml;
+}
+
+void Patchbay::normalsFromXml (const juce::XmlElement& xml)
+{
+    for (auto& n : normals) n = {};
+    for (auto* e : xml.getChildWithTagNameIterator ("NORMAL"))
+    {
+        const int s = findSource (e->getStringAttribute ("fromPort"), e->getStringAttribute ("from"));
+        const int d = findDest (e->getStringAttribute ("toPort"), e->getStringAttribute ("to"));
+        if (s >= 0 && d >= 0 && isMidiSource (s) == isMidiDest (d))
+            normals[(size_t) d] = { s, e->getBoolAttribute ("full") };
+    }
+    publish();
+}
+
 std::vector<std::pair<int, int>> Patchbay::getAllNormals() const
 {
     std::vector<std::pair<int, int>> all;

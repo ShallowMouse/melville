@@ -1048,9 +1048,35 @@ PatchbayView::PatchbayView (Hub& h) : hub (h), canvas (h)
     defaultButton.setTooltip ("Wire the bay the way MELVILLE starts (interface > Hawthorne > EMERSON > WHITMAN > back to Hawthorne) and pull every cable");
     defaultButton.onClick = [this]
     {
-        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Default patch",
-            "Rewire the normals the way MELVILLE starts and pull every cable?", "Rewire", "Cancel", this,
-            juce::ModalCallbackFunction::create ([this] (int ok) { if (ok) hub.defaultPatch(); }));
+        if (Hub::hasStudioNormals())
+            juce::AlertWindow::showYesNoCancelBox (juce::MessageBoxIconType::QuestionIcon, "Default patch",
+                "Pull every cable and rewire the normals: your own (saved with MAKE NORMALS), or MELVILLE's factory ones?",
+                "Your normals", "Factory", "Cancel", this,
+                juce::ModalCallbackFunction::create ([this] (int r) { if (r == 1) hub.defaultPatch(); else if (r == 2) hub.defaultPatch (true); }));
+        else
+            juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Default patch",
+                "Rewire the normals the way MELVILLE starts and pull every cable?", "Rewire", "Cancel", this,
+                juce::ModalCallbackFunction::create ([this] (int ok) { if (ok) hub.defaultPatch (true); }));
+    };
+    normalsButton.setTooltip ("Wire what's patched now behind the bay, and keep it as your normals: DEFAULT (and a new MELVILLE) starts from them");
+    normalsButton.onClick = [this]
+    {
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Make these the normals",
+            "Wire what's patched now behind the bay? Each input with one cable at 0 dB becomes normalled from it and the cable comes out; "
+            "inputs mixing several cables, or at another level, keep their cables.\n\n"
+            "These become your normals: DEFAULT goes back to them, and MELVILLE starts with them.", "Make normals", "Cancel", this,
+            juce::ModalCallbackFunction::create ([this] (int ok)
+            {
+                if (! ok) return;
+                int kept = 0;
+                const int wired = hub.getPatchbay().cablesToNormals (&kept);
+                hub.saveStudioNormals();
+                juce::String msg;
+                msg << wired << (wired == 1 ? " cable is" : " cables are") << " now wired behind the bay. Your normals are saved.";
+                if (kept > 0) msg << "\n\n" << kept << (kept == 1 ? " input keeps its cables" : " inputs keep their cables")
+                                  << " (a mix of several, or not at 0 dB): a normal is one source at 0 dB.";
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Normals", msg, "OK", this);
+            }));
     };
     clearButton.setTooltip ("Pull every cable out of the patchbay. The normals stay, so everything goes back to its usual wiring");
     clearButton.onClick = [this]
@@ -1066,7 +1092,7 @@ PatchbayView::PatchbayView (Hub& h) : hub (h), canvas (h)
     everyCable.setColour (juce::ToggleButton::tickColourId, Colours::accent);
     everyCable.onClick = [this] { canvas.setShowEveryCable (everyCable.getToggleState()); };
     canvas.onShowEveryCable = [this] { everyCable.setToggleState (true, juce::dontSendNotification); };
-    for (auto* b : { &defaultButton, &clearButton, &saveButton, &openButton }) addAndMakeVisible (b);
+    for (auto* b : { &normalsButton, &defaultButton, &clearButton, &saveButton, &openButton }) addAndMakeVisible (b);
 
     // AUDIO and MIDI: the same panels, in the same order, each with its own jacks
     for (auto* t : { &audioTab, &midiTab })
@@ -1110,9 +1136,9 @@ void PatchbayView::paint (juce::Graphics& g)
     g.setColour (Colours::textDim);
     g.setFont (font (12.0f));
     g.drawText (midiTab.getToggleState()
-                    ? "MIDI: OUT to IN; one cable carries all sixteen channels. A cable into a normalled IN breaks its normal."
-                    : "Drag OUT to IN; drag a plug out to move it. A cable into a normalled IN breaks its normal.",
-                bar.reduced (14, 0).withTrimmedLeft (170).withTrimmedRight (670), juce::Justification::centredLeft, true);
+                    ? "OUT to IN; a cable carries all 16 channels and breaks an IN's normal."
+                    : "Drag OUT to IN. A cable breaks an IN's normal.",
+                bar.reduced (14, 0).withTrimmedLeft (170).withTrimmedRight (800), juce::Justification::centredLeft, true);
 }
 
 void PatchbayView::resized()
@@ -1121,9 +1147,9 @@ void PatchbayView::resized()
     auto bar = r.removeFromTop (46).reduced (10, 9);
     audioTab.setBounds (bar.removeFromLeft (76));
     midiTab.setBounds (bar.removeFromLeft (76));
-    for (auto* b : { &openButton, &saveButton, &clearButton, &defaultButton })
+    for (auto* b : { &openButton, &saveButton, &clearButton, &defaultButton, &normalsButton })
     {
-        b->setBounds (bar.removeFromRight (b == &clearButton ? 96 : 80));
+        b->setBounds (bar.removeFromRight (b == &normalsButton ? 116 : b == &clearButton ? 96 : 80));
         bar.removeFromRight (6);
     }
     everyCable.setBounds (bar.removeFromRight (160));

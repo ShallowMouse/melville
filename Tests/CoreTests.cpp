@@ -205,6 +205,24 @@ int main()
     pb.fromXml (*saved);                            // saving and loading brings the normals back
     CHECK (pb.isNormalLive (dst) && pb.getAllCords().size() == 1 && passes());
 
+    // MAKE NORMALS: what's patched becomes the normals (one cable at 0 dB); a mix keeps its cables
+    {
+        auto before = pb.toXml();
+        const int dst3 = pb.findDest ("hawthorne", "Track 3");
+        pb.connect (src2, dst);                     // In 2 onto track 1 (breaks In 1's normal)
+        pb.connect (src, dst3); pb.connect (src2, dst3);   // a mix of two onto track 3
+        int kept = 0;
+        const int wired = pb.cablesToNormals (&kept);
+        CHECK (pb.normalOf (dst) == src2 && pb.isNormalLive (dst) && ! pb.isConnected (src2, dst));
+        CHECK (pb.isConnected (src, dst3) && pb.isConnected (src2, dst3) && kept == 1);
+        CHECK (wired == 2);                         // (and the test's cable into Out 1)
+        auto normalsOnly = pb.normalsToXml();
+        pb.fromXml (*before);
+        pb.normalsFromXml (*normalsOnly);           // put back: the normals only, the cables stay
+        CHECK (pb.normalOf (dst) == src2 && pb.getAllCords().size() == 1);
+        pb.fromXml (*before);
+    }
+
     // a patch from before normals (version 5, all cables): the usual cables become normals, a usual
     // cable it didn't have stays out, and the rest stay cables, so it's connected exactly as it was
     {

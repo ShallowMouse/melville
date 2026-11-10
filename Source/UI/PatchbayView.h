@@ -130,6 +130,7 @@ private:
     void open();
 
     Hub& hub;
+    juce::TextButton normalsButton { "MAKE NORMALS" };
     juce::TextButton defaultButton { "DEFAULT" }, clearButton { "PULL ALL" }, saveButton { "SAVE" }, openButton { "OPEN" };
     juce::ToggleButton everyCable { "SHOW EVERY CABLE" }, normalsShown { "SHOW NORMALS" };
     juce::TextButton audioTab { "AUDIO" }, midiTab { "MIDI" };

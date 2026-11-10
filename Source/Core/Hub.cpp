@@ -151,9 +151,38 @@ bool Hub::isPartConnected (const juce::String& id) const
 }
 
 //==============================================================================
-void Hub::defaultPatch()
+juce::File Hub::studioNormalsFile()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+               .getChildFile ("MELVILLE").getChildFile ("studio-normals.xml");
+}
+
+bool Hub::hasStudioNormals()
+{
+    return studioNormalsFile().existsAsFile();
+}
+
+void Hub::saveStudioNormals()
+{
+    auto f = studioNormalsFile();
+    f.getParentDirectory().createDirectory();
+    patchbay.normalsToXml()->writeTo (f);
+}
+
+void Hub::forgetStudioNormals()
+{
+    studioNormalsFile().deleteFile();
+}
+
+void Hub::defaultPatch (bool factory)
 {
     patchbay.clearAll();
+    if (! factory)
+        if (auto xml = juce::XmlDocument::parse (studioNormalsFile()); xml != nullptr && xml->hasTagName ("NORMALS"))
+        {
+            patchbay.normalsFromXml (*xml);
+            return;
+        }
     wireDefaultNormals();
 }
 

@@ -99,6 +99,13 @@ public:
     /** Normal a destination from a source (-1 takes the normal out). */
     void setNormal (int source, int dest, bool full = false);
     void clearNormals();
+    /** Make what's patched now the normals: each input with one cable at 0 dB is normalled
+        from that cable's source and the cable comes out. Inputs mixing several cables, or at
+        another level, keep their cables (how many: `kept`). Returns the inputs wired. */
+    int cablesToNormals (int* kept = nullptr);
+    /** Just the normals (NORMALS), and putting them back (the cables stay). */
+    std::unique_ptr<juce::XmlElement> normalsToXml() const;
+    void normalsFromXml (const juce::XmlElement&);
     /** Each normal: (dest, source). */
     std::vector<std::pair<int, int>> getAllNormals() const;
 
