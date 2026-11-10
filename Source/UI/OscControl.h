@@ -1,23 +1,37 @@
 #pragma once
 
-// MELVILLE's control surface over OSC: TWAIN's monitor keys and level, and the transport, from
-// a tablet (TouchOSC) or, later, the hardware TWAIN. Listens on a UDP port (8100) and answers
-// whoever sent the last message (or a fixed address) on the reply port (9100), with every lamp and
-// the display, so a surface's buttons light like the hardware's LEDs. Set up in MELVILLE's
-// INTERFACE window. (IRVING's own OSC is on 9000 / 9001.)
+// MELVILLE's control surfaces over OSC: the hardware TWAIN, the Hawthorne transport (and a meter
+// bridge later), or TouchOSC pages standing in for them. Listens on a UDP port (8100) and answers
+// every surface it has heard from (or a fixed list of addresses) on the reply port (9100), with
+// every lamp and readout, so a surface's keys light like the hardware's LEDs. A surface that only
+// listens should send /melville/sync now and then (every few seconds) so MELVILLE keeps answering
+// it. Set up in MELVILLE's INTERFACE window. (IRVING's own OSC is on 9000 / 9001.)
 //
+// TWAIN
 //   /twain/source/mix  /twain/source/2track  /twain/source/ext1  /twain/source/ext2     press
 //   /twain/speakers/a  /twain/speakers/b  /twain/speakers/c                            press
 //   /twain/dim  /twain/mute  /twain/mono                                     press: on / off
 //   /twain/ref                                                 press: the level to 0 dB
 //   /twain/level f       0..1 = -60 .. +6 dB (a knob)
 //   /twain/level/step f  half-dB steps, + or - (what an encoder sends)
-//   /transport/rtz  /transport/stop  /transport/play  /transport/rec                    press
-//   /transport/rew  /transport/ffw                      held: winds while it's held down
-//   /melville/sync                                      any surface: send me everything
+//   back: each key 1 / 0; /twain/level f; /twain/level/text s; /twain/display/1 s, /twain/display/2 s
 //
-// Back to the surface: each key's address with 1 (lit) or 0; /twain/level f; /twain/level/text s;
-// /twain/display/1 s, /twain/display/2 s; /transport/counter s.
+// HAWTHORNE (its transport; without a reel, the play / stop / record keys run MELVILLE's clock)
+//   /hawthorne/rtz  /stop  /play  /reverse  /rec                                        press
+//   /hawthorne/rew  /hawthorne/ffw                         held: winds while it's held down
+//   /hawthorne/mark                                        press: a marker here
+//   /hawthorne/marker/prev  /hawthorne/marker/next         press: to the marker before / after
+//   /hawthorne/in  /hawthorne/out                          press: the autolocator's IN / OUT here
+//   /hawthorne/goto/in  /hawthorne/goto/out                press: go there
+//   /hawthorne/loop  /hawthorne/auto  /hawthorne/rehearse  press: on / off
+//   /hawthorne/locate/1 .. /8                              press: go to LOC n (or store it, after STORE)
+//   /hawthorne/store                                       press: the next LOC key stores here
+//   /hawthorne/store/1 .. /8                               press: store LOC n here
+//   back: each key 1 / 0 (LOC n lit: it holds a place; IN / OUT lit: set); /hawthorne/counter s;
+//         /hawthorne/in/text s, /hawthorne/out/text s; /hawthorne/marker/now s, /hawthorne/marker/next s
+//
+// /transport/... (rtz stop play rec rew ffw, counter): MELVILLE's transport, as on its bar
+// /melville/sync                                        any surface: send me everything
 
 #include <JuceHeader.h>
 #include "../Core/TwainNode.h"
@@ -35,7 +49,7 @@ public:
     {
         bool enabled = true;
         int listenPort = 8100, replyPort = 9100;
-        juce::String replyHost;                 // empty: answer whoever's sending
+        juce::String replyHost;                 // empty: answer every surface heard; else these addresses (comma separated)
 
         std::unique_ptr<juce::XmlElement> toXml() const
         {
@@ -56,6 +70,12 @@ public:
             s.replyHost = x->getStringAttribute ("replyHost").trim();
             return s;
         }
+        juce::StringArray fixedHosts() const
+        {
+            auto a = juce::StringArray::fromTokens (replyHost, ",; ", "");
+            a.trim(); a.removeEmptyStrings();
+            return a;
+        }
     };
 
     /** The one MELVILLE runs (for its settings), or nullptr. */
@@ -71,16 +91,14 @@ public:
     {
         stop();
         settings = s;
-        surfaceHost = {};
-        connected = false;
-        lastHeardMs = 0;
+        surfaces.clear();
         if (onSettingsChanged) onSettingsChanged (settings);
         if (! settings.enabled) return true;
         socket = std::make_unique<juce::DatagramSocket> (false);
         if (! socket->bindToPort (settings.listenPort)) { socket.reset(); failed = true; return false; }
         failed = false;
         port = settings.listenPort;
-        if (settings.replyHost.isNotEmpty()) connectTo (settings.replyHost);
+        for (auto& h : settings.fixedHosts()) surfaceFor (h);
         startThread();
         startTimerHz (15);
         return true;
@@ -102,9 +120,8 @@ public:
     {
         return port == 0 ? juce::String() : lanAddress() + ":" + juce::String (port);
     }
-    juce::String getSurface() const { return lastHeardMs > 0 ? lastFrom : juce::String(); }   // who's controlling (empty: nobody yet)
 
-    /** One line for the settings: off, listening where, who's on it. */
+    /** One line for the settings: off, listening where, which surfaces. */
     juce::String getStatus() const
     {
         if (! settings.enabled) return "Off.";
@@ -116,14 +133,16 @@ public:
             rest.remove (0);
             s << "(Also " << rest.joinIntoString (", ") << ".) ";
         }
-        if (lastHeardMs == 0) s << "Nothing heard yet.";
-        else
+        if (surfaces.empty()) return s + "No surfaces yet.";
+        juce::StringArray list;
+        const auto now = juce::Time::getMillisecondCounter();
+        for (auto& [host, sf] : surfaces)
         {
-            const auto ago = (juce::Time::getMillisecondCounter() - lastHeardMs) / 1000u;
-            s << "Last heard from " << lastFrom << (ago < 2 ? juce::String (" just now") : " " + juce::String ((int) ago) + " s ago") << ".";
+            if (sf.lastHeard == 0) { list.add (host + " (fixed)"); continue; }
+            const auto ago = (now - sf.lastHeard) / 1000u;
+            list.add (host + (ago < 2 ? juce::String (" just now") : " " + juce::String ((int) ago) + " s ago"));
         }
-        if (connected) s << " Answering " << surfaceHost << ":" << settings.replyPort << ".";
-        return s;
+        return s + "Answering on port " + juce::String (settings.replyPort) + ": " + list.joinIntoString (", ") + ".";
     }
 
 private:
@@ -146,11 +165,13 @@ private:
             {
                 if (auto* self = safe.get())
                 {
-                    self->lastFrom = from;
-                    self->lastHeardMs = juce::jmax (1u, juce::Time::getMillisecondCounter());
-                    if (self->settings.replyHost.isEmpty() && from != self->surfaceHost) self->connectTo (from);
+                    if (self->settings.fixedHosts().isEmpty() || self->surfaces.count (from) > 0)
+                    {
+                        auto& sf = self->surfaceFor (from);
+                        sf.lastHeard = juce::jmax (1u, juce::Time::getMillisecondCounter());
+                        sf.resend = true;            // (and put every lamp right, the pressed one too)
+                    }
                     for (auto& m : msgs) self->handle (m);
-                    self->resendAll = true;          // (and put every lamp right, the pressed one too)
                 }
             });
         }
@@ -230,12 +251,18 @@ private:
     static float levelDb (float gain) { return gain <= 0.0f ? -60.0f : juce::jlimit (-60.0f, 6.0f, juce::Decibels::gainToDecibels (gain)); }
     static float dbGain (float db)    { return db <= -59.9f ? 0.0f : juce::Decibels::decibelsToGain (juce::jlimit (-60.0f, 6.0f, db)); }
 
+    static void deck (int command, int arg = 0)
+    {
+        if (auto& d = melville::transport().deck) d (command, arg);
+    }
+
     void handle (const Msg& m)
     {
         const auto& a = m.address;
         const bool press = ! m.hasValue || m.value > 0.5f;
         auto onPress = [press] (auto f) { if (press) f(); };
 
+        // --- TWAIN
         static const std::map<juce::String, int> sources { { "/twain/source/mix", TwainNode::mix }, { "/twain/source/2track", TwainNode::twoTrack },
                                                            { "/twain/source/ext1", TwainNode::ext1 }, { "/twain/source/ext2", TwainNode::ext2 } };
         if (auto it = sources.find (a); it != sources.end()) { onPress ([&] { twain.source = it->second; }); return; }
@@ -254,39 +281,87 @@ private:
             twain.monitorLevel = dbGain (-60.0f + 66.0f * juce::jlimit (0.0f, 1.0f, m.value));
             return;
         }
-        if (a == "/twain/level/step" && m.hasValue && m.value != 0.0f)
+        if (a == "/twain/level/step" && m.hasValue && std::abs (m.value) > 0.0f)
         {
-            const float db = levelDb (twain.monitorLevel.load());
-            twain.monitorLevel = dbGain (db + 0.5f * m.value);
+            twain.monitorLevel = dbGain (levelDb (twain.monitorLevel.load()) + 0.5f * m.value);
             return;
         }
-        if (a == "/transport/play") { onPress ([] { melville::play(); });         return; }
-        if (a == "/transport/stop") { onPress ([] { melville::stop(); });         return; }
-        if (a == "/transport/rec")  { onPress ([] { melville::record(); });       return; }
-        if (a == "/transport/rtz")  { onPress ([] { melville::returnToZero(); }); return; }
-        if (a == "/transport/rew" || a == "/transport/ffw")
+
+        // --- the transport: MELVILLE's (/transport) and Hawthorne's (/hawthorne)
+        const bool hw = a.startsWith ("/hawthorne/");
+        if (hw || a.startsWith ("/transport/"))
         {
-            melville::wind (press ? (a.endsWith ("rew") ? -1 : 1) : 0);
+            const auto key = a.fromFirstOccurrenceOf ("/", false, false).fromFirstOccurrenceOf ("/", false, false);
+            if (key == "play") { onPress ([] { melville::play(); });         return; }
+            if (key == "stop") { onPress ([] { melville::stop(); });         return; }
+            if (key == "rec")  { onPress ([] { melville::record(); });       return; }
+            if (key == "rtz")  { onPress ([] { melville::returnToZero(); }); return; }
+            if (key == "rew" || key == "ffw") { melville::wind (press ? (key == "rew" ? -1 : 1) : 0); return; }
+        }
+        if (! hw) return;
+        const auto key = a.substring (11);           // (after "/hawthorne/")
+        if (key == "reverse")      { onPress ([] { deck (deckReverse); });    return; }
+        if (key == "mark")         { onPress ([] { deck (deckMark); });       return; }
+        if (key == "marker/prev")  { onPress ([] { deck (deckPrevMarker); }); return; }
+        if (key == "marker/next")  { onPress ([] { deck (deckNextMarker); }); return; }
+        if (key == "in")           { onPress ([] { deck (deckSetIn); });      return; }
+        if (key == "out")          { onPress ([] { deck (deckSetOut); });     return; }
+        if (key == "goto/in")      { onPress ([] { deck (deckGotoIn); });     return; }
+        if (key == "goto/out")     { onPress ([] { deck (deckGotoOut); });    return; }
+        if (key == "loop")         { onPress ([] { deck (deckLoop); });       return; }
+        if (key == "auto")         { onPress ([] { deck (deckAutoPunch); });  return; }
+        if (key == "rehearse")     { onPress ([] { deck (deckRehearse); });   return; }
+        if (key == "store")        { onPress ([this] { storeArmed = ! storeArmed; }); return; }
+        if (key.startsWith ("locate/") || key.startsWith ("store/"))
+        {
+            const int k = key.fromLastOccurrenceOf ("/", false, false).getIntValue() - 1;
+            if (! juce::isPositiveAndBelow (k, 8)) return;
+            onPress ([&]
+            {
+                const bool store = key.startsWith ("store/") || storeArmed;
+                storeArmed = false;
+                deck (store ? deckStoreLocate : deckLocate, k);
+            });
             return;
         }
-        // (/melville/sync and anything else: just the lamps, below)
+        // (/melville/sync and anything else: just the lamps)
     }
 
     //==========================================================================
     // answering (message thread)
-    void connectTo (const juce::String& host)
+    struct Surface
     {
-        surfaceHost = host;
-        sender.disconnect();
-        connected = sender.connect (host, settings.replyPort);
-        sent.clear();
+        std::unique_ptr<juce::OSCSender> sender = std::make_unique<juce::OSCSender>();
+        bool connected = false, resend = true;
+        juce::uint32 lastHeard = 0;                  // 0: a fixed address
+        std::map<juce::String, juce::String> sent;
+    };
+
+    Surface& surfaceFor (const juce::String& host)
+    {
+        auto& sf = surfaces[host];
+        if (! sf.connected) sf.connected = sf.sender->connect (host, settings.replyPort);
+        return sf;
     }
 
-    void timerCallback() override
-    {
-        if (! connected) return;
-        if (++ticks % 30 == 0) resendAll = true;       // (every two seconds: a surface that's just woken up)
+    struct Out { juce::String address; bool isText; float v; juce::String text; };
 
+    static juce::String clockText (double secs, bool tenths)
+    {
+        const double s = juce::jmax (0.0, secs);
+        const int whole = (int) std::floor (s);
+        return tenths ? juce::String::formatted ("%02d:%02d:%02d.%d", whole / 3600, (whole / 60) % 60, whole % 60, (int) ((s - whole) * 10.0))
+                      : juce::String::formatted ("%02d:%02d.%d", whole / 60, whole % 60, (int) ((s - whole) * 10.0));
+    }
+
+    /** Everything a surface shows, now. */
+    std::vector<Out> state() const
+    {
+        std::vector<Out> o;
+        auto lamp = [&o] (const juce::String& a, bool on) { o.push_back ({ a, false, on ? 1.0f : 0.0f, {} }); };
+        auto text = [&o] (const juce::String& a, const juce::String& t) { o.push_back ({ a, true, 0.0f, t }); };
+
+        // TWAIN
         const int src = twain.source.load(), spk = twain.speakers.load();
         lamp ("/twain/source/mix", src == TwainNode::mix);
         lamp ("/twain/source/2track", src == TwainNode::twoTrack);
@@ -297,15 +372,10 @@ private:
         lamp ("/twain/dim", twain.dim.load());
         lamp ("/twain/mute", twain.mute.load());
         lamp ("/twain/mono", twain.mono.load());
-        lamp ("/twain/ref", std::abs (levelDb (twain.monitorLevel.load())) < 0.25f);
-
         const float db = levelDb (twain.monitorLevel.load());
-        value ("/twain/level", (db + 60.0f) / 66.0f);
-        const juce::String levelText = twain.mute.load() ? juce::String ("MUTE")
-                                     : db <= -59.9f ? juce::String ("-INF")
-                                     : juce::String (db, 1) + " dB";
-        text ("/twain/level/text", levelText);
-
+        lamp ("/twain/ref", std::abs (db) < 0.25f);
+        o.push_back ({ "/twain/level", false, (db + 60.0f) / 66.0f, {} });
+        text ("/twain/level/text", twain.mute.load() ? juce::String ("MUTE") : db <= -59.9f ? juce::String ("-INF") : juce::String (db, 1) + " dB");
         static const char* names[] = { "MIX", "2-TRACK", "EXT 1", "EXT 2" };
         const juce::String listening = juce::isPositiveAndBelow (src, 4) ? juce::String (names[src]) : "PHONES " + juce::String (src - TwainNode::feed1 + 1);
         text ("/twain/display/1", "LISTENING  " + listening + "   SPEAKERS " + juce::String::charToString ((juce::juce_wchar) ('A' + spk)));
@@ -315,46 +385,72 @@ private:
         if (twain.mono.load()) flags.add ("MONO");
         text ("/twain/display/2", flags.isEmpty() ? juce::String ("MELVILLE  TWAIN") : flags.joinIntoString ("  "));
 
+        // the transport
         auto& t = melville::transport();
-        const bool rolling = melville::isRolling(), recording = t.recording.load();
-        lamp ("/transport/play", rolling);
-        lamp ("/transport/rec", recording);
-        lamp ("/transport/stop", ! rolling);
-        const double secs = (double) t.position.load() / juce::jmax (1.0, t.reelRate.load());
-        const int whole = (int) std::floor (juce::jmax (0.0, secs));
-        text ("/transport/counter", juce::String::formatted ("%02d:%02d:%02d.%d", whole / 3600, (whole / 60) % 60, whole % 60,
-                                                             (int) ((juce::jmax (0.0, secs) - whole) * 10.0)));
-        resendAll = false;
+        const int lamps = t.deckLamps.load();
+        const bool rolling = melville::isRolling(), recording = t.recording.load(), reversing = (lamps & lampReversing) != 0;
+        const double rate = juce::jmax (1.0, t.reelRate.load());
+        const auto counter = clockText ((double) t.position.load() / rate, true);
+        for (auto* ns : { "/transport/", "/hawthorne/" })
+        {
+            const juce::String n (ns);
+            lamp (n + "play", rolling && ! reversing);
+            lamp (n + "rec", recording);
+            lamp (n + "stop", ! rolling);
+            text (n + "counter", counter);
+        }
+        lamp ("/hawthorne/reverse", reversing);
+        lamp ("/hawthorne/loop", (lamps & lampLoop) != 0);
+        lamp ("/hawthorne/auto", (lamps & lampAutoPunch) != 0);
+        lamp ("/hawthorne/rehearse", (lamps & lampRehearse) != 0);
+        const auto in = t.punchIn.load(), out = t.punchOut.load();
+        lamp ("/hawthorne/in", in >= 0);
+        lamp ("/hawthorne/out", out >= 0);
+        text ("/hawthorne/in/text", in >= 0 ? clockText ((double) in / rate, false) : juce::String ("--:--"));
+        text ("/hawthorne/out/text", out >= 0 ? clockText ((double) out / rate, false) : juce::String ("--:--"));
+        const int stored = t.locatesStored.load();
+        for (int k = 0; k < 8; ++k) lamp ("/hawthorne/locate/" + juce::String (k + 1), (stored >> k) & 1);
+        lamp ("/hawthorne/store", storeArmed);
+        juce::String now, next;
+        {
+            const juce::SpinLock::ScopedLockType sl (t.markerLock);
+            now = t.markerNow; next = t.markerNext;
+        }
+        text ("/hawthorne/marker/now", now.isEmpty() ? juce::String ("-") : now.toUpperCase());
+        text ("/hawthorne/marker/next", next.isEmpty() ? juce::String ("-") : next.toUpperCase());
+        return o;
     }
 
-    void lamp (const juce::String& a, bool on) { value (a, on ? 1.0f : 0.0f); }
-
-    void value (const juce::String& a, float v)
+    void timerCallback() override
     {
-        const auto s = juce::String (v, 4);
-        if (! resendAll && sent[a] == s) return;
-        sent[a] = s;
-        sender.send (a, v);
-    }
-
-    void text (const juce::String& a, const juce::String& v)
-    {
-        if (! resendAll && sent[a] == v) return;
-        sent[a] = v;
-        sender.send (a, v);
+        if (surfaces.empty()) return;
+        const bool everything = ++ticks % 30 == 0;   // (every two seconds: a surface that's just woken up)
+        const auto now = state();
+        const auto clock = juce::Time::getMillisecondCounter();
+        for (auto it = surfaces.begin(); it != surfaces.end();)
+        {
+            auto& sf = it->second;
+            if (sf.lastHeard != 0 && clock - sf.lastHeard > 60u * 60u * 1000u) { it = surfaces.erase (it); continue; }   // (an hour's silence: gone)
+            if (sf.connected)
+                for (auto& o : now)
+                {
+                    const auto v = o.isText ? o.text : juce::String (o.v, 4);
+                    if (! (everything || sf.resend) && sf.sent[o.address] == v) continue;
+                    sf.sent[o.address] = v;
+                    if (o.isText) sf.sender->send (o.address, o.text); else sf.sender->send (o.address, o.v);
+                }
+            sf.resend = false;
+            ++it;
+        }
     }
 
     TwainNode& twain;
     std::unique_ptr<juce::DatagramSocket> socket;
     std::atomic<int> port { 0 };
-    juce::OSCSender sender;
     Settings settings;
-    bool connected = false, resendAll = true, failed = false;
-    juce::uint32 lastHeardMs = 0;
-    juce::String lastFrom;
+    bool failed = false, storeArmed = false;
     int ticks = 0;
-    juce::String surfaceHost;
-    std::map<juce::String, juce::String> sent;
+    std::map<juce::String, Surface> surfaces;
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (OscControl)
 };

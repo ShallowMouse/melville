@@ -447,8 +447,8 @@ public:
         oscCaption.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
         oscCaption.setColour (juce::Label::textColourId, Colours::accent);
         addAndMakeVisible (oscCaption);
-        oscHelp.setText ("TouchOSC (or the hardware TWAIN) works TWAIN's monitor keys and level and the transport. Point it at this "
-                         "computer's address and the listen port; MELVILLE lights its keys back on the reply port.",
+        oscHelp.setText ("The hardware (TWAIN, the Hawthorne transport) or TouchOSC. Point each at this computer's address and the "
+                         "listen port; MELVILLE lights their keys back on the reply port, every surface at once.",
                          juce::dontSendNotification);
         oscHelp.setJustificationType (juce::Justification::topLeft);
         oscHelp.setColour (juce::Label::textColourId, Colours::textDim);
@@ -467,12 +467,12 @@ public:
         }
         listenPort.setTooltip ("The port MELVILLE listens on (the surface's send port)");
         replyPort.setTooltip ("The port MELVILLE answers on (the surface's receive port)");
-        replyTo.addItem ("whoever's sending", 1);
-        replyTo.addItem ("this address:", 2);
-        replyTo.setTooltip ("Where MELVILLE sends the lamps and the display: back to whichever surface sent the last message, or a fixed address");
+        replyTo.addItem ("every surface heard", 1);
+        replyTo.addItem ("these addresses:", 2);
+        replyTo.setTooltip ("Where MELVILLE sends the lamps and readouts: every surface it has heard from, or only these addresses (comma between them)");
         replyTo.onChange = [this] { replyHost.setEnabled (replyTo.getSelectedId() == 2); applyOsc(); };
         addAndMakeVisible (replyTo);
-        replyHost.setTextToShowWhenEmpty ("192.168.1.20", Colours::textDim);
+        replyHost.setTextToShowWhenEmpty ("192.168.1.20, 192.168.1.21", Colours::textDim);
         replyHost.setInputRestrictions (64);
         replyHost.onReturnKey = [this] { applyOsc(); };
         replyHost.onFocusLost = [this] { applyOsc(); };
@@ -527,10 +527,10 @@ public:
         auto row2 = r.removeFromTop (26);
         row2.removeFromLeft (70);
         replyToLabel.setBounds (row2.removeFromLeft (80)); row2.removeFromLeft (6);
-        replyTo.setBounds (row2.removeFromLeft (160)); row2.removeFromLeft (8);
-        replyHost.setBounds (row2.removeFromLeft (150));
+        replyTo.setBounds (row2.removeFromLeft (170)); row2.removeFromLeft (8);
+        replyHost.setBounds (row2.removeFromLeft (210));
         r.removeFromTop (8);
-        oscStatus.setBounds (r.removeFromTop (40));
+        oscStatus.setBounds (r.removeFromTop (56));
     }
 
     void paint (juce::Graphics& g) override

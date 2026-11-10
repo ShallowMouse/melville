@@ -57,6 +57,8 @@ namespace melville
         std::function<void (double bpm, int beatsPerBar, double barOne)> writeTempo;   // onto the reel (barOne: tape samples)
         std::function<void (int rate, double startSeconds)> writeTimecode;              // onto the reel, and for its chase
         std::function<void (int source, const juce::String& mtcInput)> setChase;       // 0 off, 1 LTC (LTC IN jack), 2 MTC
+        /** The deck's other keys, for a hardware transport (message thread): see DeckCommand. */
+        std::function<void (int command, int arg)> deck;
 
         // --- State (any thread)
         std::atomic<bool> available { false };              // Hawthorne is there
@@ -75,7 +77,19 @@ namespace melville
         std::atomic<double> tapePos { 0.0 }, tapePerSample { 0.0 };
         std::atomic<juce::int64> publishedFrame { -1 };      // the hub frame of that block's start
         std::atomic<int> flags { 0 };                        // 1 rolling, 2 recording, 4 reel loaded
+
+        // --- The deck's lamps and readouts (Hawthorne publishes them, message thread)
+        std::atomic<int> deckLamps { 0 };                    // DeckLamp bits
+        std::atomic<int> locatesStored { 0 };                // bit k: LOC k+1 holds a position
+        std::atomic<juce::int64> punchIn { -1 }, punchOut { -1 };   // reel samples, -1 = not set
+        juce::SpinLock markerLock;
+        juce::String markerNow, markerNext;                  // (under markerLock)
     };
+
+    /** A hardware transport's keys for the deck (Transport::deck). */
+    enum DeckCommand { deckReverse = 0, deckMark, deckPrevMarker, deckNextMarker, deckSetIn, deckSetOut, deckGotoIn, deckGotoOut,
+                       deckLoop, deckAutoPunch, deckRehearse, deckLocate /* arg: 0-7 */, deckStoreLocate /* arg: 0-7 */ };
+    enum DeckLamp { lampReversing = 1, lampLoop = 2, lampAutoPunch = 4, lampRehearse = 8 };
     Transport& transport() noexcept;
 
     // MELVILLE's transport keys (message thread): the tape's with a reel on the deck,
