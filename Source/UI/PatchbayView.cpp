@@ -44,10 +44,36 @@ PatchCanvas::~PatchCanvas()
     hub.getPatchbay().onChange = nullptr;
 }
 
+/** A MIDI port's name -> its device and which of the device's ports it is
+    ("MIDIIN2 (Launchkey 49)" -> "Launchkey 49", "2"; "MIDISPORT 4x4 Port B" -> "MIDISPORT 4x4", "B"). */
+static std::pair<juce::String, juce::String> midiDevicePort (juce::String nm)
+{
+    nm = nm.trim();
+    // Windows numbers a device's extra ports MIDIIN2 (X), MIDIOUT3 (X) ...
+    if ((nm.startsWithIgnoreCase ("MIDIIN") || nm.startsWithIgnoreCase ("MIDIOUT")) && nm.contains ("(") && nm.endsWithChar (')'))
+    {
+        const auto dev = nm.fromFirstOccurrenceOf ("(", false, false).dropLastCharacters (1).trim();
+        const auto num = nm.upToFirstOccurrenceOf ("(", false, false).retainCharacters ("0123456789");
+        if (dev.isNotEmpty()) return { dev, num.isEmpty() ? juce::String ("2") : num };
+    }
+    // "... Port A", "... MIDI 2", "... In 1", "... Out B": the last word is the port
+    const auto words = juce::StringArray::fromTokens (nm, " ", "");
+    if (words.size() >= 3)
+    {
+        const auto last = words[words.size() - 1], word = words[words.size() - 2].toLowerCase();
+        const bool portish = (last.length() <= 2 && last.containsOnly ("0123456789"))
+                          || (last.length() == 1 && juce::CharacterFunctions::isLetter (last[0]));
+        if (portish && (word == "port" || word == "midi" || word == "in" || word == "out" || word == "input" || word == "output"))
+            return { words.joinIntoString (" ", 0, words.size() - 2), last.toUpperCase() };
+    }
+    return { nm, {} };
+}
+
 void PatchCanvas::rebuild()
 {
     auto& pb = hub.getPatchbay();
-    const int tracks = hub.getVisibleTracks();
+    int tracks = hub.getVisibleTracks();
+    if (const int t = juce::SystemStats::getEnvironmentVariable ("MELVILLE_TEST_TRACKS", "0").getIntValue(); t > 0) tracks = t;   // (pictures)
     int ins = 8, outs = 8;
     if (auto* dev = hub.deviceManager.getCurrentAudioDevice())
     {
@@ -154,19 +180,53 @@ void PatchCanvas::rebuild()
         auto& p = panels.back();
         if (const auto* mp = pb.findPort ("midi"))
         {
-            juce::StringArray ins, inShort, outs, outShort;
-            int k = 0;
+            // ALL: every keyboard at once
+            column (p, { "KEYBOARDS", "midi", "Every MIDI keyboard and controller at once (each device's own ports are to the right). "
+                                             "ALCOTT's slots are normalled from here.", { "Keyboards" }, { "ALL" } }, none);
+
+            // then a column per MIDI device, its ports as jacks: what comes out of it on top,
+            // what goes into it underneath ("MIDIIN2 (X)" is X's second port on Windows)
+            struct Device { juce::String name; juce::StringArray ins, inShort, outs, outShort; };
+            std::vector<Device> devices;
+            auto deviceFor = [&devices] (const juce::String& name) -> Device&
+            {
+                for (auto& d : devices) if (d.name.equalsIgnoreCase (name)) return d;
+                devices.push_back ({ name });
+                return devices.back();
+            };
             for (auto& nm : mp->sources)
-                if (nm == "Keyboards" || nm.startsWith ("In: ")) { ins.add (nm); inShort.add (nm == "Keyboards" ? "ALL" : juce::String (++k)); }
-            k = 0;
+                if (nm.startsWith ("In: "))
+                {
+                    const auto [dev, port] = midiDevicePort (nm.substring (4));
+                    auto& d = deviceFor (dev);
+                    d.ins.add (nm); d.inShort.add (port);
+                }
             for (auto& nm : mp->dests)
-                if (nm.startsWith ("Out: ")) { outs.add (nm); outShort.add (juce::String (++k)); }
-            column (p, { "MIDI IN", "midi", "Your MIDI keyboards and controllers: ALL is every one of them at once, then each on its own ("
-                                            + ins.joinIntoString (", ").replace ("In: ", "") + "). A MIDI device opens while something's cabled to it.",
-                         ins, inShort },
-                       { "MIDI OUT", "midi", outs.isEmpty() ? juce::String ("Your MIDI interface's outputs (none found): to drum machines, synths and sequencers.")
-                                                            : "Your MIDI outputs (" + outs.joinIntoString (", ").replace ("Out: ", "") + "): to drum machines, synths and sequencers.",
-                         outs, outShort });
+                if (nm.startsWith ("Out: "))
+                {
+                    const auto [dev, port] = midiDevicePort (nm.substring (5));
+                    auto& d = deviceFor (dev);
+                    d.outs.add (nm); d.outShort.add (port);
+                }
+            for (auto& d : devices)
+            {
+                // the port names: "1", "2" ... unless the device names them; a single port: "MIDI"
+                auto tidy = [] (juce::StringArray& shorts)
+                {
+                    for (int i = 0; i < shorts.size(); ++i) if (shorts[i].isEmpty()) shorts.set (i, juce::String (i + 1));
+                    if (shorts.size() == 1) shorts.set (0, "MIDI");
+                };
+                tidy (d.inShort); tidy (d.outShort);
+                const auto title = d.name.toUpperCase().substring (0, 28);
+                column (p, { d.ins.isEmpty() ? juce::String() : title, "midi",
+                             d.name + ": what it sends (" + juce::String (d.ins.size()) + (d.ins.size() == 1 ? " port" : " ports")
+                                    + ", each carrying all sixteen channels). It opens while something's cabled to it.",
+                             d.ins, d.inShort },
+                           { d.outs.isEmpty() ? juce::String() : title, "midi",
+                             d.name + ": what it plays (" + juce::String (d.outs.size()) + (d.outs.size() == 1 ? " port" : " ports")
+                                    + ", each carrying all sixteen channels): drum machines, synths and sequencers.",
+                             d.outs, d.outShort });
+            }
         }
     }
 
@@ -522,12 +582,22 @@ void PatchCanvas::drawPanel (juce::Graphics& g, const Panel& p) const
         const auto& s = p.sections[(size_t) si];
         const bool hoverTitle = hover.titleOnly && &panels[(size_t) hover.panel] == &p && hover.section == si;
 
-        // the section's name, with a bracket over its jacks
-        g.setColour (hoverTitle ? ink : inkDim);
-        g.setFont (font (11.0f, true));
-        g.drawText (s.title, s.titleArea, juce::Justification::centredLeft);
-        g.setColour (ink.withAlpha (0.25f));
-        g.drawHorizontalLine ((int) s.titleArea.getBottom() - 1, s.titleArea.getX(), s.titleArea.getX() + (float) juce::jmin ((int) s.jacks.size(), 24) * jackPitch - 4.0f);
+        // the section's name, with a bracket over its jacks; folded into lines of 24, every
+        // line gets its own name and range ("TRACK OUT 25-48")
+        const int lines = ((int) s.jacks.size() + 23) / 24;
+        for (int line = 0; line < juce::jmax (1, lines); ++line)
+        {
+            const int first = line * 24, last = juce::jmin ((int) s.jacks.size(), first + 24) - 1;
+            const float dy = s.jacks.empty() ? 0.0f : s.jacks[(size_t) first].centre.y - s.jacks.front().centre.y;
+            const auto area = s.titleArea.translated (0.0f, dy);
+            auto title = s.title;
+            if (lines > 1) title << "  " << s.jacks[(size_t) first].label << "-" << s.jacks[(size_t) last].label;
+            g.setColour (hoverTitle ? ink : inkDim);
+            g.setFont (font (11.0f, true));
+            g.drawText (title, area, juce::Justification::centredLeft);
+            g.setColour (ink.withAlpha (0.25f));
+            g.drawHorizontalLine ((int) area.getBottom() - 1, area.getX(), area.getX() + (float) (last - first + 1) * jackPitch - 4.0f);
+        }
 
         for (int ji = 0; ji < (int) s.jacks.size(); ++ji)
         {
