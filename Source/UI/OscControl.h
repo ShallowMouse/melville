@@ -1,9 +1,10 @@
 #pragma once
 
 // MELVILLE's control surface over OSC: TWAIN's monitor keys and level, and the transport, from
-// a tablet (TouchOSC) or, later, the hardware TWAIN. Listens on UDP port 8100 (8101 ... if that's
-// taken) and answers whoever sent the last message, on port 9100, with every lamp and the display
-// (so a surface's buttons light like the hardware's LEDs). (IRVING's own OSC is on 9000 / 9001.)
+// a tablet (TouchOSC) or, later, the hardware TWAIN. Listens on a UDP port (8100) and answers
+// whoever sent the last message (or a fixed address) on the reply port (9100), with every lamp and
+// the display, so a surface's buttons light like the hardware's LEDs. Set up in MELVILLE's
+// INTERFACE window. (IRVING's own OSC is on 9000 / 9001.)
 //
 //   /twain/source/mix  /twain/source/2track  /twain/source/ext1  /twain/source/ext2     press
 //   /twain/speakers/a  /twain/speakers/b  /twain/speakers/c                            press
@@ -29,20 +30,59 @@ namespace melville
 class OscControl : private juce::Thread, private juce::Timer
 {
 public:
-    static constexpr int firstPort = 8100, replyPort = 9100;
-
-    explicit OscControl (TwainNode& t) : juce::Thread ("MELVILLE OSC"), twain (t) {}
-    ~OscControl() override { stop(); }
-
-    bool start()
+    struct Settings
     {
-        for (int p = firstPort; p < firstPort + 10; ++p)
+        bool enabled = true;
+        int listenPort = 8100, replyPort = 9100;
+        juce::String replyHost;                 // empty: answer whoever's sending
+
+        std::unique_ptr<juce::XmlElement> toXml() const
         {
-            socket = std::make_unique<juce::DatagramSocket> (false);
-            if (socket->bindToPort (p)) { port = p; startThread(); startTimerHz (15); return true; }
+            auto x = std::make_unique<juce::XmlElement> ("OSC");
+            x->setAttribute ("enabled", enabled);
+            x->setAttribute ("listen", listenPort);
+            x->setAttribute ("reply", replyPort);
+            x->setAttribute ("replyHost", replyHost);
+            return x;
         }
-        socket.reset();
-        return false;
+        static Settings fromXml (const juce::XmlElement* x)
+        {
+            Settings s;
+            if (x == nullptr) return s;
+            s.enabled = x->getBoolAttribute ("enabled", true);
+            s.listenPort = juce::jlimit (1, 65535, x->getIntAttribute ("listen", 8100));
+            s.replyPort = juce::jlimit (1, 65535, x->getIntAttribute ("reply", 9100));
+            s.replyHost = x->getStringAttribute ("replyHost").trim();
+            return s;
+        }
+    };
+
+    /** The one MELVILLE runs (for its settings), or nullptr. */
+    static OscControl*& instance() { static OscControl* o = nullptr; return o; }
+    /** The settings changed (to save them). */
+    std::function<void (const Settings&)> onSettingsChanged;
+
+    explicit OscControl (TwainNode& t) : juce::Thread ("MELVILLE OSC"), twain (t) { instance() = this; }
+    ~OscControl() override { stop(); if (instance() == this) instance() = nullptr; }
+
+    /** Use these settings: stops, and starts again if it's on. Returns false if the port couldn't be opened. */
+    bool apply (const Settings& s)
+    {
+        stop();
+        settings = s;
+        surfaceHost = {};
+        connected = false;
+        lastHeardMs = 0;
+        if (onSettingsChanged) onSettingsChanged (settings);
+        if (! settings.enabled) return true;
+        socket = std::make_unique<juce::DatagramSocket> (false);
+        if (! socket->bindToPort (settings.listenPort)) { socket.reset(); failed = true; return false; }
+        failed = false;
+        port = settings.listenPort;
+        if (settings.replyHost.isNotEmpty()) connectTo (settings.replyHost);
+        startThread();
+        startTimerHz (15);
+        return true;
     }
 
     void stop()
@@ -52,14 +92,32 @@ public:
         stopThread (1000);
         socket.reset();
         port = 0;
+        failed = false;
     }
 
+    const Settings& getSettings() const noexcept { return settings; }
     int getPort() const noexcept { return port; }
     juce::String getAddress() const
     {
         return port == 0 ? juce::String() : juce::IPAddress::getLocalAddress().toString() + ":" + juce::String (port);
     }
-    juce::String getSurface() const { return surfaceHost; }      // who's controlling (empty: nobody yet)
+    juce::String getSurface() const { return lastHeardMs > 0 ? lastFrom : juce::String(); }   // who's controlling (empty: nobody yet)
+
+    /** One line for the settings: off, listening where, who's on it. */
+    juce::String getStatus() const
+    {
+        if (! settings.enabled) return "Off.";
+        if (failed || port == 0) return "Port " + juce::String (settings.listenPort) + " is taken (by another program?): pick another.";
+        juce::String s = "Listening on " + getAddress() + ". ";
+        if (lastHeardMs == 0) s << "Nothing heard yet.";
+        else
+        {
+            const auto ago = (juce::Time::getMillisecondCounter() - lastHeardMs) / 1000u;
+            s << "Last heard from " << lastFrom << (ago < 2 ? juce::String (" just now") : " " + juce::String ((int) ago) + " s ago") << ".";
+        }
+        if (connected) s << " Answering " << surfaceHost << ":" << settings.replyPort << ".";
+        return s;
+    }
 
 private:
     //==========================================================================
@@ -81,7 +139,9 @@ private:
             {
                 if (auto* self = safe.get())
                 {
-                    if (from != self->surfaceHost) self->connectTo (from);
+                    self->lastFrom = from;
+                    self->lastHeardMs = juce::jmax (1u, juce::Time::getMillisecondCounter());
+                    if (self->settings.replyHost.isEmpty() && from != self->surfaceHost) self->connectTo (from);
                     for (auto& m : msgs) self->handle (m);
                     self->resendAll = true;          // (and put every lamp right, the pressed one too)
                 }
@@ -211,7 +271,7 @@ private:
     {
         surfaceHost = host;
         sender.disconnect();
-        connected = sender.connect (host, replyPort);
+        connected = sender.connect (host, settings.replyPort);
         sent.clear();
     }
 
@@ -281,7 +341,10 @@ private:
     std::unique_ptr<juce::DatagramSocket> socket;
     std::atomic<int> port { 0 };
     juce::OSCSender sender;
-    bool connected = false, resendAll = true;
+    Settings settings;
+    bool connected = false, resendAll = true, failed = false;
+    juce::uint32 lastHeardMs = 0;
+    juce::String lastFrom;
     int ticks = 0;
     juce::String surfaceHost;
     std::map<juce::String, juce::String> sent;

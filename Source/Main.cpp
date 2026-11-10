@@ -411,7 +411,7 @@ private:
 };
 
 //==============================================================================
-/** INTERFACE: the device selector, and underneath a round-trip latency measurement. */
+/** INTERFACE: the device selector, a round-trip latency measurement, and the control surface (OSC). */
 class InterfacePanel : public juce::Component, private juce::Timer
 {
 public:
@@ -441,7 +441,59 @@ public:
         addAndMakeVisible (result);
         fillBoxes();
         showCurrent();
-        setSize (580, 640);
+
+        // the control surface (OSC)
+        oscCaption.setText ("CONTROL SURFACE (OSC)", juce::dontSendNotification);
+        oscCaption.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
+        oscCaption.setColour (juce::Label::textColourId, Colours::accent);
+        addAndMakeVisible (oscCaption);
+        oscHelp.setText ("TouchOSC (or the hardware TWAIN) works TWAIN's monitor keys and level and the transport. Point it at this "
+                         "computer's address and the listen port; MELVILLE lights its keys back on the reply port.",
+                         juce::dontSendNotification);
+        oscHelp.setJustificationType (juce::Justification::topLeft);
+        oscHelp.setColour (juce::Label::textColourId, Colours::textDim);
+        addAndMakeVisible (oscHelp);
+        oscOn.setButtonText ("On");
+        oscOn.setTooltip ("Listen for a control surface");
+        oscOn.onClick = [this] { applyOsc(); };
+        addAndMakeVisible (oscOn);
+        for (auto* e : { &listenPort, &replyPort })
+        {
+            e->setInputRestrictions (5, "0123456789");
+            e->setJustification (juce::Justification::centred);
+            e->onReturnKey = [this] { applyOsc(); };
+            e->onFocusLost = [this] { applyOsc(); };
+            addAndMakeVisible (e);
+        }
+        listenPort.setTooltip ("The port MELVILLE listens on (the surface's send port)");
+        replyPort.setTooltip ("The port MELVILLE answers on (the surface's receive port)");
+        replyTo.addItem ("whoever's sending", 1);
+        replyTo.addItem ("this address:", 2);
+        replyTo.setTooltip ("Where MELVILLE sends the lamps and the display: back to whichever surface sent the last message, or a fixed address");
+        replyTo.onChange = [this] { replyHost.setEnabled (replyTo.getSelectedId() == 2); applyOsc(); };
+        addAndMakeVisible (replyTo);
+        replyHost.setTextToShowWhenEmpty ("192.168.1.20", Colours::textDim);
+        replyHost.setInputRestrictions (64);
+        replyHost.onReturnKey = [this] { applyOsc(); };
+        replyHost.onFocusLost = [this] { applyOsc(); };
+        addAndMakeVisible (replyHost);
+        for (auto* l : { &listenLabel, &replyLabel, &replyToLabel })
+        {
+            l->setColour (juce::Label::textColourId, Colours::text);
+            l->setJustificationType (juce::Justification::centredRight);
+            addAndMakeVisible (l);
+        }
+        listenLabel.setText ("Listen port", juce::dontSendNotification);
+        replyLabel.setText ("Reply port", juce::dontSendNotification);
+        replyToLabel.setText ("Reply to", juce::dontSendNotification);
+        oscStatus.setColour (juce::Label::textColourId, Colours::text);
+        oscStatus.setJustificationType (juce::Justification::topLeft);
+        addAndMakeVisible (oscStatus);
+        showOsc();
+        oscTimer.f = [this] { if (auto* o = melville::OscControl::instance()) oscStatus.setText (o->getStatus(), juce::dontSendNotification); };
+        oscTimer.startTimer (500);
+
+        setSize (580, 830);
     }
 
     void resized() override
@@ -459,6 +511,26 @@ public:
         clear.setBounds (row.removeFromLeft (70));
         r.removeFromTop (8);
         result.setBounds (r.removeFromTop (44));
+
+        r.removeFromTop (14);
+        oscTop = r.getY() - 7;
+        oscCaption.setBounds (r.removeFromTop (22));
+        oscHelp.setBounds (r.removeFromTop (38));
+        r.removeFromTop (6);
+        auto row1 = r.removeFromTop (26);
+        oscOn.setBounds (row1.removeFromLeft (60)); row1.removeFromLeft (10);
+        listenLabel.setBounds (row1.removeFromLeft (80)); row1.removeFromLeft (6);
+        listenPort.setBounds (row1.removeFromLeft (64)); row1.removeFromLeft (16);
+        replyLabel.setBounds (row1.removeFromLeft (76)); row1.removeFromLeft (6);
+        replyPort.setBounds (row1.removeFromLeft (64));
+        r.removeFromTop (8);
+        auto row2 = r.removeFromTop (26);
+        row2.removeFromLeft (70);
+        replyToLabel.setBounds (row2.removeFromLeft (80)); row2.removeFromLeft (6);
+        replyTo.setBounds (row2.removeFromLeft (160)); row2.removeFromLeft (8);
+        replyHost.setBounds (row2.removeFromLeft (150));
+        r.removeFromTop (8);
+        oscStatus.setBounds (r.removeFromTop (40));
     }
 
     void paint (juce::Graphics& g) override
@@ -466,6 +538,7 @@ public:
         g.fillAll (Colours::bg);
         g.setColour (Colours::line);
         g.drawHorizontalLine (440, 12.0f, (float) getWidth() - 12.0f);
+        g.drawHorizontalLine (oscTop, 12.0f, (float) getWidth() - 12.0f);
     }
 
 private:
@@ -492,6 +565,37 @@ private:
         result.setText ("Driver reports " + juce::String (rep) + " samples round trip"
                         + (extra != 0 ? ";  measured extra " + juce::String (extra) + " samples (" + ms (extra) + ")" : juce::String ("; not measured")),
                         juce::dontSendNotification);
+    }
+
+    void showOsc()
+    {
+        auto* o = melville::OscControl::instance();
+        for (auto* c : std::initializer_list<juce::Component*> { &oscOn, &listenPort, &replyPort, &replyTo, &replyHost }) c->setEnabled (o != nullptr);
+        if (o == nullptr) { oscStatus.setText ("Not running.", juce::dontSendNotification); return; }
+        const auto& s = o->getSettings();
+        oscOn.setToggleState (s.enabled, juce::dontSendNotification);
+        listenPort.setText (juce::String (s.listenPort), false);
+        replyPort.setText (juce::String (s.replyPort), false);
+        replyTo.setSelectedId (s.replyHost.isEmpty() ? 1 : 2, juce::dontSendNotification);
+        replyHost.setText (s.replyHost, false);
+        replyHost.setEnabled (s.replyHost.isNotEmpty());
+        oscStatus.setText (o->getStatus(), juce::dontSendNotification);
+    }
+
+    void applyOsc()
+    {
+        auto* o = melville::OscControl::instance();
+        if (o == nullptr) return;
+        melville::OscControl::Settings s;
+        s.enabled = oscOn.getToggleState();
+        s.listenPort = juce::jlimit (1, 65535, listenPort.getText().getIntValue() > 0 ? listenPort.getText().getIntValue() : 8100);
+        s.replyPort = juce::jlimit (1, 65535, replyPort.getText().getIntValue() > 0 ? replyPort.getText().getIntValue() : 9100);
+        s.replyHost = replyTo.getSelectedId() == 2 ? replyHost.getText().trim() : juce::String();
+        const auto& now = o->getSettings();
+        if (s.enabled == now.enabled && s.listenPort == now.listenPort && s.replyPort == now.replyPort && s.replyHost == now.replyHost)
+            return;
+        o->apply (s);
+        showOsc();
     }
 
     juce::String ms (int samples) const { return juce::String (1000.0 * samples / juce::jmax (1.0, hub.getSampleRate()), 2) + " ms"; }
@@ -536,6 +640,13 @@ private:
     juce::Label caption, help, result;
     juce::ComboBox outBox, inBox;
     juce::TextButton measure { "MEASURE" }, clear { "CLEAR" };
+
+    juce::Label oscCaption, oscHelp, oscStatus, listenLabel, replyLabel, replyToLabel;
+    juce::ToggleButton oscOn;
+    juce::TextEditor listenPort, replyPort, replyHost;
+    juce::ComboBox replyTo;
+    int oscTop = 0;
+    struct Every : juce::Timer { std::function<void()> f; void timerCallback() override { if (f) f(); } } oscTimer;
 };
 
 /** The MELVILLE bar: every part's icon (click to bring up its window, lamp lit while it
@@ -887,6 +998,7 @@ public:
         return f != nullptr ? f->getContent() : patchWindow->getContentComponent();
     }
     juce::DocumentWindow* getPatchbayWindow() { return patchWindow.get(); }
+    juce::DocumentWindow* getInterfaceWindow() { showAudio(); return interfaceWindow.get(); }
 
     static constexpr int barHeight = 100, tileWidth = 84, gap = 4, wordmarkWidth = 160;
 
@@ -988,7 +1100,15 @@ public:
         phones->start();
         // a control surface (TouchOSC now, the hardware TWAIN later) over OSC
         osc = std::make_unique<melville::OscControl> (hub->getTwain());
-        osc->start();
+        {
+            auto saved = props.getUserSettings()->getXmlValue ("oscControl");
+            osc->apply (melville::OscControl::Settings::fromXml (saved.get()));
+            osc->onSettingsChanged = [this] (const melville::OscControl::Settings& s)
+            {
+                props.getUserSettings()->setValue ("oscControl", s.toXml().get());
+                props.saveIfNeeded();
+            };
+        }
         phonesNames.f = [this] { if (phones != nullptr && hub != nullptr) phones->setCueNames (melville::twainCueNames (*hub)); };
         phonesNames.startTimer (1000);
         mtcOut = std::make_unique<melville::MtcOut> (hub->getClock());
@@ -1028,10 +1148,7 @@ public:
             tw->minHeight = 560;
             auto tp = std::make_unique<melville::TwainPanel> (*hub);
             tp->phonesUrl = [this] { return phones != nullptr ? phones->getUrl() : juce::String(); };
-            tp->oscStatus = [this] { return osc == nullptr || osc->getPort() == 0 ? juce::String ("isn't running (its port is taken)")
-                                                                                 : "listens on " + osc->getAddress() + " and answers on port "
-                                                                                   + juce::String (melville::OscControl::replyPort)
-                                                                                   + (osc->getSurface().isNotEmpty() ? " (" + osc->getSurface() + " is on it)" : juce::String()); };
+            tp->oscStatus = [this] { return osc == nullptr ? juce::String() : osc->getStatus() + " (set up in INTERFACE)"; };
             tw->content = std::move (tp);
             parts.push_back (std::move (tw));
         }
@@ -1129,6 +1246,7 @@ public:
                             }
                     save (bar.get(), "bar-window.png");
                     save (b->getPatchbayWindow(), "patchbay-window.png");
+                    save (b->getInterfaceWindow(), "interface-window.png");
                     showNetwork();
                     save (networkWindow.get(), "link-window.png");
                     showClock();
