@@ -4,6 +4,7 @@
 // Each player opens http://<this PC>:8770 on their phone, picks their feed and sets their own
 // levels. Nothing to install. (Windows asks once whether MELVILLE may take connections.)
 
+#include "LanAddress.h"
 #include <juce_core/juce_core.h>
 #include "../Core/TwainNode.h"
 
@@ -41,7 +42,7 @@ public:
     juce::String getUrl() const
     {
         if (port == 0) return {};
-        return "http://" + juce::IPAddress::getLocalAddress().toString() + ":" + juce::String (port);
+        return "http://" + lanAddress() + ":" + juce::String (port);
     }
 
 private:

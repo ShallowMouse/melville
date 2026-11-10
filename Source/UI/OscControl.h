@@ -22,6 +22,7 @@
 #include <JuceHeader.h>
 #include "../Core/TwainNode.h"
 #include "../Hosted/MelvilleHosted.h"
+#include "LanAddress.h"
 #include <map>
 
 namespace melville
@@ -99,7 +100,7 @@ public:
     int getPort() const noexcept { return port; }
     juce::String getAddress() const
     {
-        return port == 0 ? juce::String() : juce::IPAddress::getLocalAddress().toString() + ":" + juce::String (port);
+        return port == 0 ? juce::String() : lanAddress() + ":" + juce::String (port);
     }
     juce::String getSurface() const { return lastHeardMs > 0 ? lastFrom : juce::String(); }   // who's controlling (empty: nobody yet)
 
@@ -109,6 +110,12 @@ public:
         if (! settings.enabled) return "Off.";
         if (failed || port == 0) return "Port " + juce::String (settings.listenPort) + " is taken (by another program?): pick another.";
         juce::String s = "Listening on " + getAddress() + ". ";
+        if (const auto more = lanAddresses(); more.size() > 1)
+        {
+            juce::StringArray rest (more);
+            rest.remove (0);
+            s << "(Also " << rest.joinIntoString (", ") << ".) ";
+        }
         if (lastHeardMs == 0) s << "Nothing heard yet.";
         else
         {
