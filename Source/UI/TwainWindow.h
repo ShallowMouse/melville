@@ -528,6 +528,7 @@ public:
     }
 
     std::function<juce::String()> phonesUrl;      // the players' web page (shown on the panel)
+    std::function<juce::String()> oscStatus;      // the OSC control surface: where it listens
 
     void refresh()
     {
@@ -605,7 +606,8 @@ private:
     {
         struct Panel : juce::Component
         {
-            Panel (TwainNode& t, std::function<juce::String()> url) : twain (t), phonesUrl (std::move (url))
+            Panel (TwainNode& t, std::function<juce::String()> url, std::function<juce::String()> osc)
+                : twain (t), phonesUrl (std::move (url)), oscStatus (std::move (osc))
             {
                 auto setUp = [this] (juce::Slider& sl, double lo, double hi, double v, std::function<void (double)> f)
                 {
@@ -625,7 +627,7 @@ private:
                     setUp (sl, -12.0, 6.0, juce::Decibels::gainToDecibels (twain.speakerTrim[k].load(), -12.0f), [this, k] (double v) { twain.speakerTrim[k] = juce::Decibels::decibelsToGain ((float) v); });
                     sl.setDoubleClickReturnValue (true, 0.0);
                 }
-                setSize (480, 250);
+                setSize (520, 270);
             }
             void paint (juce::Graphics& g) override
             {
@@ -644,7 +646,9 @@ private:
                 const auto url = phonesUrl ? phonesUrl() : juce::String();
                 g.drawText (url.isNotEmpty() ? "Players set their own headphone mixes at " + url + " (same network)"
                                              : juce::String ("The phones page isn't running."),
-                            18, getHeight() - 30, getWidth() - 36, 18, juce::Justification::centredLeft);
+                            18, getHeight() - 48, getWidth() - 36, 18, juce::Justification::centredLeft);
+                if (oscStatus)
+                    g.drawText ("Control surface (OSC, TouchOSC): " + oscStatus(), 18, getHeight() - 28, getWidth() - 36, 18, juce::Justification::centredLeft);
             }
             void resized() override
             {
@@ -652,11 +656,11 @@ private:
                 for (int k = 0; k < TwainNode::numSpeakers; ++k) trims[(size_t) k].setBounds (160, 102 + 30 * k, getWidth() - 178, 26);
             }
             TwainNode& twain;
-            std::function<juce::String()> phonesUrl;
+            std::function<juce::String()> phonesUrl, oscStatus;
             juce::Slider dim;
             std::array<juce::Slider, TwainNode::numSpeakers> trims;
         };
-        melville::showPanel (std::make_unique<Panel> (twain, phonesUrl), "TWAIN settings", "twain");
+        melville::showPanel (std::make_unique<Panel> (twain, phonesUrl, oscStatus), "TWAIN settings", "twain");
     }
 
     void timerCallback() override

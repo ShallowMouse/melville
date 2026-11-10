@@ -16,6 +16,7 @@
 #include "UI/ClockWindow.h"
 #include "UI/TwainWindow.h"
 #include "UI/PhonesServer.h"
+#include "UI/OscControl.h"
 #include "Core/NetworkNode.h"
 #include "Updater.h"
 #include "Hosted/MelvilleHosted.h"
@@ -985,6 +986,9 @@ public:
         // the players set their own headphone mixes on their phones
         phones = std::make_unique<melville::PhonesServer> (hub->getTwain());
         phones->start();
+        // a control surface (TouchOSC now, the hardware TWAIN later) over OSC
+        osc = std::make_unique<melville::OscControl> (hub->getTwain());
+        osc->start();
         phonesNames.f = [this] { if (phones != nullptr && hub != nullptr) phones->setCueNames (melville::twainCueNames (*hub)); };
         phonesNames.startTimer (1000);
         mtcOut = std::make_unique<melville::MtcOut> (hub->getClock());
@@ -1024,6 +1028,10 @@ public:
             tw->minHeight = 560;
             auto tp = std::make_unique<melville::TwainPanel> (*hub);
             tp->phonesUrl = [this] { return phones != nullptr ? phones->getUrl() : juce::String(); };
+            tp->oscStatus = [this] { return osc == nullptr || osc->getPort() == 0 ? juce::String ("isn't running (its port is taken)")
+                                                                                 : "listens on " + osc->getAddress() + " and answers on port "
+                                                                                   + juce::String (melville::OscControl::replyPort)
+                                                                                   + (osc->getSurface().isNotEmpty() ? " (" + osc->getSurface() + " is on it)" : juce::String()); };
             tw->content = std::move (tp);
             parts.push_back (std::move (tw));
         }
@@ -1215,6 +1223,7 @@ public:
         networkWindow = nullptr;
         clockWindow = nullptr;
         phonesNames.stopTimer();
+        osc = nullptr;
         phones = nullptr;
         if (libraryWindow != nullptr)
         {
@@ -1570,6 +1579,7 @@ private:
     std::unique_ptr<melville::BarWindow> bar;
     std::unique_ptr<juce::DocumentWindow> networkWindow, clockWindow, libraryWindow;
     std::unique_ptr<melville::PhonesServer> phones;
+    std::unique_ptr<melville::OscControl> osc;
     struct Every : juce::Timer { std::function<void()> f; void timerCallback() override { f(); } } phonesNames;
 
     void showTwain() { showPart ("twain"); }
