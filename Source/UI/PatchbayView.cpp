@@ -292,6 +292,12 @@ void PatchCanvas::setMidiView (bool b)
     rebuild();
 }
 
+void PatchCanvas::setShowNormals (bool b)
+{
+    showNormals = b;
+    repaint();
+}
+
 void PatchCanvas::setShowEveryCable (bool b)
 {
     showEveryCable = b;
@@ -441,7 +447,20 @@ juce::Colour PatchCanvas::colourOfSource (int flat) const
 void PatchCanvas::paint (juce::Graphics& g)
 {
     g.fillAll (Colours::bg);
+    {
+        // which jacks are normalled (0 no, 1 broken, 2 carrying), once per paint
+        auto& pb = hub.getPatchbay();
+        srcNormalMark.assign ((size_t) pb.getNumSources(), 0);
+        dstNormalMark.assign ((size_t) pb.getNumDests(), 0);
+        for (auto& [d, src] : pb.getAllNormals())
+        {
+            const char m = pb.isNormalLive (d) ? 2 : 1;
+            dstNormalMark[(size_t) d] = m;
+            srcNormalMark[(size_t) src] = juce::jmax (srcNormalMark[(size_t) src], m);
+        }
+    }
     for (auto& p : panels) drawPanel (g, p);
+    if (showNormals) drawNormals (g);
     drawCables (g);
 
     if (drag.active)
@@ -544,6 +563,21 @@ void PatchCanvas::drawPanel (juce::Graphics& g, const Panel& p) const
             g.drawEllipse (r.expanded (2.5f), lit ? 2.0f : 1.0f);
             }
 
+            // normalled: an arc over the jack (solid while it carries, faint once a cable breaks it)
+            {
+                const auto& marks = s.output ? srcNormalMark : dstNormalMark;
+                const char mark = juce::isPositiveAndBelow (j.flat, (int) marks.size()) ? marks[(size_t) j.flat] : 0;
+                const bool normalled = mark != 0, live = mark == 2;
+                if (normalled)
+                {
+                    const float rr = r.getWidth() * 0.5f + (j.midi ? 6.0f : 5.0f);
+                    juce::Path arc;
+                    arc.addCentredArc (j.centre.x, j.centre.y, rr, rr, 0.0f, -0.9f, 0.9f, true);
+                    g.setColour (ink.withAlpha (live ? 0.85f : 0.25f));
+                    g.strokePath (arc, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                }
+            }
+
             g.setColour (inkDim);
             g.setFont (font (9.5f));
             const auto labelArea = juce::Rectangle<float> (jackPitch + 6.0f, labelH).withCentre ({ j.centre.x, j.centre.y + jackPitch * 0.5f + labelH * 0.5f });
@@ -632,6 +666,55 @@ void PatchCanvas::drawCables (juce::Graphics& g) const
     }
 }
 
+void PatchCanvas::drawNormals (juce::Graphics& g) const
+{
+    // the wiring behind the bay, where it's carrying: thin dashed lines (a run of them as one)
+    auto& pb = hub.getPatchbay();
+    struct Group { std::vector<std::pair<juce::Point<float>, juce::Point<float>>> ends; juce::Colour colour; };
+    std::map<std::tuple<int, int, int, int>, Group> groups;
+    for (auto& [d, src] : pb.getAllNormals())
+    {
+        if (! juce::isPositiveAndBelow (d, (int) dstNormalMark.size()) || dstNormalMark[(size_t) d] != 2) continue;
+        int sp = -1, dp = -1;
+        const auto* ss = sectionFor (src, true, &sp);
+        const auto* ds = sectionFor (d, false, &dp);
+        const auto* sj = jackFor (src, true);
+        const auto* dj = jackFor (d, false);
+        if (ss == nullptr || ds == nullptr || sj == nullptr || dj == nullptr) continue;
+        auto& grp = groups[{ sp, (int) (ss - panels[(size_t) sp].sections.data()), dp, (int) (ds - panels[(size_t) dp].sections.data()) }];
+        grp.colour = sj->midi ? juce::Colour (0xffb9b6ae) : panels[(size_t) sp].colour;
+        grp.ends.push_back ({ sj->centre, dj->centre });
+    }
+
+    auto dashed = [&g] (juce::Point<float> a, juce::Point<float> b, juce::Colour c, float thickness)
+    {
+        juce::Path path;
+        path.startNewSubPath (a);
+        const float bow = std::abs (a.x - b.x) < 60.0f ? 22.0f + 0.08f * std::abs (a.y - b.y) : 0.0f;
+        const float sag = 12.0f + 0.08f * a.getDistanceFrom (b);
+        path.cubicTo (a.translated (bow, sag), b.translated (bow, sag), b);
+        juce::Path dash;
+        const float lengths[] = { 6.0f, 4.0f };
+        juce::PathStrokeType (thickness).createDashedStroke (dash, path, lengths, 2);
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
+        g.strokePath (path, juce::PathStrokeType (thickness + 1.5f));
+        g.setColour (c.withAlpha (0.9f));
+        g.fillPath (dash);
+    };
+
+    for (auto& [key, grp] : groups)
+    {
+        if (showEveryCable || grp.ends.size() < 3)
+        {
+            for (auto& [a, b] : grp.ends) dashed (a, b, grp.colour, 1.5f);
+            continue;
+        }
+        juce::Point<float> a, b;
+        for (auto& [x, y] : grp.ends) { a += x; b += y; }
+        dashed (a / (float) grp.ends.size(), b / (float) grp.ends.size(), grp.colour, 3.0f);
+    }
+}
+
 //==============================================================================
 void PatchCanvas::mouseMove (const juce::MouseEvent& e)
 {
@@ -664,6 +747,20 @@ void PatchCanvas::mouseMove (const juce::MouseEvent& e)
                 }
                 tip << "\n" << (to.isEmpty() ? juce::String ("Nothing cabled.")
                                                : (s.output ? "Cabled to: " : "Cabled from: ") + to.joinIntoString (", "));
+                if (s.output)
+                {
+                    juce::StringArray normalled;
+                    for (auto& [d, src] : pb.getAllNormals())
+                        if (src == j.flat) normalled.add (pb.destName (d) + (pb.isNormalLive (d) ? "" : " (broken)"));
+                    if (! normalled.isEmpty()) tip << "\nNormalled to: " << normalled.joinIntoString (", ");
+                }
+                else if (const int ns = pb.normalOf (j.flat); ns >= 0)
+                {
+                    tip << "\nNormalled from " << pb.sourceName (ns) << (pb.isFullNormal (j.flat) ? " (full normal)" : " (half-normal)");
+                    if (pb.isNormalLive (j.flat))    tip << ": carrying.";
+                    else if (pb.isDestPlugged (j.flat)) tip << ": broken by the cable in this jack.";
+                    else                             tip << ": broken by the cable in " << pb.sourceName (ns) << ".";
+                }
             }
         }
         setTooltip (tip);
@@ -807,11 +904,39 @@ void PatchCanvas::showJackMenu (const Hit& h)
         m.addItem (1, "Pull every cable here");
     }
 
+    // an input's normal (the wiring behind the bay)
+    if (! s.output)
+    {
+        m.addSeparator();
+        if (const int ns = pb.normalOf (flat); ns >= 0)
+        {
+            m.addSectionHeader ("Normalled from " + pb.sourceName (ns));
+            m.addItem (2, "Half-normal (a cable in " + pb.sourceName (ns) + " doesn't break it)", true, ! pb.isFullNormal (flat));
+            m.addItem (3, "Full normal (a cable in either jack breaks it)", true, pb.isFullNormal (flat));
+            m.addItem (4, "Take the normal out");
+        }
+        else
+        {
+            m.addItem (-1, "Not normalled", false);
+        }
+        if (cords.size() == 1 && pb.normalOf (flat) != cords.front().second.source)
+            m.addItem (5, "Wire this cable behind the bay (make it the normal)");
+    }
+
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(),
-                     [this, cords, levels] (int r)
+                     [this, cords, levels, flat] (int r)
                      {
                          auto& p = hub.getPatchbay();
                          if (r == 1) { for (auto& [d, c] : cords) p.disconnect (c.source, d); return; }
+                         if (r == 2 || r == 3) { p.setNormal (p.normalOf (flat), flat, r == 3); return; }
+                         if (r == 4) { p.setNormal (-1, flat); return; }
+                         if (r == 5 && cords.size() == 1)
+                         {
+                             const int src = cords.front().second.source;
+                             p.disconnect (src, flat);
+                             p.setNormal (src, flat);
+                             return;
+                         }
                          if (r < 10) return;
                          const auto& [d, c] = cords[(size_t) (r / 100)];
                          const int k = r % 100;
@@ -850,18 +975,18 @@ void PatchCanvas::showMulticoreMenu (int sp, int ss, int dp, int ds)
 //==============================================================================
 PatchbayView::PatchbayView (Hub& h) : hub (h), canvas (h)
 {
-    defaultButton.setTooltip ("Put every cable back the way MELVILLE starts: interface > Hawthorne > EMERSON > WHITMAN > back to Hawthorne");
+    defaultButton.setTooltip ("Wire the bay the way MELVILLE starts (interface > Hawthorne > EMERSON > WHITMAN > back to Hawthorne) and pull every cable");
     defaultButton.onClick = [this]
     {
         juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Default patch",
-            "Replace every cable with MELVILLE's default patch?", "Replace", "Cancel", this,
+            "Rewire the normals the way MELVILLE starts and pull every cable?", "Rewire", "Cancel", this,
             juce::ModalCallbackFunction::create ([this] (int ok) { if (ok) hub.defaultPatch(); }));
     };
-    clearButton.setTooltip ("Pull every cable out of the patchbay");
+    clearButton.setTooltip ("Pull every cable out of the patchbay. The normals stay, so everything goes back to its usual wiring");
     clearButton.onClick = [this]
     {
-        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon, "Pull every cable",
-            "Pull every cable out? Nothing will reach anything until you patch it again.", "Pull them", "Cancel", this,
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Pull every cable",
+            "Pull every cable out? The normals stay, so the studio goes back to its usual wiring.", "Pull them", "Cancel", this,
             juce::ModalCallbackFunction::create ([this] (int ok) { if (ok) hub.getPatchbay().clearAll(); }));
     };
     saveButton.onClick = [this] { save(); };
@@ -891,6 +1016,12 @@ PatchbayView::PatchbayView (Hub& h) : hub (h), canvas (h)
     audioTab.onClick = [this] { if (audioTab.getToggleState()) { canvas.setMidiView (false); resized(); repaint(); } };
     midiTab.onClick  = [this] { if (midiTab.getToggleState())  { canvas.setMidiView (true);  resized(); repaint(); } };
     addAndMakeVisible (everyCable);
+    normalsShown.setTooltip ("Draw the wiring behind the bay (the normals that are carrying) as dashed lines");
+    normalsShown.setColour (juce::ToggleButton::textColourId, Colours::text);
+    normalsShown.setColour (juce::ToggleButton::tickColourId, Colours::accent);
+    normalsShown.setToggleState (true, juce::dontSendNotification);
+    normalsShown.onClick = [this] { canvas.setShowNormals (normalsShown.getToggleState()); };
+    addAndMakeVisible (normalsShown);
 
     viewport.setViewedComponent (&canvas, false);
     viewport.setScrollBarsShown (true, false);
@@ -909,9 +1040,9 @@ void PatchbayView::paint (juce::Graphics& g)
     g.setColour (Colours::textDim);
     g.setFont (font (12.0f));
     g.drawText (midiTab.getToggleState()
-                    ? "MIDI: drag from a MIDI OUT to a MIDI IN. One cable carries all sixteen channels; several into one IN merge."
-                    : "Drag from an OUT jack to an IN jack. Drag a plug out of an IN jack to move or pull it. Drag a section's name to patch the whole section.",
-                bar.reduced (14, 0).withTrimmedLeft (170).withTrimmedRight (520), juce::Justification::centredLeft, true);
+                    ? "MIDI: OUT to IN; one cable carries all sixteen channels. A cable into a normalled IN breaks its normal."
+                    : "Drag OUT to IN; drag a plug out to move it. A cable into a normalled IN breaks its normal.",
+                bar.reduced (14, 0).withTrimmedLeft (170).withTrimmedRight (670), juce::Justification::centredLeft, true);
 }
 
 void PatchbayView::resized()
@@ -925,7 +1056,8 @@ void PatchbayView::resized()
         b->setBounds (bar.removeFromRight (b == &clearButton ? 96 : 80));
         bar.removeFromRight (6);
     }
-    everyCable.setBounds (bar.removeFromRight (170));
+    everyCable.setBounds (bar.removeFromRight (160));
+    normalsShown.setBounds (bar.removeFromRight (140));
     viewport.setBounds (r);
 
     const int w = viewport.getMaximumVisibleWidth();

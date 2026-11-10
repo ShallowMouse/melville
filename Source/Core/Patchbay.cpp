@@ -17,6 +17,7 @@ int Patchbay::addPort (Port p)
     numDests += p.dests.size();
     ports.push_back (std::move (p));
     edit.into.resize ((size_t) numDests);
+    normals.resize ((size_t) numDests);
     publish();
     return (int) ports.size() - 1;
 }
@@ -82,11 +83,17 @@ void Patchbay::connect (int source, int dest, float gain)
 {
     if (! juce::isPositiveAndBelow (source, numSources) || ! juce::isPositiveAndBelow (dest, numDests)) return;
     if (isMidiSource (source) != isMidiDest (dest)) return;       // (MIDI only to MIDI, audio only to audio)
+    plug (source, dest, gain);
+    if (! wiringNormals) publish();
+}
+
+void Patchbay::plug (int source, int dest, float gain)
+{
+    if (wiringNormals) { normals[(size_t) dest] = { source, false }; return; }
     auto& cords = edit.into[(size_t) dest];
     for (auto& c : cords)
-        if (c.source == source) { c.gain = gain; publish(); return; }
+        if (c.source == source) { c.gain = gain; return; }
     cords.push_back ({ source, gain });
-    publish();
 }
 
 void Patchbay::disconnect (int source, int dest)
@@ -120,13 +127,10 @@ int Patchbay::connectByName (const juce::String& fromPort, const juce::String& t
     for (int i = 0; i < a->sources.size(); ++i)
         if (const int j = b->dests.indexOf (a->sources[i]); j >= 0)
         {
-            auto& cords = edit.into[(size_t) (b->firstDest + j)];
-            const int s = a->firstSource + i;
-            if (std::none_of (cords.begin(), cords.end(), [s] (const Cord& c) { return c.source == s; }))
-                cords.push_back ({ s, 1.0f });
+            plug (a->firstSource + i, b->firstDest + j, 1.0f);
             ++made;
         }
-    publish();
+    if (! wiringNormals) publish();
     return made;
 }
 
@@ -138,13 +142,8 @@ int Patchbay::connectInOrder (const juce::String& fromPort, int fromOffset, cons
     if ((a->id == "midi") != (b->id == "midi")) return 0;          // (MIDI only to MIDI)
     n = juce::jmin (n, a->sources.size() - fromOffset, b->dests.size() - toOffset);
     for (int k = 0; k < n; ++k)
-    {
-        const int s = a->firstSource + fromOffset + k;
-        auto& cords = edit.into[(size_t) (b->firstDest + toOffset + k)];
-        if (std::none_of (cords.begin(), cords.end(), [s] (const Cord& c) { return c.source == s; }))
-            cords.push_back ({ s, 1.0f });
-    }
-    publish();
+        plug (a->firstSource + fromOffset + k, b->firstDest + toOffset + k, 1.0f);
+    if (! wiringNormals) publish();
     return juce::jmax (0, n);
 }
 
@@ -157,10 +156,95 @@ std::vector<std::pair<int, Cord>> Patchbay::getAllCords() const
     return all;
 }
 
+Matrix Patchbay::live_() const
+{
+    Matrix m (edit);
+    std::vector<bool> plugged ((size_t) numSources, false);
+    for (auto& cords : edit.into)
+        for (auto& c : cords) if (juce::isPositiveAndBelow (c.source, numSources)) plugged[(size_t) c.source] = true;
+    for (int d = 0; d < numDests; ++d)
+    {
+        const auto& n = normals[(size_t) d];
+        if (n.source >= 0 && edit.into[(size_t) d].empty() && ! (n.full && plugged[(size_t) n.source]))
+            m.into[(size_t) d].push_back ({ n.source, 1.0f });
+    }
+    return m;
+}
+
+std::vector<std::pair<int, Cord>> Patchbay::getLiveCords() const
+{
+    const auto m = live_();
+    std::vector<std::pair<int, Cord>> all;
+    for (int d = 0; d < numDests; ++d)
+        for (auto& c : m.into[(size_t) d])
+            all.push_back ({ d, c });
+    return all;
+}
+
+bool Patchbay::isLive (int source, int dest) const
+{
+    if (! juce::isPositiveAndBelow (dest, numDests)) return false;
+    if (isConnected (source, dest)) return true;
+    return normals[(size_t) dest].source == source && isNormalLive (dest);
+}
+
+int Patchbay::normalOf (int dest) const
+{
+    return juce::isPositiveAndBelow (dest, numDests) ? normals[(size_t) dest].source : -1;
+}
+
+bool Patchbay::isFullNormal (int dest) const
+{
+    return juce::isPositiveAndBelow (dest, numDests) && normals[(size_t) dest].full;
+}
+
+bool Patchbay::isSourcePlugged (int source) const
+{
+    for (auto& cords : edit.into)
+        for (auto& c : cords) if (c.source == source) return true;
+    return false;
+}
+
+bool Patchbay::isDestPlugged (int dest) const
+{
+    return juce::isPositiveAndBelow (dest, numDests) && ! edit.into[(size_t) dest].empty();
+}
+
+bool Patchbay::isNormalLive (int dest) const
+{
+    const int s = normalOf (dest);
+    if (s < 0 || isDestPlugged (dest)) return false;
+    return ! (normals[(size_t) dest].full && isSourcePlugged (s));
+}
+
+void Patchbay::setNormal (int source, int dest, bool full)
+{
+    if (! juce::isPositiveAndBelow (dest, numDests)) return;
+    if (source < 0) normals[(size_t) dest] = {};
+    else if (juce::isPositiveAndBelow (source, numSources) && isMidiSource (source) == isMidiDest (dest))
+        normals[(size_t) dest] = { source, full };
+    else return;
+    if (! wiringNormals) publish();
+}
+
+void Patchbay::clearNormals()
+{
+    for (auto& n : normals) n = {};
+    if (! wiringNormals) publish();
+}
+
+std::vector<std::pair<int, int>> Patchbay::getAllNormals() const
+{
+    std::vector<std::pair<int, int>> all;
+    for (int d = 0; d < numDests; ++d)
+        if (normals[(size_t) d].source >= 0) all.push_back ({ d, normals[(size_t) d].source });
+    return all;
+}
+
 std::unique_ptr<juce::XmlElement> Patchbay::toXml() const
 {
     auto xml = std::make_unique<juce::XmlElement> ("PATCH");
-    xml->setAttribute ("version", 5);
+    xml->setAttribute ("version", 6);
     auto where = [this] (int flat, bool isSource) -> std::pair<juce::String, juce::String>
     {
         for (auto& p : ports)
@@ -183,6 +267,19 @@ std::unique_ptr<juce::XmlElement> Patchbay::toXml() const
         e->setAttribute ("to", dc);
         if (c.gain != 1.0f) e->setAttribute ("gain", (double) c.gain);
     }
+    for (int d = 0; d < numDests; ++d)
+    {
+        const auto& n = normals[(size_t) d];
+        if (n.source < 0) continue;
+        auto [sp, sc] = where (n.source, true);
+        auto [dp, dc] = where (d, false);
+        auto* e = xml->createNewChildElement ("NORMAL");
+        e->setAttribute ("fromPort", sp);
+        e->setAttribute ("from", sc);
+        e->setAttribute ("toPort", dp);
+        e->setAttribute ("to", dc);
+        if (n.full) e->setAttribute ("full", true);
+    }
     return xml;
 }
 
@@ -201,11 +298,38 @@ void Patchbay::fromXml (const juce::XmlElement& xml)
     fromXmlCurrent (x);
     // (before version 5 there was no MIDI on the patchbay: its usual cords, so nothing goes quiet)
     if (x.getIntAttribute ("version") < 5 && onOlderPatch) onOlderPatch();
+
+    // (before version 6 there were no normals: the usual wiring was cables. Wire the usual
+    //  normals; a cable that is just its input's normal becomes the normal, and a normal the
+    //  old patch didn't have comes out, so everything is connected exactly as it was.)
+    if (x.getIntAttribute ("version") < 6 && onDefaultNormals)
+    {
+        onDefaultNormals();
+        for (int d = 0; d < numDests; ++d)
+        {
+            auto& n = normals[(size_t) d];
+            if (n.source < 0) continue;
+            auto& cords = edit.into[(size_t) d];
+            if (cords.size() == 1 && cords.front().source == n.source && std::abs (cords.front().gain - 1.0f) < 1.0e-4f)
+                cords.clear();
+            else
+                n = {};
+        }
+        publish();
+    }
 }
 
 void Patchbay::fromXmlCurrent (const juce::XmlElement& xml)
 {
     for (auto& c : edit.into) c.clear();
+    for (auto& n : normals) n = {};
+    for (auto* e : xml.getChildWithTagNameIterator ("NORMAL"))
+    {
+        const int s = findSource (e->getStringAttribute ("fromPort"), e->getStringAttribute ("from"));
+        const int d = findDest (e->getStringAttribute ("toPort"), e->getStringAttribute ("to"));
+        if (s >= 0 && d >= 0 && isMidiSource (s) == isMidiDest (d))
+            normals[(size_t) d] = { s, e->getBoolAttribute ("full") };
+    }
     for (auto* e : xml.getChildWithTagNameIterator ("CORD"))
     {
         const int s = findSource (e->getStringAttribute ("fromPort"), e->getStringAttribute ("from"));
@@ -218,7 +342,7 @@ void Patchbay::fromXmlCurrent (const juce::XmlElement& xml)
 
 void Patchbay::publish()
 {
-    auto* fresh = new Matrix (edit);
+    auto* fresh = new Matrix (live_());
     auto* old = live.exchange (fresh, std::memory_order_acq_rel);
     if (old != nullptr)
         retired.push_back ({ old, blocksDone.load (std::memory_order_acquire) + 2 });

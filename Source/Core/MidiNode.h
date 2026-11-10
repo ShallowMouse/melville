@@ -77,7 +77,10 @@ public:
         if (patchbay == nullptr || portIndex < 0) return;
         const auto& pp = patchbay->getPorts()[(size_t) portIndex];
         std::vector<bool> inUsed ((size_t) inputs.size(), false), outUsed ((size_t) outputs.size(), false);
-        for (auto& [d, c] : patchbay->getAllCords())
+        const auto* live = patchbay->getMatrix();       // (cables and normals; message thread, so it can't be freed under us)
+        if (live == nullptr) return;
+        for (int d = 0; d < (int) live->into.size(); ++d)
+        for (auto& c : live->into[(size_t) d])
         {
             const int src = c.source - pp.firstSource, dst = d - pp.firstDest;
             if (src == keyboards()) std::fill (inUsed.begin(), inUsed.end(), true);

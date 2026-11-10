@@ -49,7 +49,8 @@ public:
     void initialiseAudio (const juce::XmlElement* savedState);
 
     Patchbay& getPatchbay() noexcept { return patchbay; }
-    void defaultPatch();
+    void defaultPatch();         // pull every cable and wire the usual normals
+    void wireDefaultNormals();
 
     /** A part, by id ("hawthorne", "emerson", "whitman", "thoreau", "pequod"). */
     PartNode* findPart (const juce::String& id) const;

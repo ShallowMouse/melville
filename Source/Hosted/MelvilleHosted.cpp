@@ -179,7 +179,7 @@ juce::String midiCabledInto (int jack)
     juce::StringArray from;
     if (auto* h = Hub::getIfExists())
         if (auto* p = h->getPatchbay().findPort ("midi"); p != nullptr && jack >= 0)
-            for (auto& [d, c] : h->getPatchbay().getAllCords())
+            for (auto& [d, c] : h->getPatchbay().getLiveCords())
                 if (d == p->firstDest + jack && c.source >= p->firstSource && c.source < p->firstSource + p->sources.size())
                     from.add (p->sources[c.source - p->firstSource].replace ("In: ", ""));
     return from.joinIntoString (", ");

@@ -71,6 +71,7 @@ Hub::Hub()
         clock->midiClock = &midi->source (midi->clock());
         midi->getBpm = [clock] { if (clock->getState) { const auto s = clock->getState(); if (s.valid && s.bpm > 0.0) return s.bpm; } return 120.0; };
         patchbay.onOlderPatch = [this] { midiDefaults(); };
+        patchbay.onDefaultNormals = [this] { wireDefaultNormals(); };
     }
 
     auto node = [this] (const char* id) -> Node*
@@ -152,8 +153,16 @@ bool Hub::isPartConnected (const juce::String& id) const
 //==============================================================================
 void Hub::defaultPatch()
 {
+    patchbay.clearAll();
+    wireDefaultNormals();
+}
+
+void Hub::wireDefaultNormals()
+{
+    // the usual wiring, behind the bay: normals (a cable into an input breaks its normal)
     auto& pb = patchbay;
-    pb.clearAll();
+    pb.clearNormals();
+    Patchbay::NormalWiring wiring (pb);
     // the interface's inputs onto the first tracks; Hawthorne's master (and click) to the monitors
     pb.connectInOrder ("interface", 0, "hawthorne", 0, hawthorne::route::defaultTracks);
     // the control room (TWAIN): Hawthorne's master (the 2-track), the desk's mix and the click in;

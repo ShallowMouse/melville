@@ -72,7 +72,7 @@ inline juce::StringArray twainCueNames (Hub& hub)
 {
     auto& pb = hub.getPatchbay();
     juce::StringArray names;
-    const auto cords = pb.getAllCords();
+    const auto cords = pb.getLiveCords();
     for (int c = 0; c < TwainNode::numCues; ++c)
     {
         const int dest = pb.findDest ("twain", "Cue " + juce::String (c + 1));
