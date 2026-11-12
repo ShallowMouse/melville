@@ -2,6 +2,7 @@
 // the tests don't build windows.
 #include "MelvilleHosted.h"
 #include "../UI/WindowFrame.h"
+#include "BinaryData.h"
 
 namespace melville
 {
@@ -25,6 +26,19 @@ namespace
         void closeButtonPressed() override { setVisible (false); }
         MelvilleLookAndFeel look;
     };
+    /** The part's own mark for the window (its icon on the bar and the taskbar), MELVILLE's if it has none. */
+    juce::Image partIcon (const juce::String& id)
+    {
+        const void* data = BinaryData::MELVILLE_png; int size = BinaryData::MELVILLE_pngSize;
+        if (id == "hawthorne") { data = BinaryData::HAWTHORNE_png; size = BinaryData::HAWTHORNE_pngSize; }
+        if (id == "emerson")   { data = BinaryData::EMERSON_png;   size = BinaryData::EMERSON_pngSize; }
+        if (id == "whitman")   { data = BinaryData::WHITMAN_png;   size = BinaryData::WHITMAN_pngSize; }
+        if (id == "thoreau")   { data = BinaryData::THOREAU_png;   size = BinaryData::THOREAU_pngSize; }
+        if (id.startsWith ("pequod") || id == "irving") { data = BinaryData::IRVING_png; size = BinaryData::IRVING_pngSize; }
+        auto img = juce::ImageCache::getFromMemory (data, size);
+        return img.isValid() ? img.rescaled (64, 64, juce::Graphics::highResamplingQuality) : img;
+    }
+
     juce::OwnedArray<PanelWindow>& panels() { static juce::OwnedArray<PanelWindow> p; return p; }
 }
 
@@ -39,14 +53,14 @@ void showPanel (std::unique_ptr<juce::Component> content, const juce::String& ti
             {
                 // (asked again: its content fresh)
                 w->clearContentComponent();
-                frameWindow (*w, content.release(), true, title, Colours::forPart (partId), {}, WindowTitleBar::close);
+                frameWindow (*w, content.release(), true, title, Colours::forPart (partId), partIcon (partId), WindowTitleBar::close);
             }
             w->setVisible (true);
             w->toFront (true);
             return;
         }
     auto* w = panels().add (new PanelWindow (title, Colours::panel, Colours::forPart (partId)));
-    frameWindow (*w, content.release(), true, title, Colours::forPart (partId), {}, WindowTitleBar::close);
+    frameWindow (*w, content.release(), true, title, Colours::forPart (partId), partIcon (partId), WindowTitleBar::close);
     w->setAlwaysOnTop (false);
     w->centreWithSize (w->getWidth(), w->getHeight());
     w->setVisible (true);
