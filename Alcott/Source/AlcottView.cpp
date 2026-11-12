@@ -469,10 +469,20 @@ void View::layoutRack()
 
 void View::showInstrumentMenu()
 {
+    // the PEQUOD Keys (organ, electric pianos, clavinet, Mellotron, Minimoog, DX7) first, then the rest
     juce::PopupMenu m;
     const auto list = Engine::instruments();
-    for (size_t k = 0; k < list.size(); ++k)
-        m.addItem ((int) k + 1, list[k]->name + "   " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7")) + "  " + list[k]->vendor.fromLastOccurrenceOf ("PEQUOD", false, true).trim());
+    auto isKeys = [] (const PequodNative::Info* i) { return i->vendor.endsWithIgnoreCase ("Keys"); };
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        bool header = false;
+        for (size_t k = 0; k < list.size(); ++k)
+        {
+            if (isKeys (list[k]) != (pass == 0)) continue;
+            if (! header) { m.addSectionHeader (pass == 0 ? "KEYS" : "INSTRUMENTS"); header = true; }
+            m.addItem ((int) k + 1, list[k]->name + "   " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7")) + "  " + list[k]->vendor.fromLastOccurrenceOf ("PEQUOD", false, true).trim());
+        }
+    }
     if (list.empty()) m.addItem (-1, "(no PEQUOD instruments in this build)", false);
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (rackView), [this, list] (int r)
     {
