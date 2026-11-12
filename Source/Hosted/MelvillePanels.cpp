@@ -26,7 +26,8 @@ namespace
         void closeButtonPressed() override { setVisible (false); }
         MelvilleLookAndFeel look;
     };
-    /** The part's own mark for the window (its icon on the bar and the taskbar), MELVILLE's if it has none. */
+    /** The part's own mark for the window (its icon on the bar and the taskbar), MELVILLE's if it has none.
+        Studio-wide windows (the new-session wizard) pass "melville" for MELVILLE's mark and colour. */
     juce::Image partIcon (const juce::String& id)
     {
         const void* data = BinaryData::MELVILLE_png; int size = BinaryData::MELVILLE_pngSize;
