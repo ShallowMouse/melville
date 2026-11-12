@@ -1062,6 +1062,15 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+        // (smoke runs with pictures: the new-session wizard's steps go in the same folder)
+        if (const auto snaps = juce::SystemStats::getEnvironmentVariable ("MELVILLE_SNAPSHOT_DIR", {}); snaps.isNotEmpty())
+        {
+           #if JUCE_WINDOWS
+            _putenv_s ("HAWTHORNE_WIZARD_GALLERY", snaps.toRawUTF8());
+           #else
+            setenv ("HAWTHORNE_WIZARD_GALLERY", snaps.toRawUTF8(), 1);
+           #endif
+        }
         using namespace melville;
         taskbar::setProcessIdentity();
         juce::PropertiesFile::Options o;
