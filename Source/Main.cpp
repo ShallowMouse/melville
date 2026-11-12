@@ -1062,7 +1062,8 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
-        // (smoke runs with pictures: the new-session wizard's steps go in the same folder)
+        // (smoke runs with pictures: the new-session wizard's steps go in the same folder;
+        //  WHITMAN_PREVIEW_DESK=<number> with WHITMAN_PREVIEW_STRIPS pictures one of WHITMAN's desks)
         if (const auto snaps = juce::SystemStats::getEnvironmentVariable ("MELVILLE_SNAPSHOT_DIR", {}); snaps.isNotEmpty())
         {
            #if JUCE_WINDOWS
