@@ -470,7 +470,8 @@ void View::layoutRack()
 
 void View::showInstrumentMenu()
 {
-    // the PEQUOD Keys (organ, electric pianos, clavinet, Mellotron, Minimoog, DX7) first, then the rest
+    // the PEQUOD Keys (organs, electric pianos, clavinet, Mellotron and Chamberlin, string machines,
+    // Minimoog, Taurus, TB-303, DX7, CS-80) first, then the rest
     juce::PopupMenu m;
     const auto list = Engine::instruments();
     auto isKeys = [] (const PequodNative::Info* i) { return i->vendor.endsWithIgnoreCase ("Keys"); };
