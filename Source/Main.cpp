@@ -1315,7 +1315,25 @@ public:
                 std::printf ("MELVILLE smoke: %d of %d parts running, %d cords\n", up, (int) parts.size(),
                              (int) hub->getPatchbay().getAllCords().size());
                 std::fflush (stdout);
-                setApplicationReturnValue (up == (int) parts.size() && sessionOk ? 0 : 1);
+                // a new reel's clean studio: everything back to nothing, on the desk and bay chosen
+                bool freshOk = true;
+                {
+                    auto before = studioXml();
+                    melville::NewStudio made;
+                    made.desk = 9; made.usualCables = false; made.bpm = 96.0; made.beatsPerBar = 3;
+                    freshStudio (made);
+                    const int desk = melville::currentDesk ? melville::currentDesk() : -1;
+                    const auto cords = hub->getPatchbay().getAllCords().size();
+                    freshOk = (desk == 9 || ! melville::currentDesk) && cords == 0 && melville::transport().beatsPerBar.load() == 3;
+                    std::printf ("MELVILLE smoke: a new reel's studio %s (desk %d, %d cords, %d/4)\n", freshOk ? "is clean" : "NOT CLEAN",
+                                 desk, (int) cords, melville::transport().beatsPerBar.load());
+                    made.usualCables = true;
+                    freshStudio (made);
+                    std::printf ("MELVILLE smoke: with the usual cables, %d cords\n", (int) hub->getPatchbay().getAllCords().size());
+                    freshOk = freshOk && hub->getPatchbay().getAllCords().size() > 100;
+                    applyStudio (*before, false);
+                }
+                setApplicationReturnValue (up == (int) parts.size() && sessionOk && freshOk ? 0 : 1);
                 // (with pictures to take: a moment for the settings windows first)
                 const bool pictures = juce::SystemStats::getEnvironmentVariable ("MELVILLE_SNAPSHOT_DIR", {}).isNotEmpty();
                 juce::Timer::callAfterDelay (pictures ? 1500 : 1, [] { juce::JUCEApplication::getInstance()->systemRequestedQuit(); });
@@ -1599,13 +1617,31 @@ public:
 
     void studioArrived (const juce::File& reelFile)
     {
-        // a reel that has a studio saved with it brings it back; a new one keeps the studio as it is
-        if (auto x = juce::XmlDocument::parse (reelFile.getParentDirectory().getChildFile (studioFileName)))
-            if (x->hasTagName ("MELVILLE_SESSION"))
-                applyStudio (*x, false);
+        // a reel that has a studio saved with it brings it back; one without (a new reel) gets a
+        // clean studio: no mix, no racks, no patterns - as its new-session wizard settled it
+        auto& lib = melville::library();
+        const auto made = lib.newStudioPending ? lib.newStudio : melville::NewStudio {};
+        lib.newStudioPending = false;
+        auto x = juce::XmlDocument::parse (reelFile.getParentDirectory().getChildFile (studioFileName));
+        if (x != nullptr && x->hasTagName ("MELVILLE_SESSION"))
+            applyStudio (*x, false);
+        else
+            freshStudio (made);
         if (bar != nullptr)
             if (auto* b = barContent()) b->setSessionName (reelFile.getParentDirectory().getParentDirectory().getFileName()
                                                             + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + reelFile.getFileNameWithoutExtension());
+    }
+
+    /** A clean studio for a new reel: every part back to nothing (WHITMAN on the desk chosen),
+        and the patchbay with the usual cables or none. The tempo is the reel's own. */
+    void freshStudio (const melville::NewStudio& made)
+    {
+        for (auto& [id, sp] : melville::sessionParts())
+            if (id != "hawthorne" && sp.fresh)
+                sp.fresh (made);
+        if (made.usualCables) hub->defaultPatch();
+        else                  hub->getPatchbay().clearAll();
+        if (made.bpm > 0.0) melville::setTempo (made.bpm, made.beatsPerBar, 0.0);
     }
 
     void showLibrary()

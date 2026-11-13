@@ -9,11 +9,9 @@
 // names; the default patch connects channels whose names match ("Hawthorne track 7"
 // out of the Route bridge -> "Hawthorne track 7" into EMERSON).
 //
-// NORMALS: like a hardware TT bay, the usual wiring is behind the bay. A destination can be
-// normalled from a source; with no cable in either jack the normal carries the signal.
-// Plugging a cable into the destination breaks it. A HALF normal (the usual kind) keeps
-// working when a cable is plugged into the source (a mult out); a FULL normal breaks then too.
-// PULL ALL pulls the cables; the normals stay, so the studio goes back to its usual wiring.
+// No normals: nothing is wired behind the bay. Every connection is a cable you can see and
+// pull; the usual wiring (DEFAULT) is a set of cables too. (Sessions saved with normals load
+// them as cables, so they sound as they did.)
 //
 // The audio thread reads a Matrix through an atomic pointer; the message thread
 // builds a new one and swaps it in. Old ones are freed later on the message thread
@@ -81,41 +79,15 @@ public:
     /** Connect A's sources 1..n to B's dests 1..n in order (from the given offsets). */
     int connectInOrder (const juce::String& fromPort, int fromOffset, const juce::String& toPort, int toOffset, int n);
 
-    /** Every cable, for the UI (not the normals). */
+    /** Every cable. */
     std::vector<std::pair<int, Cord>> getAllCords() const;   // (dest, cord)
-    /** What's actually connected: the cables and the normals no cable has broken. */
-    std::vector<std::pair<int, Cord>> getLiveCords() const;
-    bool isLive (int source, int dest) const;
-
-    //--------------------------------------------------------------------------
-    // Normals (message thread)
-    /** The source a destination is normalled from (-1: none). */
-    int normalOf (int dest) const;
-    bool isFullNormal (int dest) const;
-    /** Normalled and no cable has broken it. */
-    bool isNormalLive (int dest) const;
     bool isSourcePlugged (int source) const;     // a cable's in this output
     bool isDestPlugged (int dest) const;         // a cable's in this input
-    /** Normal a destination from a source (-1 takes the normal out). */
-    void setNormal (int source, int dest, bool full = false);
-    void clearNormals();
-    /** Make what's patched now the normals: each input with one cable at 0 dB is normalled
-        from that cable's source and the cable comes out. Inputs mixing several cables, or at
-        another level, keep their cables (how many: `kept`). Returns the inputs wired. */
-    int cablesToNormals (int* kept = nullptr);
-    /** Just the normals (NORMALS), and putting them back (the cables stay). */
-    std::unique_ptr<juce::XmlElement> normalsToXml() const;
-    void normalsFromXml (const juce::XmlElement&);
-    /** Each normal: (dest, source). */
-    std::vector<std::pair<int, int>> getAllNormals() const;
 
-    /** While one of these is alive, connect / connectByName / connectInOrder wire normals, not cables. */
-    struct NormalWiring
-    {
-        explicit NormalWiring (Patchbay& p) : pb (p) { pb.wiringNormals = true; }
-        ~NormalWiring() { pb.wiringNormals = false; pb.publish(); }
-        Patchbay& pb;
-    };
+    /** Your usual wiring (the cables DEFAULT puts back), and putting it back. Older files of
+        normals load as cables. */
+    std::unique_ptr<juce::XmlElement> wiringToXml() const;
+    void wiringFromXml (const juce::XmlElement&);
 
     // Saving: cords by port id + channel name, so a patch survives ports growing.
     std::unique_ptr<juce::XmlElement> toXml() const;
@@ -136,19 +108,15 @@ public:
 
     /** Changes (for the UI). */
     std::function<void()> onChange;
-    /** A patch from before normals was loaded: wire the usual normals (the hub's default patch). */
-    std::function<void()> onDefaultNormals;
     /** A patch from before MIDI was on the patchbay was loaded (the hub adds MIDI's usual cords). */
     std::function<void()> onOlderPatch;
 
 private:
     void publish();
-    void plug (int source, int dest, float gain);   // a cable, or a normal while wiring
-    Matrix live_() const;
-
-    struct Normal { int source = -1; bool full = false; };
-    std::vector<Normal> normals;                    // [dest]
-    bool wiringNormals = false;
+    void plug (int source, int dest, float gain);
+    /** Cables and (from older files) normals, all as cables: a normal becomes a cable where
+        nothing was plugged into its input (and, for a full normal, its output). */
+    void loadCordsAndNormals (const juce::XmlElement&);
 
     std::vector<Port> ports;
     int numSources = 0, numDests = 0;

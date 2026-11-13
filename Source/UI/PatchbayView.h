@@ -7,12 +7,10 @@
 //   drag from an OUTPUT jack to an INPUT jack       patch a cable
 //   drag the plug out of an INPUT jack               move it to another input, or pull it out
 //   drag a section's name onto another section's     patch the whole section, 1 to 1, 2 to 2 ...
-//   right-click a jack or a multicore                levels, pull cables, normals
+//   right-click a jack or a multicore                levels, pull cables
 //
-// NORMALS: the usual wiring is behind the bay, as on a hardware TT bay. An input is
-// normalled from an output; a cable into the input breaks the normal (a FULL normal
-// breaks with a cable in the output too). The arc over a jack says it's normalled: solid
-// while the normal is carrying, faint once a cable has broken it. SHOW NORMALS draws them.
+// No normals: every connection is a cable on the bay. DEFAULT cables the usual wiring;
+// SAVE AS USUAL keeps what's patched as your usual wiring.
 //
 // A run of cables between the same two sections (24 tape tracks into EMERSON, say) is
 // drawn as one multicore with its count; SHOW EVERY CABLE draws them all.
@@ -34,7 +32,6 @@ public:
     void rebuild();                  // the panels (when the reel or interface changes)
     void setShowEveryCable (bool);
     void setMidiView (bool);            // the MIDI tab: the MIDI jacks (else the audio ones)
-    void setShowNormals (bool);
 
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -85,7 +82,6 @@ private:
     juce::Colour colourOfSource (int flat) const;
     void drawPanel (juce::Graphics&, const Panel&) const;
     void drawCables (juce::Graphics&) const;
-    void drawNormals (juce::Graphics&) const;
     static void drawCable (juce::Graphics&, juce::Point<float> a, juce::Point<float> b, juce::Colour, float thickness);
     void showJackMenu (const Hit&);
     void showMulticoreMenu (int srcPanel, int srcSection, int dstPanel, int dstSection);
@@ -93,7 +89,7 @@ private:
 
     Hub& hub;
     std::vector<Panel> panels;
-    bool showEveryCable = false, midiView = false, showNormals = true;
+    bool showEveryCable = false, midiView = false;
     int contentHeight = 600;
     int lastTracks = -1, lastIns = -1, lastOuts = -1, tracksRev = -1;
     juce::String lastNetwork;
@@ -113,7 +109,6 @@ private:
     // multicores drawn this time (for clicking them)
     struct Multicore { int sp, ss, dp, ds; juce::Point<float> label; };
     mutable std::vector<Multicore> multicores;
-    std::vector<char> srcNormalMark, dstNormalMark;   // (worked out in paint)
 };
 
 class PatchbayView : public juce::Component
@@ -130,9 +125,9 @@ private:
     void open();
 
     Hub& hub;
-    juce::TextButton normalsButton { "MAKE NORMALS" };
+    juce::TextButton usualButton { "SAVE AS USUAL" };
     juce::TextButton defaultButton { "DEFAULT" }, clearButton { "PULL ALL" }, saveButton { "SAVE" }, openButton { "OPEN" };
-    juce::ToggleButton everyCable { "SHOW EVERY CABLE" }, normalsShown { "SHOW NORMALS" };
+    juce::ToggleButton everyCable { "SHOW EVERY CABLE" };
     juce::TextButton audioTab { "AUDIO" }, midiTab { "MIDI" };
     PatchCanvas canvas;
     juce::Viewport viewport;

@@ -353,7 +353,8 @@ View::View()
     deviceManager.addAudioCallback (&engine);
     melville::addToSession (deviceManager, {
         [this] { return engine.toXml(); },
-        [this] (const juce::XmlElement& x) { units.clear(); engine.fromXml (x); rebuildRack(); list->repaint(); } });
+        [this] (const juce::XmlElement& x) { units.clear(); engine.fromXml (x); rebuildRack(); list->repaint(); },
+        [this] (const melville::NewStudio&) { units.clear(); engine.fromXml (juce::XmlElement ("ALCOTT")); rebuildRack(); list->repaint(); } });   // (empty slots)
 
     // (development: instruments straight away, for screenshots and checks)
     //   ALCOTT_PREVIEW="1=Juno Six|Tape Echo;2=Prophet Five"

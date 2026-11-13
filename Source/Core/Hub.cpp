@@ -71,7 +71,6 @@ Hub::Hub()
         clock->midiClock = &midi->source (midi->clock());
         midi->getBpm = [clock] { if (clock->getState) { const auto s = clock->getState(); if (s.valid && s.bpm > 0.0) return s.bpm; } return 120.0; };
         patchbay.onOlderPatch = [this] { midiDefaults(); };
-        patchbay.onDefaultNormals = [this] { wireDefaultNormals(); };
     }
 
     auto node = [this] (const char* id) -> Node*
@@ -151,47 +150,54 @@ bool Hub::isPartConnected (const juce::String& id) const
 }
 
 //==============================================================================
-juce::File Hub::studioNormalsFile()
+juce::File Hub::usualWiringFile()
 {
     return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-               .getChildFile ("MELVILLE").getChildFile ("studio-normals.xml");
+               .getChildFile ("MELVILLE").getChildFile ("studio-wiring.xml");
 }
 
-bool Hub::hasStudioNormals()
+/** (MELVILLE's normals from before, kept with MAKE NORMALS: read as your usual wiring.) */
+static juce::File oldNormalsFile()
 {
-    return studioNormalsFile().existsAsFile();
+    return Hub::usualWiringFile().getSiblingFile ("studio-normals.xml");
 }
 
-void Hub::saveStudioNormals()
+bool Hub::hasUsualWiring()
 {
-    auto f = studioNormalsFile();
+    return usualWiringFile().existsAsFile() || oldNormalsFile().existsAsFile();
+}
+
+void Hub::saveUsualWiring()
+{
+    auto f = usualWiringFile();
     f.getParentDirectory().createDirectory();
-    patchbay.normalsToXml()->writeTo (f);
+    patchbay.wiringToXml()->writeTo (f);
+    oldNormalsFile().deleteFile();
 }
 
-void Hub::forgetStudioNormals()
+void Hub::forgetUsualWiring()
 {
-    studioNormalsFile().deleteFile();
+    usualWiringFile().deleteFile();
+    oldNormalsFile().deleteFile();
 }
 
 void Hub::defaultPatch (bool factory)
 {
-    patchbay.clearAll();
     if (! factory)
-        if (auto xml = juce::XmlDocument::parse (studioNormalsFile()); xml != nullptr && xml->hasTagName ("NORMALS"))
-        {
-            patchbay.normalsFromXml (*xml);
-            return;
-        }
-    wireDefaultNormals();
+        for (auto f : { usualWiringFile(), oldNormalsFile() })
+            if (auto xml = juce::XmlDocument::parse (f); xml != nullptr && (xml->hasTagName ("WIRING") || xml->hasTagName ("NORMALS")))
+            {
+                patchbay.wiringFromXml (*xml);
+                return;
+            }
+    wireDefaultCables();
 }
 
-void Hub::wireDefaultNormals()
+void Hub::wireDefaultCables()
 {
-    // the usual wiring, behind the bay: normals (a cable into an input breaks its normal)
+    // the usual wiring: cables, all of them on the bay where you can see and pull them
     auto& pb = patchbay;
-    pb.clearNormals();
-    Patchbay::NormalWiring wiring (pb);
+    pb.clearAll();
     // the interface's inputs onto the first tracks; Hawthorne's master (and click) to the monitors
     pb.connectInOrder ("interface", 0, "hawthorne", 0, hawthorne::route::defaultTracks);
     // the control room (TWAIN): Hawthorne's master (the 2-track), the desk's mix and the click in;

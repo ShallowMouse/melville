@@ -171,7 +171,7 @@ int main()
     CHECK (rs->driverRunning.load() == 1);
     CHECK (std::string (rs->clientName) == "MELVILLE");
 
-    // --- patchbay: the usual wiring is normals behind the bay; a cable into an input breaks its normal
+    // --- patchbay: no normals - the usual wiring is cables, all on the bay
     auto& pb = hub.getPatchbay();
     auto saved = pb.toXml();
     const int src = pb.findSource ("interface", "In 1"), src2 = pb.findSource ("interface", "In 2");
@@ -180,71 +180,56 @@ int main()
                         return out.getSample (0, 5) == in.getSample (0, 5) && out.getMagnitude (0, 0, n) > 0.0f; };
     auto silent = [&] { hub.processBlockForTest (in.getArrayOfReadPointers(), 2, out.getArrayOfWritePointers(), 2, n);
                         return out.getMagnitude (0, 0, n) == 0.0f; };
-    CHECK (! pb.isConnected (src, dst));            // no cable...
-    CHECK (pb.normalOf (dst) == src && pb.isNormalLive (dst) && pb.isLive (src, dst));   // ...the normal carries it
+    CHECK (pb.isConnected (src, dst));              // the usual wiring: a cable you can see
     CHECK (passes());
     const int click = pb.findSource ("hawthorne", "Click"), out1 = pb.findDest ("interface", "Out 1");
-    CHECK (pb.normalOf (out1) >= 0 && ! pb.isNormalLive (out1));   // (the cable above broke TWAIN's normal into Out 1)
-    pb.clearAll();                                  // PULL ALL: the normals stay
-    CHECK (pb.isNormalLive (dst) && pb.isNormalLive (out1));
+    pb.clearAll();                                  // PULL ALL: nothing behind the bay, so nothing at all
+    CHECK (pb.getAllCords().empty());
     pb.connect (click, out1);                       // (back on the cable the test listens to)
+    CHECK (silent());                               // (In 1 isn't on track 1 any more)
+    pb.connect (src, dst);
     CHECK (passes());
-    pb.connect (src2, dst);                         // a cable into the input breaks the normal
-    CHECK (! pb.isNormalLive (dst) && ! pb.isLive (src, dst) && pb.isLive (src2, dst));
-    CHECK (silent());                               // (In 2 is silent in this test)
-    pb.disconnect (src2, dst);                      // pulled: the normal is back
-    CHECK (pb.isNormalLive (dst) && passes());
-    pb.connect (src, dst2, 0.5f);                   // a half-normal survives a cable out of its source (a mult)
-    CHECK (pb.isNormalLive (dst));
-    pb.setNormal (src, dst, true);                  // a full normal doesn't
-    CHECK (! pb.isNormalLive (dst) && silent());
-    pb.setNormal (src, dst, false);
-    CHECK (pb.isNormalLive (dst));
-    pb.setNormal (-1, dst);                         // no normal: nothing
+    pb.connect (src2, dst);                         // a second cable mixes in (In 2 is silent here)
+    CHECK (pb.isConnected (src, dst) && pb.isConnected (src2, dst) && passes());
+    pb.disconnect (src, dst);
     CHECK (silent());
-    pb.fromXml (*saved);                            // saving and loading brings the normals back
-    CHECK (pb.isNormalLive (dst) && pb.getAllCords().size() == 1 && passes());
+    pb.fromXml (*saved);                            // saving and loading brings the cables back
+    CHECK (pb.isConnected (src, dst) && pb.getAllCords().size() == saved->getNumChildElements() && passes());
 
-    // MAKE NORMALS: what's patched becomes the normals (one cable at 0 dB); a mix keeps its cables
+    // your usual wiring: kept, and put back (as cables)
     {
         auto before = pb.toXml();
-        const int dst3 = pb.findDest ("hawthorne", "Track 3");
-        pb.connect (src2, dst);                     // In 2 onto track 1 (breaks In 1's normal)
-        pb.connect (src, dst3); pb.connect (src2, dst3);   // a mix of two onto track 3
-        int kept = 0;
-        const int wired = pb.cablesToNormals (&kept);
-        CHECK (pb.normalOf (dst) == src2 && pb.isNormalLive (dst) && ! pb.isConnected (src2, dst));
-        CHECK (pb.isConnected (src, dst3) && pb.isConnected (src2, dst3) && kept == 1);
-        CHECK (wired == 2);                         // (and the test's cable into Out 1)
-        auto normalsOnly = pb.normalsToXml();
-        pb.fromXml (*before);
-        pb.normalsFromXml (*normalsOnly);           // put back: the normals only, the cables stay
-        CHECK (pb.normalOf (dst) == src2 && pb.getAllCords().size() == 1);
+        pb.connect (src2, dst2);
+        auto usual = pb.wiringToXml();
+        pb.clearAll();
+        pb.wiringFromXml (*usual);
+        CHECK (pb.isConnected (src2, dst2) && pb.isConnected (src, dst));
         pb.fromXml (*before);
     }
 
-    // a patch from before normals (version 5, all cables): the usual cables become normals, a usual
-    // cable it didn't have stays out, and the rest stay cables, so it's connected exactly as it was
+    // a patch from the days of normals (version 6): each normal that was carrying comes in as a
+    // cable; one a cable had broken stays out, so it's connected exactly as it was
     {
-        juce::XmlElement old (*saved);
-        old.setAttribute ("version", 5);
-        // (a version 5 patch had a cable wherever a normal is carrying now)
-        juce::Array<juce::XmlElement*> broken;
-        for (auto* e : old.getChildWithTagNameIterator ("NORMAL"))
-            if (e->getStringAttribute ("toPort") == "interface" && e->getStringAttribute ("to") == "Out 1") broken.add (e);
-        for (auto* e : broken) old.removeChildElement (e, true);
-        for (auto* e : old.getChildWithTagNameIterator ("NORMAL")) e->setTagName ("CORD");
-        for (auto* e : old.getChildWithTagNameIterator ("CORD"))
-            if (e->getStringAttribute ("toPort") == "hawthorne" && e->getStringAttribute ("to") == "Track 2")
-                { e->setAttribute ("toPort", "hawthorne"); e->setAttribute ("to", "Track 3"); e->setAttribute ("from", "In 2"); }
-        // (Track 3 now has its own normal's cable and In 2's: two cables, so both stay cables)
+        juce::XmlElement old ("PATCH");
+        old.setAttribute ("version", 6);
+        auto add = [&old] (const char* tag, const char* fp, const char* f, const char* tp, const char* t, bool full = false)
+        {
+            auto* e = old.createNewChildElement (tag);
+            e->setAttribute ("fromPort", fp); e->setAttribute ("from", f); e->setAttribute ("toPort", tp); e->setAttribute ("to", t);
+            if (full) e->setAttribute ("full", true);
+        };
+        add ("NORMAL", "interface", "In 1", "hawthorne", "Track 1");                 // carrying: becomes a cable
+        add ("NORMAL", "interface", "In 1", "hawthorne", "Track 2");                 // broken by the cable below: stays out
+        add ("CORD",   "interface", "In 2", "hawthorne", "Track 2");
+        add ("NORMAL", "interface", "In 2", "hawthorne", "Track 3", true);           // full, its source plugged: stays out
+        add ("CORD",   "hawthorne", "Click", "interface", "Out 1");
         pb.fromXml (old);
-        const int dst3 = pb.findDest ("hawthorne", "Track 3");
-        CHECK (pb.isNormalLive (dst));
-        CHECK (pb.normalOf (dst2) < 0 && pb.getLiveCords().size() > 0);
-        CHECK (pb.normalOf (dst3) < 0 && pb.isConnected (pb.findSource ("interface", "In 3"), dst3) && pb.isConnected (src2, dst3));
-        CHECK (pb.getAllCords().size() == 3);       // (and the test's cable into Out 1)
+        CHECK (pb.isConnected (src, dst));
+        CHECK (! pb.isConnected (src, dst2) && pb.isConnected (src2, dst2));
+        CHECK (! pb.isConnected (src2, pb.findDest ("hawthorne", "Track 3")));
+        CHECK (pb.getAllCords().size() == 3);
         CHECK (passes());
+        CHECK (pb.toXml()->getNumChildElements() == 3 && pb.toXml()->getChildByName ("NORMAL") == nullptr);
         pb.fromXml (*saved);
     }
 
@@ -271,7 +256,7 @@ int main()
         const int steps = mpb.findSource ("midi", "THOREAU steps"), clk = mpb.findSource ("midi", "Clock");
         const int slot3 = mpb.findDest ("midi", "ALCOTT slot 3"), slot4 = mpb.findDest ("midi", "ALCOTT slot 4");
         CHECK (steps >= 0 && clk >= 0 && slot3 >= 0 && slot4 >= 0);
-        CHECK (mpb.isLive (mpb.findSource ("midi", "Keyboards"), slot3));           // (the usual normal)
+        CHECK (mpb.isConnected (mpb.findSource ("midi", "Keyboards"), slot3));      // (the usual cable)
         const auto cordsBefore = mpb.getAllCords().size();
         mpb.connect (steps, mpb.findDest ("hawthorne", "Track 1"));                   // MIDI into audio: refused
         mpb.connect (mpb.findSource ("interface", "In 1"), slot4);                     // audio into MIDI: refused

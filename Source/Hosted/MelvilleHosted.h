@@ -120,6 +120,15 @@ namespace melville
     bool tapePositionAt (juce::int64 frame, double& tapePos, double& tapePerSample, int& flags) noexcept;
 
     //==========================================================================
+    /** A new reel's studio, as the new-session wizard settled it. */
+    struct NewStudio
+    {
+        double bpm = 0.0;           // the reel's tempo (0: none)
+        int beatsPerBar = 4;
+        int desk = -1;              // WHITMAN's desk (-1: leave it as it is)
+        bool usualCables = true;    // the patchbay: the usual cables, or none
+    };
+
     /** MELVILLE's library: Hawthorne's sessions and reels, shown and run by MELVILLE. Each reel
         keeps the whole studio with it (MELVILLE.studio in its folder) and its session sheet. */
     struct Library
@@ -132,6 +141,10 @@ namespace melville
         std::function<void (juce::Colour, juce::Colour, juce::Colour, juce::Colour, juce::Colour, juce::Colour, juce::Image)> style;
         // MELVILLE's
         std::function<void (const juce::File& reel)> reelLeaving, reelArrived;   // save / restore the studio with the reel
+        /** Hawthorne's wizard, just before it loads a reel it has made: the studio that reel
+            starts with (MELVILLE clears the studio for it when it arrives). */
+        NewStudio newStudio;
+        bool newStudioPending = false;
         std::function<void()> show, showDeck;                   // the LIBRARY window; Hawthorne's deck
     };
     Library& library() noexcept;
@@ -160,11 +173,25 @@ namespace melville
     {
         std::function<std::unique_ptr<juce::XmlElement>()> save;     // the part's state, any tag
         std::function<void (const juce::XmlElement&)> load;          // what save() gave
+        /** A new reel with nothing saved yet: back to a clean slate (no mix, no racks, no
+            patterns), as the wizard settled it. Not set: the part has nothing to clear. */
+        std::function<void (const NewStudio&)> fresh;
     };
     void addToSession (juce::AudioDeviceManager&, SessionPart);
 
     /** MELVILLE: the parts in the session, by part id ("hawthorne", "pequod2" ...). */
     const std::map<juce::String, SessionPart>& sessionParts();
+
+    /** The desks a new session can be mixed on (WHITMAN's, oldest first), for the wizard. */
+    struct DeskCard
+    {
+        int id = 0;
+        juce::String name, maker, history, sound;
+        std::function<void (juce::Graphics&, juce::Rectangle<float>)> draw;   // a little of its face
+    };
+    std::vector<DeskCard>& deskCards();
+    /** The desk WHITMAN is on now (-1: no WHITMAN). */
+    extern std::function<int()> currentDesk;
 
     //==========================================================================
     /** MIDI on the patchbay (MELVILLE's MIDI patch bay). THOREAU sends each step played into its

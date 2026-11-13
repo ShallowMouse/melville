@@ -49,15 +49,16 @@ public:
     void initialiseAudio (const juce::XmlElement* savedState);
 
     Patchbay& getPatchbay() noexcept { return patchbay; }
-    /** Pull every cable and wire the normals: your own (saved with MAKE NORMALS) if there are
-        any, else MELVILLE's (factory). */
+    /** Pull every cable and put the usual wiring back, as cables: your own (saved with SAVE AS
+        USUAL) if there is one, else MELVILLE's (factory). */
     void defaultPatch (bool factory = false);
-    /** Your own normals: save what the bay's normals are now as them; forget them. */
-    void saveStudioNormals();
-    void forgetStudioNormals();
-    static bool hasStudioNormals();
-    static juce::File studioNormalsFile();
-    void wireDefaultNormals();
+    /** Your usual wiring: what DEFAULT (and a new studio, if you ask for it) puts back. */
+    void saveUsualWiring();
+    void forgetUsualWiring();
+    static bool hasUsualWiring();
+    static juce::File usualWiringFile();
+    /** MELVILLE's own usual wiring, as cables. */
+    void wireDefaultCables();
 
     /** A part, by id ("hawthorne", "emerson", "whitman", "thoreau", "pequod"). */
     PartNode* findPart (const juce::String& id) const;
