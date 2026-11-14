@@ -82,13 +82,18 @@ namespace melville
         std::atomic<int> deckLamps { 0 };                    // DeckLamp bits
         std::atomic<int> locatesStored { 0 };                // bit k: LOC k+1 holds a position
         std::atomic<juce::int64> punchIn { -1 }, punchOut { -1 };   // reel samples, -1 = not set
+        std::atomic<double> speed { 1.0 };                   // the deck's play speed setting (varispeed, deck ips): 1 = as recorded
+        std::atomic<int> bar { 1 }, beat { 1 };              // Hawthorne's own bar . beat, as its counter shows it
+        std::atomic<int> barBeatState { 0 };                 // 1: bar / beat are set; -1: the reel has no tempo; 0: no reel
         juce::SpinLock markerLock;
         juce::String markerNow, markerNext;                  // (under markerLock)
     };
 
     /** A hardware transport's keys for the deck (Transport::deck). */
     enum DeckCommand { deckReverse = 0, deckMark, deckPrevMarker, deckNextMarker, deckSetIn, deckSetOut, deckGotoIn, deckGotoOut,
-                       deckLoop, deckAutoPunch, deckRehearse, deckLocate /* arg: 0-7 */, deckStoreLocate /* arg: 0-7 */ };
+                       deckLoop, deckAutoPunch, deckRehearse, deckLocate /* arg: 0-7 */, deckStoreLocate /* arg: 0-7 */,
+                       deckSemitoneUp, deckSemitoneDown /* varispeed to the next whole semitone */,
+                       deckSave /* the reel */, deckGotoEnd /* of what's recorded */, deckDeleteMarker /* the one it's in */ };
     enum DeckLamp { lampReversing = 1, lampLoop = 2, lampAutoPunch = 4, lampRehearse = 8 };
     Transport& transport() noexcept;
 

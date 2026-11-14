@@ -27,14 +27,23 @@
 //   /hawthorne/locate/1 .. /8                              press: go to LOC n (or store it, after STORE)
 //   /hawthorne/store                                       press: the next LOC key stores here
 //   /hawthorne/store/1 .. /8                               press: store LOC n here
+//   /hawthorne/vari/up  /hawthorne/vari/down               press: varispeed to the next whole semitone up / down
+//   /hawthorne/save                                        press: save the reel
+//   /hawthorne/end                                         press: to the end of what's recorded
+//   /hawthorne/marker/delete                               press: delete the marker it's in (marker/now)
+//   /hawthorne/click                                       press: MELVILLE's click on / off
 //   back: each key 1 / 0 (LOC n lit: it holds a place; IN / OUT lit: set); /hawthorne/counter s;
-//         /hawthorne/in/text s, /hawthorne/out/text s; /hawthorne/marker/now s, /hawthorne/marker/next s
+//         /hawthorne/in/text s, /hawthorne/out/text s; /hawthorne/marker/now s, /hawthorne/marker/next s;
+//         /hawthorne/beat s ("bar.beat", "12.3": Hawthorne's own, as its counter shows it - count-in bars are
+//         negative, no bar 0; empty with no reel on the deck or a reel with no tempo);
+//         /hawthorne/speed f (the deck's play speed setting, 1 = as recorded: varispeed and deck ips)
 //
 // /transport/... (rtz stop play rec rew ffw, counter): MELVILLE's transport, as on its bar
 // /melville/sync                                        any surface: send me everything
 
 #include <JuceHeader.h>
 #include "../Core/TwainNode.h"
+#include "../Core/ClockNode.h"
 #include "../Hosted/MelvilleHosted.h"
 #include "LanAddress.h"
 #include <map>
@@ -82,6 +91,8 @@ public:
     static OscControl*& instance() { static OscControl* o = nullptr; return o; }
     /** The settings changed (to save them). */
     std::function<void (const Settings&)> onSettingsChanged;
+    /** MELVILLE's clock (its click), for the CLICK key. */
+    ClockNode* clock = nullptr;
 
     explicit OscControl (TwainNode& t) : juce::Thread ("MELVILLE OSC"), twain (t) { instance() = this; }
     ~OscControl() override { stop(); if (instance() == this) instance() = nullptr; }
@@ -311,6 +322,12 @@ private:
         if (key == "loop")         { onPress ([] { deck (deckLoop); });       return; }
         if (key == "auto")         { onPress ([] { deck (deckAutoPunch); });  return; }
         if (key == "rehearse")     { onPress ([] { deck (deckRehearse); });   return; }
+        if (key == "vari/up")      { onPress ([] { deck (deckSemitoneUp); });   return; }
+        if (key == "vari/down")    { onPress ([] { deck (deckSemitoneDown); }); return; }
+        if (key == "save")         { onPress ([] { deck (deckSave); });         return; }
+        if (key == "end")          { onPress ([] { deck (deckGotoEnd); });      return; }
+        if (key == "marker/delete"){ onPress ([] { deck (deckDeleteMarker); }); return; }
+        if (key == "click")        { onPress ([this] { if (clock != nullptr) clock->clickOn = ! clock->clickOn.load(); }); return; }
         if (key == "store")        { onPress ([this] { storeArmed = ! storeArmed; }); return; }
         if (key.startsWith ("locate/") || key.startsWith ("store/"))
         {
@@ -411,11 +428,17 @@ private:
         const int stored = t.locatesStored.load();
         for (int k = 0; k < 8; ++k) lamp ("/hawthorne/locate/" + juce::String (k + 1), (stored >> k) & 1);
         lamp ("/hawthorne/store", storeArmed);
+        lamp ("/hawthorne/click", clock != nullptr && clock->clickOn.load());
         juce::String now, next;
         {
             const juce::SpinLock::ScopedLockType sl (t.markerLock);
             now = t.markerNow; next = t.markerNext;
         }
+        // bar . beat: straight from Hawthorne's counter; nothing with no reel on the deck or no tempo on it
+        text ("/hawthorne/beat", t.barBeatState.load() == 1 ? juce::String (t.bar.load()) + "." + juce::String (t.beat.load())
+                                                            : juce::String());
+        // the deck's speed setting (varispeed)
+        o.push_back ({ "/hawthorne/speed", false, (float) (std::round (t.speed.load() * 10000.0) / 10000.0), {} });
         text ("/hawthorne/marker/now", now.isEmpty() ? juce::String ("-") : now.toUpperCase());
         text ("/hawthorne/marker/next", next.isEmpty() ? juce::String ("-") : next.toUpperCase());
         return o;

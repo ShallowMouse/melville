@@ -1113,6 +1113,7 @@ public:
         phones->start();
         // a control surface (TouchOSC now, the hardware TWAIN later) over OSC
         osc = std::make_unique<melville::OscControl> (hub->getTwain());
+        osc->clock = &hub->getClock();
         {
             auto saved = props.getUserSettings()->getXmlValue ("oscControl");
             osc->apply (melville::OscControl::Settings::fromXml (saved.get()));
