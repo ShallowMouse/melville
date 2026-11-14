@@ -27,7 +27,8 @@
 //   /hawthorne/locate/1 .. /8                              press: go to LOC n (or store it, after STORE)
 //   /hawthorne/store                                       press: the next LOC key stores here
 //   /hawthorne/store/1 .. /8                               press: store LOC n here
-//   /hawthorne/vari/up  /hawthorne/vari/down               press: varispeed to the next whole semitone up / down
+//   /hawthorne/vari/up  /hawthorne/vari/down               press: to the next whole semitone up / down (VARI goes an octave each
+//                                                          way; past that Hawthorne changes the deck speed, as on a real machine)
 //   /hawthorne/save                                        press: save the reel
 //   /hawthorne/end                                         press: to the end of what's recorded
 //   /hawthorne/marker/delete                               press: delete the marker it's in (marker/now)
