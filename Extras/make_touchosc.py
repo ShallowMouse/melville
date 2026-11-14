@@ -278,6 +278,15 @@ def hawthorne_controller_layout():
            '  end\n'
            '  self.values.text = v\n'
            'end\n'
+           'function init()\n'
+           '  local p = self.parent.children\n'
+           '  p.iconStop.shape = Shape.RECTANGLE\n'
+           '  p.iconRec.shape = Shape.CIRCLE\n'
+           '  p.iconLoop.shape = Shape.CIRCLE\n'
+           '  p.iconPlay.shape = Shape.TRIANGLE;    p.iconPlay.orientation = Orientation.EAST\n'
+           '  p.iconReverse.shape = Shape.TRIANGLE; p.iconReverse.orientation = Orientation.WEST\n'
+           '  show()\n'
+           'end\n'
            'function onReceiveOSC(m)\n'
            '  local key = string.match(m[1], "^/hawthorne/(.+)$")\n'
            '  if key == nil or st[key] == nil then return false end\n'
@@ -385,12 +394,13 @@ def hawthorne_controller_layout():
                         f'    sendOSC("/hawthorne/{w}", 1); say("{W} SET")\n')
 
     gx, gy, cw, rh, kw, kh = 556, 74, 148, 80, 104, 52
-    # the old REAPER remote's 15 keys, each doing its job the Hawthorne way (as the hardware's KEYS table);
-    # placed as those buttons sit on the panel (old button n: column (n-1) // 5, row from the bottom (n-1) % 5)
-    old = ['mark', 'stop', 'prev', 'semidown', 'in', 'click', 'save', 'out', 'loc1', 'semiup', 'rtz', 'end', 'loop', 'del', 'next']
-    grid = [[None] * 3 for _ in range(5)]
-    for n, name in enumerate(old):
-        grid[4 - n % 5][n // 5] = name
+    # the old REAPER remote's 15 jobs, grouped (as the hardware's KEYS table): where it goes, the loop,
+    # markers, varispeed and click, then stop / save
+    grid = [['rtz', 'loc1', 'end'],
+            ['in', 'loop', 'out'],
+            ['prev', 'mark', 'next'],
+            ['semidown', 'click', 'semiup'],
+            ['del', 'stop', 'save']]
     names = {'mark': 'MARK', 'stop': 'STOP', 'prev': '|< MARK', 'semidown': 'SEMI -', 'in': 'IN', 'click': 'CLICK', 'save': 'SAVE',
              'out': 'OUT', 'semiup': 'SEMI +', 'rtz': 'RTZ', 'end': 'END', 'loop': 'LOOP', 'del': 'DEL MARK', 'next': 'MARK >|'}
     paths = {'mark': 'mark', 'stop': 'stop', 'prev': 'marker/prev', 'semidown': 'vari/down', 'click': 'click', 'save': 'save',
