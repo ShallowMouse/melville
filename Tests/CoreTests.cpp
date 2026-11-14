@@ -10,6 +10,7 @@
 #include "../Source/Core/PartDevice.h"
 #include "../Source/Core/Bridges.h"
 #include "../Source/Hosted/MelvilleHosted.h"
+#include "../Source/Core/OscDevices.h"
 #include <cstdio>
 
 using namespace melville;
@@ -308,6 +309,41 @@ int main()
         CHECK (ticks == 47 || ticks == 48);
         std::printf ("    MIDI: clock %d ticks in a second at 120, %d start\n", ticks, starts);
         clock.getState = oldState;
+    }
+
+    // --- control surfaces: a device is sent only its own pages, and presses only its own keys
+    {
+        namespace Osc = melville;
+        CHECK (Osc::typeWants (Osc::typeHawthorne, "/hawthorne/play"));
+        CHECK (Osc::typeWants (Osc::typeHawthorne, "/transport/rec"));        // (the deck runs MELVILLE's clock with no reel)
+        CHECK (! Osc::typeWants (Osc::typeHawthorne, "/twain/mute"));         // a transport can't touch the monitoring
+        CHECK (Osc::typeWants (Osc::typeTwain, "/twain/level"));
+        CHECK (! Osc::typeWants (Osc::typeTwain, "/hawthorne/rec"));          // ... and the monitoring can't hit record
+        CHECK (Osc::typeWants (Osc::typeEverything, "/twain/mute") && Osc::typeWants (Osc::typeEverything, "/hawthorne/rec"));
+        for (int t = 0; t < Osc::numDeviceTypes; ++t)
+            CHECK (Osc::typeWants (t, "/melville/sync"));                     // everyone may ask to be caught up
+        CHECK (Osc::typeOf ("/hawthorne/mark") == Osc::typeHawthorne);
+        CHECK (Osc::typeOf ("/twain/dim") == Osc::typeTwain);
+        CHECK (Osc::typeOf ("/transport/play") == Osc::typeEverything);
+
+        // the list is kept with the settings
+        Osc::OscSettings s;
+        s.devices.push_back ({ Osc::typeHawthorne, "Deck", "192.168.1.20", 0, "a1b2" });
+        s.devices.push_back ({ Osc::typeTwain, "Control room", "192.168.1.21", 9200, {} });
+        const auto back = Osc::OscSettings::fromXml (s.toXml().get());
+        CHECK (back.devices.size() == 2);
+        CHECK (back.devices[0].type == Osc::typeHawthorne && back.devices[0].name == "Deck"
+               && back.devices[0].host == "192.168.1.20" && back.devices[0].serial == "a1b2");
+        CHECK (back.devices[1].type == Osc::typeTwain && back.devices[1].replyPort == 9200);
+
+        // a setting from before the device list: the addresses it answered become devices
+        Osc::OscSettings old2;
+        old2.replyHost = "192.168.1.30, 192.168.1.31";
+        const auto moved = Osc::OscSettings::fromXml (old2.toXml().get());
+        CHECK (moved.devices.size() == 2 && moved.devices[0].host == "192.168.1.30"
+               && moved.devices[1].type == Osc::typeEverything);
+        std::printf ("    OSC: %d devices kept, %d brought over from the old settings\n",
+                     (int) back.devices.size(), (int) moved.devices.size());
     }
 
     std::printf (failures == 0 ? "MELVILLE core: all tests passed\n" : "MELVILLE core: %d failure(s)\n", failures);

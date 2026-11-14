@@ -411,6 +411,62 @@ private:
 };
 
 //==============================================================================
+/** The surfaces MELVILLE talks to: one row each, with its type, name, address and when it was
+    last heard from. Under it the ones it has heard from that aren't on the list yet. */
+class DeviceList : public juce::Component, public juce::ListBoxModel
+{
+public:
+    using Device = melville::OscControl::Device;
+
+    std::function<void (int row)> onChosen;        // double-click / Enter: edit it
+
+    DeviceList()
+    {
+        box.setModel (this);
+        box.setRowHeight (24);
+        box.setColour (juce::ListBox::backgroundColourId, Colours::panel);
+        box.setColour (juce::ListBox::outlineColourId, Colours::line);
+        box.setOutlineThickness (1);
+        addAndMakeVisible (box);
+    }
+
+    void setDevices (std::vector<Device> d) { devices = std::move (d); box.updateContent(); box.repaint(); }
+    const std::vector<Device>& getDevices() const { return devices; }
+    int chosen() const { return box.getSelectedRow(); }
+    void resized() override { box.setBounds (getLocalBounds()); }
+
+    int getNumRows() override { return (int) devices.size(); }
+
+    void paintListBoxItem (int row, juce::Graphics& g, int w, int h, bool selected) override
+    {
+        if (! juce::isPositiveAndBelow (row, (int) devices.size())) return;
+        const auto& d = devices[(size_t) row];
+        if (selected) { g.setColour (Colours::accent.withAlpha (0.18f)); g.fillRect (0, 0, w, h); }
+        g.setColour (Colours::line);
+        g.drawHorizontalLine (h - 1, 0.0f, (float) w);
+        auto r = juce::Rectangle<int> (0, 0, w, h).reduced (8, 0);
+        g.setFont (juce::Font (juce::FontOptions (12.0f, juce::Font::bold)));
+        g.setColour (Colours::accent);
+        g.drawText (melville::OscControl::deviceTypeName (d.type), r.removeFromLeft (92), juce::Justification::centredLeft);
+        g.setFont (juce::Font (juce::FontOptions (12.0f)));
+        g.setColour (Colours::text);
+        g.drawText (d.name.isNotEmpty() ? d.name : d.host, r.removeFromLeft (150), juce::Justification::centredLeft);
+        g.setColour (Colours::textDim);
+        g.drawText (d.host, r.removeFromLeft (130), juce::Justification::centredLeft);
+        juce::String heard;
+        if (auto* o = melville::OscControl::instance()) heard = o->lastHeard (d.host);
+        g.setColour (heard.isEmpty() ? Colours::textDim : Colours::text);
+        g.drawText (heard.isEmpty() ? "not heard from" : heard, r, juce::Justification::centredRight);
+    }
+
+    void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override { if (onChosen) onChosen (row); }
+    void returnKeyPressed (int row) override { if (onChosen) onChosen (row); }
+
+private:
+    juce::ListBox box;
+    std::vector<Device> devices;
+};
+
 /** INTERFACE: the device selector, a round-trip latency measurement, and the control surface (OSC). */
 class InterfacePanel : public juce::Component, private juce::Timer
 {
@@ -447,8 +503,8 @@ public:
         oscCaption.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
         oscCaption.setColour (juce::Label::textColourId, Colours::accent);
         addAndMakeVisible (oscCaption);
-        oscHelp.setText ("The hardware (TWAIN, the Hawthorne transport) or TouchOSC. Point each at this computer's address and the "
-                         "listen port; MELVILLE lights their keys back on the reply port, every surface at once.",
+        oscHelp.setText ("The hardware (TWAIN, the HAWTHORNE transport) or TouchOSC. Point each at this computer's address "
+                         "and the listen port, then add it below; MELVILLE lights its keys back on the reply port.",
                          juce::dontSendNotification);
         oscHelp.setJustificationType (juce::Justification::topLeft);
         oscHelp.setColour (juce::Label::textColourId, Colours::textDim);
@@ -467,17 +523,45 @@ public:
         }
         listenPort.setTooltip ("The port MELVILLE listens on (the surface's send port)");
         replyPort.setTooltip ("The port MELVILLE answers on (the surface's receive port)");
-        replyTo.addItem ("every surface heard", 1);
-        replyTo.addItem ("these addresses:", 2);
-        replyTo.setTooltip ("Where MELVILLE sends the lamps and readouts: every surface it has heard from, or only these addresses (comma between them)");
-        replyTo.onChange = [this] { replyHost.setEnabled (replyTo.getSelectedId() == 2); applyOsc(); };
-        addAndMakeVisible (replyTo);
-        replyHost.setTextToShowWhenEmpty ("192.168.1.20, 192.168.1.21", Colours::textDim);
-        replyHost.setInputRestrictions (64);
-        replyHost.onReturnKey = [this] { applyOsc(); };
-        replyHost.onFocusLost = [this] { applyOsc(); };
-        addAndMakeVisible (replyHost);
-        for (auto* l : { &listenLabel, &replyLabel, &replyToLabel })
+        // the devices: one row each, with ADD and REMOVE
+        devicesCaption.setText ("DEVICES", juce::dontSendNotification);
+        devicesCaption.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
+        devicesCaption.setColour (juce::Label::textColourId, Colours::accent);
+        addAndMakeVisible (devicesCaption);
+        devicesHelp.setText ("Each surface, with what it drives. A device is sent only its own pages and can press only "
+                             "its own keys, so a transport can't touch the monitoring. With devices listed, anything else "
+                             "on the network is ignored; with none listed MELVILLE answers whatever it hears.",
+                             juce::dontSendNotification);
+        devicesHelp.setJustificationType (juce::Justification::topLeft);
+        devicesHelp.setColour (juce::Label::textColourId, Colours::textDim);
+        addAndMakeVisible (devicesHelp);
+        devices.onChosen = [this] (int row) { editDevice (row); };
+        addAndMakeVisible (devices);
+        addDevice.setTooltip ("Add a surface: its type, a name and its address on the network");
+        addDevice.onClick = [this] { editDevice (-1); };
+        addAndMakeVisible (addDevice);
+        editDeviceButton.setTooltip ("Change the device picked out above");
+        editDeviceButton.onClick = [this] { editDevice (devices.chosen()); };
+        addAndMakeVisible (editDeviceButton);
+        removeDevice.setTooltip ("Take the device picked out above off the list");
+        removeDevice.onClick = [this]
+        {
+            auto* o = melville::OscControl::instance();
+            const int row = devices.chosen();
+            if (o == nullptr || ! juce::isPositiveAndBelow (row, (int) o->getSettings().devices.size())) return;
+            auto s2 = o->getSettings();
+            s2.devices.erase (s2.devices.begin() + row);
+            o->apply (s2);
+            showOsc();
+        };
+        addAndMakeVisible (removeDevice);
+        heardCaption.setJustificationType (juce::Justification::topLeft);
+        heardCaption.setColour (juce::Label::textColourId, Colours::text);
+        addAndMakeVisible (heardCaption);
+        addHeard.setTooltip ("Add the surface MELVILLE has just heard from");
+        addHeard.onClick = [this] { addFirstCandidate(); };
+        addAndMakeVisible (addHeard);
+        for (auto* l : { &listenLabel, &replyLabel })
         {
             l->setColour (juce::Label::textColourId, Colours::text);
             l->setJustificationType (juce::Justification::centredRight);
@@ -485,15 +569,22 @@ public:
         }
         listenLabel.setText ("Listen port", juce::dontSendNotification);
         replyLabel.setText ("Reply port", juce::dontSendNotification);
-        replyToLabel.setText ("Reply to", juce::dontSendNotification);
         oscStatus.setColour (juce::Label::textColourId, Colours::text);
         oscStatus.setJustificationType (juce::Justification::topLeft);
         addAndMakeVisible (oscStatus);
         showOsc();
-        oscTimer.f = [this] { if (auto* o = melville::OscControl::instance()) oscStatus.setText (o->getStatus(), juce::dontSendNotification); };
+        oscTimer.f = [this]
+        {
+            if (auto* o = melville::OscControl::instance())
+            {
+                oscStatus.setText (o->getStatus(), juce::dontSendNotification);
+                devices.repaint();            // (when each one was last heard from)
+                showHeard();
+            }
+        };
         oscTimer.startTimer (500);
 
-        setSize (580, 830);
+        setSize (620, 1016);
     }
 
     void resized() override
@@ -524,13 +615,23 @@ public:
         replyLabel.setBounds (row1.removeFromLeft (76)); row1.removeFromLeft (6);
         replyPort.setBounds (row1.removeFromLeft (64));
         r.removeFromTop (8);
-        auto row2 = r.removeFromTop (26);
-        row2.removeFromLeft (70);
-        replyToLabel.setBounds (row2.removeFromLeft (80)); row2.removeFromLeft (6);
-        replyTo.setBounds (row2.removeFromLeft (170)); row2.removeFromLeft (8);
-        replyHost.setBounds (row2.removeFromLeft (210));
+        oscStatus.setBounds (r.removeFromTop (54));
+
+        r.removeFromTop (12);
+        devicesTop = r.getY() - 6;
+        devicesCaption.setBounds (r.removeFromTop (22));
+        devicesHelp.setBounds (r.removeFromTop (48));
+        r.removeFromTop (6);
+        devices.setBounds (r.removeFromTop (116));
         r.removeFromTop (8);
-        oscStatus.setBounds (r.removeFromTop (56));
+        auto row3 = r.removeFromTop (26);
+        addDevice.setBounds (row3.removeFromLeft (110)); row3.removeFromLeft (8);
+        editDeviceButton.setBounds (row3.removeFromLeft (70)); row3.removeFromLeft (8);
+        removeDevice.setBounds (row3.removeFromLeft (80));
+        r.removeFromTop (10);
+        auto row4 = r.removeFromTop (26);
+        addHeard.setBounds (row4.removeFromRight (120)); row4.removeFromRight (10);
+        heardCaption.setBounds (row4);
     }
 
     void paint (juce::Graphics& g) override
@@ -539,6 +640,7 @@ public:
         g.setColour (Colours::line);
         g.drawHorizontalLine (440, 12.0f, (float) getWidth() - 12.0f);
         g.drawHorizontalLine (oscTop, 12.0f, (float) getWidth() - 12.0f);
+        g.drawHorizontalLine (devicesTop, 12.0f, (float) getWidth() - 12.0f);
     }
 
 private:
@@ -570,16 +672,102 @@ private:
     void showOsc()
     {
         auto* o = melville::OscControl::instance();
-        for (auto* c : std::initializer_list<juce::Component*> { &oscOn, &listenPort, &replyPort, &replyTo, &replyHost }) c->setEnabled (o != nullptr);
+        for (auto* c : std::initializer_list<juce::Component*> { &oscOn, &listenPort, &replyPort, &devices,
+                                                                 &addDevice, &editDeviceButton, &removeDevice })
+            c->setEnabled (o != nullptr);
         if (o == nullptr) { oscStatus.setText ("Not running.", juce::dontSendNotification); return; }
         const auto& s = o->getSettings();
         oscOn.setToggleState (s.enabled, juce::dontSendNotification);
         listenPort.setText (juce::String (s.listenPort), false);
         replyPort.setText (juce::String (s.replyPort), false);
-        replyTo.setSelectedId (s.replyHost.isEmpty() ? 1 : 2, juce::dontSendNotification);
-        replyHost.setText (s.replyHost, false);
-        replyHost.setEnabled (s.replyHost.isNotEmpty());
+        devices.setDevices (s.devices);
         oscStatus.setText (o->getStatus(), juce::dontSendNotification);
+        showHeard();
+    }
+
+    /** The line under the list: the surface MELVILLE has heard from that isn't on it yet. */
+    void showHeard()
+    {
+        auto* o = melville::OscControl::instance();
+        const auto heard = o != nullptr ? o->getCandidates() : std::vector<std::pair<juce::String, melville::OscControl::Candidate>>();
+        if (heard.empty())
+        {
+            heardCaption.setText (o != nullptr && o->getSettings().devices.empty()
+                                      ? "Nothing heard yet. Point a surface at the address above."
+                                      : juce::String(), juce::dontSendNotification);
+            addHeard.setVisible (false);
+            return;
+        }
+        const auto& [host, c] = heard.front();
+        heardCaption.setText ("Heard from " + host + ": " + melville::OscControl::deviceTypeName (c.type)
+                                  + (c.announced ? " (it says so)" : " (by what it sends)")
+                                  + (heard.size() > 1 ? ", and " + juce::String ((int) heard.size() - 1) + " more" : juce::String()),
+                              juce::dontSendNotification);
+        addHeard.setButtonText ("ADD " + melville::OscControl::deviceTypeName (c.type));
+        addHeard.setVisible (true);
+    }
+
+    /** Add the surface just heard from, as it says it is. */
+    void addFirstCandidate()
+    {
+        auto* o = melville::OscControl::instance();
+        if (o == nullptr) return;
+        const auto heard = o->getCandidates();
+        if (heard.empty()) return;
+        const auto& [host, c] = heard.front();
+        auto s2 = o->getSettings();
+        s2.devices.push_back ({ c.type, c.name.isNotEmpty() ? c.name : melville::OscControl::deviceTypeName (c.type), host, 0, c.serial });
+        o->apply (s2);
+        showOsc();
+    }
+
+    /** Add a device, or change one: its type, what to call it and where it is. */
+    void editDevice (int row)
+    {
+        auto* o = melville::OscControl::instance();
+        if (o == nullptr) return;
+        const auto& list = o->getSettings().devices;
+        const bool isNew = ! juce::isPositiveAndBelow (row, (int) list.size());
+        const auto d = isNew ? melville::OscControl::Device() : list[(size_t) row];
+
+        auto* w = new juce::AlertWindow (isNew ? "Add device" : "Device",
+                                         "Which part of MELVILLE does this surface drive, what do you call it, "
+                                         "and where is it on the network?",
+                                         juce::MessageBoxIconType::NoIcon);
+        juce::StringArray types;
+        for (int t = 0; t < melville::OscControl::numDeviceTypes; ++t)
+            types.add (melville::OscControl::deviceTypeName (t) + "  -  " + melville::OscControl::deviceTypeWhat (t));
+        w->addComboBox ("type", types, "Type");
+        w->getComboBoxComponent ("type")->setSelectedItemIndex (d.type, juce::dontSendNotification);
+        w->addTextEditor ("name", d.name, "Name");
+        w->addTextEditor ("host", d.host, "Address");
+        w->addButton (isNew ? "Add" : "Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        w->enterModalState (true, juce::ModalCallbackFunction::create ([this, w, row, isNew] (int r)
+        {
+            if (r == 1)
+            {
+                melville::OscControl::Device nd;
+                nd.type = juce::jlimit (0, melville::OscControl::numDeviceTypes - 1, w->getComboBoxComponent ("type")->getSelectedItemIndex());
+                nd.name = w->getTextEditorContents ("name").trim();
+                nd.host = w->getTextEditorContents ("host").trim();
+                if (nd.host.isNotEmpty())
+                    if (auto* o2 = melville::OscControl::instance())
+                    {
+                        auto s2 = o2->getSettings();
+                        if (nd.name.isEmpty()) nd.name = melville::OscControl::deviceTypeName (nd.type);
+                        if (isNew) s2.devices.push_back (nd);
+                        else if (juce::isPositiveAndBelow (row, (int) s2.devices.size()))
+                        {
+                            nd.serial = s2.devices[(size_t) row].serial;
+                            s2.devices[(size_t) row] = nd;
+                        }
+                        o2->apply (s2);
+                    }
+            }
+            delete w;
+            showOsc();
+        }), false);
     }
 
     void applyOsc()
@@ -590,9 +778,9 @@ private:
         s.enabled = oscOn.getToggleState();
         s.listenPort = juce::jlimit (1, 65535, listenPort.getText().getIntValue() > 0 ? listenPort.getText().getIntValue() : 8100);
         s.replyPort = juce::jlimit (1, 65535, replyPort.getText().getIntValue() > 0 ? replyPort.getText().getIntValue() : 9100);
-        s.replyHost = replyTo.getSelectedId() == 2 ? replyHost.getText().trim() : juce::String();
         const auto& now = o->getSettings();
-        if (s.enabled == now.enabled && s.listenPort == now.listenPort && s.replyPort == now.replyPort && s.replyHost == now.replyHost)
+        s.devices = now.devices;
+        if (s.enabled == now.enabled && s.listenPort == now.listenPort && s.replyPort == now.replyPort)
             return;
         o->apply (s);
         showOsc();
@@ -641,12 +829,38 @@ private:
     juce::ComboBox outBox, inBox;
     juce::TextButton measure { "MEASURE" }, clear { "CLEAR" };
 
-    juce::Label oscCaption, oscHelp, oscStatus, listenLabel, replyLabel, replyToLabel;
+    juce::Label oscCaption, oscHelp, oscStatus, listenLabel, replyLabel;
     juce::ToggleButton oscOn;
-    juce::TextEditor listenPort, replyPort, replyHost;
-    juce::ComboBox replyTo;
-    int oscTop = 0;
+    juce::TextEditor listenPort, replyPort;
+    juce::Label devicesCaption, devicesHelp, heardCaption;
+    DeviceList devices;
+    juce::TextButton addDevice { "ADD DEVICE" }, editDeviceButton { "EDIT" }, removeDevice { "REMOVE" }, addHeard { "ADD" };
+    int oscTop = 0, devicesTop = 0;
     struct Every : juce::Timer { std::function<void()> f; void timerCallback() override { if (f) f(); } } oscTimer;
+};
+
+/** A panel too tall for the screen, in a scroller. */
+class ScrollingPanel : public juce::Component
+{
+public:
+    ScrollingPanel (juce::Component* content, int maxHeight)
+        : contentW (content->getWidth()), contentH (content->getHeight())
+    {
+        view.setViewedComponent (content, true);
+        view.setScrollBarsShown (true, false);
+        addAndMakeVisible (view);
+        const bool scrolls = contentH > maxHeight;
+        setSize (contentW + (scrolls ? view.getScrollBarThickness() : 0), juce::jmin (contentH, maxHeight));
+    }
+    void resized() override
+    {
+        view.setBounds (getLocalBounds());
+        if (auto* c = view.getViewedComponent()) c->setSize (contentW, contentH);
+    }
+
+private:
+    juce::Viewport view;
+    int contentW, contentH;
 };
 
 /** The MELVILLE bar: every part's icon (click to bring up its window, lamp lit while it
@@ -876,7 +1090,7 @@ public:
         if (interfaceWindow == nullptr)
         {
             interfaceWindow = std::make_unique<ToolWindow> (juce::String (juce::CharPointer_UTF8 ("MELVILLE \xc2\xb7 INTERFACE")));
-            frameWindow (*interfaceWindow, new InterfacePanel (hub), true, "Interface", Colours::accent, loadIcon ("melville", 64),
+            frameWindow (*interfaceWindow, new ScrollingPanel (new InterfacePanel (hub), 900), true, "Interface", Colours::accent, loadIcon ("melville", 64),
                          WindowTitleBar::minimise | WindowTitleBar::close);
             interfaceWindow->setResizable (false, false);
             interfaceWindow->centreWithSize (interfaceWindow->getWidth(), interfaceWindow->getHeight());

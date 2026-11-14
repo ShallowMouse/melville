@@ -1,11 +1,21 @@
 #pragma once
 
-// MELVILLE's control surfaces over OSC: the hardware TWAIN, the Hawthorne transport (and a meter
+// MELVILLE's control surfaces over OSC: the hardware TWAIN, the HAWTHORNE transport (and a meter
 // bridge later), or TouchOSC pages standing in for them. Listens on a UDP port (8100) and answers
-// every surface it has heard from (or a fixed list of addresses) on the reply port (9100), with
-// every lamp and readout, so a surface's keys light like the hardware's LEDs. A surface that only
-// listens should send /melville/sync now and then (every few seconds) so MELVILLE keeps answering
-// it. Set up in MELVILLE's INTERFACE window. (IRVING's own OSC is on 9000 / 9001.)
+// on the reply port (9100) with every lamp and readout, so a surface's keys light like the
+// hardware's LEDs. A surface that only listens should send /melville/sync now and then (every few
+// seconds) so MELVILLE keeps answering it. Set up in MELVILLE's INTERFACE window. (IRVING's own
+// OSC is on 9000 / 9001.)
+//
+// DEVICES: each surface is added to a list with its type - HAWTHORNE (the deck), TWAIN (the
+// control room) or everything - and its address. Several of a type is fine: two transports, a
+// tablet and a hardware TWAIN. A device is sent only what its type uses and may press only what
+// its type owns, so a transport can't touch the monitoring. With devices listed, anything else on
+// the network is ignored, which is what stops a stray message hitting record; with none listed
+// MELVILLE answers whatever it hears, so a new setup works before you've listed anything. Either
+// way every surface MELVILLE hears from shows in INTERFACE, with its type guessed from what it
+// sends, so adding it is one click.
+//   /melville/hello  "hawthorne" | "twain" | "all"[, name[, serial]]    a device announcing itself
 //
 // TWAIN
 //   /twain/source/mix  /twain/source/2track  /twain/source/ext1  /twain/source/ext2     press
@@ -43,6 +53,7 @@
 // /melville/sync                                        any surface: send me everything
 
 #include <JuceHeader.h>
+#include "../Core/OscDevices.h"
 #include "../Core/TwainNode.h"
 #include "../Core/ClockNode.h"
 #include "../Hosted/MelvilleHosted.h"
@@ -55,37 +66,24 @@ namespace melville
 class OscControl : private juce::Thread, private juce::Timer
 {
 public:
-    struct Settings
-    {
-        bool enabled = true;
-        int listenPort = 8100, replyPort = 9100;
-        juce::String replyHost;                 // empty: answer every surface heard; else these addresses (comma separated)
+    // what a surface drives, and the list (Core/OscDevices.h, so the tests can read them)
+    using DeviceType = melville::DeviceType;
+    using Device = melville::OscDevice;
+    using Settings = melville::OscSettings;
+    static constexpr int typeHawthorne = melville::typeHawthorne, typeTwain = melville::typeTwain,
+                         typeEverything = melville::typeEverything, numDeviceTypes = melville::numDeviceTypes;
+    static juce::String deviceTypeName (int t) { return melville::deviceTypeName (t); }
+    static juce::String deviceTypeWhat (int t) { return melville::deviceTypeWhat (t); }
+    static bool typeWants (int t, const juce::String& a) { return melville::typeWants (t, a); }
+    static int typeOf (const juce::String& a) { return melville::typeOf (a); }
 
-        std::unique_ptr<juce::XmlElement> toXml() const
-        {
-            auto x = std::make_unique<juce::XmlElement> ("OSC");
-            x->setAttribute ("enabled", enabled);
-            x->setAttribute ("listen", listenPort);
-            x->setAttribute ("reply", replyPort);
-            x->setAttribute ("replyHost", replyHost);
-            return x;
-        }
-        static Settings fromXml (const juce::XmlElement* x)
-        {
-            Settings s;
-            if (x == nullptr) return s;
-            s.enabled = x->getBoolAttribute ("enabled", true);
-            s.listenPort = juce::jlimit (1, 65535, x->getIntAttribute ("listen", 8100));
-            s.replyPort = juce::jlimit (1, 65535, x->getIntAttribute ("reply", 9100));
-            s.replyHost = x->getStringAttribute ("replyHost").trim();
-            return s;
-        }
-        juce::StringArray fixedHosts() const
-        {
-            auto a = juce::StringArray::fromTokens (replyHost, ",; ", "");
-            a.trim(); a.removeEmptyStrings();
-            return a;
-        }
+    /** A surface MELVILLE has heard from that isn't on the list: INTERFACE offers to add it. */
+    struct Candidate
+    {
+        int type = typeEverything;       // what it looks like, or said it is
+        bool announced = false;          // it introduced itself (/melville/hello)
+        juce::String name, serial;
+        juce::uint32 lastHeard = 0;
     };
 
     /** The one MELVILLE runs (for its settings), or nullptr. */
@@ -110,7 +108,8 @@ public:
         if (! socket->bindToPort (settings.listenPort)) { socket.reset(); failed = true; return false; }
         failed = false;
         port = settings.listenPort;
-        for (auto& h : settings.fixedHosts()) surfaceFor (h);
+        candidates.clear();
+        for (auto& d : settings.devices) surfaceFor (d.host, d.type, d.replyPort);
         startThread();
         startTimerHz (15);
         return true;
@@ -133,7 +132,31 @@ public:
         return port == 0 ? juce::String() : lanAddress() + ":" + juce::String (port);
     }
 
-    /** One line for the settings: off, listening where, which surfaces. */
+    /** Surfaces heard from that aren't on the list, newest first. */
+    std::vector<std::pair<juce::String, Candidate>> getCandidates() const
+    {
+        std::vector<std::pair<juce::String, Candidate>> v (candidates.begin(), candidates.end());
+        std::sort (v.begin(), v.end(), [] (auto& a, auto& b) { return a.second.lastHeard > b.second.lastHeard; });
+        return v;
+    }
+
+    /** When a listed device was last heard from ("", "just now", "12 s ago"). */
+    juce::String lastHeard (const juce::String& host) const
+    {
+        const auto it = surfaces.find (host);
+        if (it == surfaces.end() || it->second.lastHeard == 0) return {};
+        return ago (it->second.lastHeard);
+    }
+
+    static juce::String ago (juce::uint32 when)
+    {
+        const auto secs = (juce::Time::getMillisecondCounter() - when) / 1000u;
+        if (secs < 2)   return "just now";
+        if (secs < 120) return juce::String ((int) secs) + " s ago";
+        return juce::String ((int) (secs / 60u)) + " min ago";
+    }
+
+    /** One line for the settings: off, listening where, and what's been heard. */
     juce::String getStatus() const
     {
         if (! settings.enabled) return "Off.";
@@ -145,16 +168,18 @@ public:
             rest.remove (0);
             s << "(Also " << rest.joinIntoString (", ") << ".) ";
         }
-        if (surfaces.empty()) return s + "No surfaces yet.";
+        if (settings.devices.empty())
+            s << "No devices listed, so MELVILLE answers whatever it hears. ";
         juce::StringArray list;
-        const auto now = juce::Time::getMillisecondCounter();
-        for (auto& [host, sf] : surfaces)
-        {
-            if (sf.lastHeard == 0) { list.add (host + " (fixed)"); continue; }
-            const auto ago = (now - sf.lastHeard) / 1000u;
-            list.add (host + (ago < 2 ? juce::String (" just now") : " " + juce::String ((int) ago) + " s ago"));
-        }
-        return s + "Answering on port " + juce::String (settings.replyPort) + ": " + list.joinIntoString (", ") + ".";
+        for (auto& [host, c] : candidates)
+            list.add (host + " (" + deviceTypeName (c.type) + ", " + ago (c.lastHeard) + ")");
+        if (! list.isEmpty())
+            s << (settings.devices.empty() ? "Heard: " : "Heard but not on the list: ") << list.joinIntoString (", ") << ".";
+        else if (! settings.devices.empty())
+            s << "Answering the listed devices on port " << juce::String (settings.replyPort) << ".";
+        else
+            s << "Nothing heard yet.";
+        return s;
     }
 
 private:
@@ -175,21 +200,12 @@ private:
             if (msgs.empty()) continue;
             juce::MessageManager::callAsync ([safe = juce::WeakReference<OscControl> (this), msgs, from]
             {
-                if (auto* self = safe.get())
-                {
-                    if (self->settings.fixedHosts().isEmpty() || self->surfaces.count (from) > 0)
-                    {
-                        auto& sf = self->surfaceFor (from);
-                        sf.lastHeard = juce::jmax (1u, juce::Time::getMillisecondCounter());
-                        sf.resend = true;            // (and put every lamp right, the pressed one too)
-                    }
-                    for (auto& m : msgs) self->handle (m);
-                }
+                if (auto* self = safe.get()) self->heard (from, msgs);
             });
         }
     }
 
-    struct Msg { juce::String address; float value = 1.0f; bool hasValue = false; };
+    struct Msg { juce::String address; float value = 1.0f; bool hasValue = false; juce::StringArray strings; };
 
     static juce::uint32 be32 (const char* p) noexcept
     {
@@ -250,12 +266,64 @@ private:
                 }
                 else if (t == 'T') v = 1.0f;
                 else if (t == 'F') v = 0.0f;
-                else if (t == 's') { juce::String s; if (! readString (p, end, s)) break; num = false; }
+                else if (t == 's') { juce::String s; if (! readString (p, end, s)) break; m.strings.add (s); num = false; }
                 else break;
                 if (num && ! m.hasValue) { m.value = v; m.hasValue = true; }
             }
         }
         out.push_back (m);
+    }
+
+    //==========================================================================
+    // who sent it (message thread)
+
+    /** The listed device at this address, or nullptr. */
+    const Device* deviceAt (const juce::String& host) const
+    {
+        for (auto& d : settings.devices)
+            if (d.host.equalsIgnoreCase (host)) return &d;
+        return nullptr;
+    }
+
+    /** A packet from `from`: note who it was, and press what their type owns. With nothing listed
+        MELVILLE answers anyone; with a list, anything not on it is noted but does nothing. */
+    void heard (const juce::String& from, const std::vector<Msg>& msgs)
+    {
+        const auto now = juce::jmax (1u, juce::Time::getMillisecondCounter());
+        const auto* dev = deviceAt (from);
+        const bool listed = dev != nullptr;
+        const bool openHouse = settings.devices.empty();       // nothing listed yet: anyone may play
+        const int type = listed ? dev->type : typeEverything;
+
+        if (listed || openHouse)
+        {
+            auto& sf = surfaceFor (from, type, listed ? dev->replyPort : 0);
+            sf.lastHeard = now;
+            sf.resend = true;                        // (and put every lamp right, the pressed one too)
+        }
+        if (! listed)
+        {
+            // not on the list: remember it so INTERFACE can offer to add it
+            auto& c = candidates[from];
+            c.lastHeard = now;
+            for (auto& m : msgs)
+                if (m.address == "/melville/hello")
+                {
+                    if (! m.strings.isEmpty())
+                    {
+                        const auto t = m.strings[0].trim().toLowerCase();
+                        c.type = t.startsWith ("haw") ? typeHawthorne : t.startsWith ("tw") ? typeTwain : typeEverything;
+                        c.announced = true;
+                    }
+                    if (m.strings.size() > 1) c.name = m.strings[1].trim();
+                    if (m.strings.size() > 2) c.serial = m.strings[2].trim();
+                }
+                else if (! c.announced && c.type == typeEverything)
+                    c.type = typeOf (m.address);
+        }
+        if (! (listed || openHouse)) return;         // it may be heard, but it may not press anything
+        for (auto& m : msgs)
+            if (typeWants (type, m.address)) handle (m);
     }
 
     //==========================================================================
@@ -351,14 +419,16 @@ private:
     {
         std::unique_ptr<juce::OSCSender> sender = std::make_unique<juce::OSCSender>();
         bool connected = false, resend = true;
-        juce::uint32 lastHeard = 0;                  // 0: a fixed address
+        int type = typeEverything;
+        juce::uint32 lastHeard = 0;                  // 0: listed, not heard from yet
         std::map<juce::String, juce::String> sent;
     };
 
-    Surface& surfaceFor (const juce::String& host)
+    Surface& surfaceFor (const juce::String& host, int type, int replyPort)
     {
         auto& sf = surfaces[host];
-        if (! sf.connected) sf.connected = sf.sender->connect (host, settings.replyPort);
+        if (sf.type != type) { sf.type = type; sf.sent.clear(); sf.resend = true; }
+        if (! sf.connected) sf.connected = sf.sender->connect (host, replyPort > 0 ? replyPort : settings.replyPort);
         return sf;
     }
 
@@ -447,6 +517,10 @@ private:
 
     void timerCallback() override
     {
+        // a surface that has been quiet for an hour is gone
+        const auto gone = juce::Time::getMillisecondCounter() - 60u * 60u * 1000u;
+        for (auto it = candidates.begin(); it != candidates.end();)
+            it = it->second.lastHeard < gone ? candidates.erase (it) : std::next (it);
         if (surfaces.empty()) return;
         const bool everything = ++ticks % 30 == 0;   // (every two seconds: a surface that's just woken up)
         const auto now = state();
@@ -458,6 +532,7 @@ private:
             if (sf.connected)
                 for (auto& o : now)
                 {
+                    if (! typeWants (sf.type, o.address)) continue;
                     const auto v = o.isText ? o.text : juce::String (o.v, 4);
                     if (! (everything || sf.resend) && sf.sent[o.address] == v) continue;
                     sf.sent[o.address] = v;
@@ -475,6 +550,7 @@ private:
     bool failed = false, storeArmed = false;
     int ticks = 0;
     std::map<juce::String, Surface> surfaces;
+    std::map<juce::String, Candidate> candidates;
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (OscControl)
 };
