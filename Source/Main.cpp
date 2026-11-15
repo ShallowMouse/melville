@@ -1280,6 +1280,7 @@ public:
         //  WHITMAN_PREVIEW_DESK=<number> with WHITMAN_PREVIEW_STRIPS pictures one of WHITMAN's desks,
         //  HAWTHORNE_ONLY=27 in Hawthorne's engine tests checks the tapes against their datasheets;
         //  HAWTHORNE_OPEN_REEL=<reel> pictures that reel; with no master, its 2-track shows NO TAPE;
+        //  HAWTHORNE_MACHINE_GALLERY=<folder> with it pictures the machine room and the machine builder;
         //  ALCOTT_PREVIEW="1=Tape 400" puts an instrument in a slot for the pictures)
         if (const auto snaps = juce::SystemStats::getEnvironmentVariable ("MELVILLE_SNAPSHOT_DIR", {}); snaps.isNotEmpty())
         {
