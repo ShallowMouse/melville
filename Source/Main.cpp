@@ -584,27 +584,68 @@ public:
         };
         oscTimer.startTimer (500);
 
-        setSize (620, 1016);
+        // three tabs, so nothing needs scrolling to
+        static const char* names[3] = { "AUDIO & MIDI", "LATENCY", "CONTROL SURFACE" };
+        for (int i = 0; i < 3; ++i)
+        {
+            auto& t = tabs[i];
+            t.setButtonText (names[i]);
+            t.setClickingTogglesState (true);
+            t.setRadioGroupId (71);
+            t.setConnectedEdges ((i > 0 ? juce::Button::ConnectedOnLeft : 0) | (i < 2 ? juce::Button::ConnectedOnRight : 0));
+            t.setColour (juce::TextButton::buttonOnColourId, Colours::accent);
+            t.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+            t.setColour (juce::TextButton::textColourOffId, Colours::text);
+            t.onClick = [this, i] { if (tabs[i].getToggleState()) showPage (i); };
+            addAndMakeVisible (t);
+        }
+        tabs[0].setToggleState (true, juce::dontSendNotification);
+        setSize (620, 500);
+        showPage (juce::SystemStats::getEnvironmentVariable ("MELVILLE_INTERFACE_PAGE", "0").getIntValue());     // (for pictures)
+    }
+
+    /** 0 the interface and MIDI inputs, 1 the latency measurement, 2 the control surfaces. */
+    void showPage (int p)
+    {
+        page = juce::jlimit (0, 2, p);
+        tabs[page].setToggleState (true, juce::dontSendNotification);
+        selector.setVisible (page == 0);
+        for (auto* c : std::initializer_list<juce::Component*> { &caption, &help, &outBox, &inBox, &measure, &clear, &result })
+            c->setVisible (page == 1);
+        for (auto* c : std::initializer_list<juce::Component*> { &oscCaption, &oscHelp, &oscOn, &listenLabel, &listenPort, &replyLabel, &replyPort, &oscStatus,
+                                                                 &devicesCaption, &devicesHelp, &devices, &addDevice, &editDeviceButton, &removeDevice, &heardCaption })
+            c->setVisible (page == 2);
+        showHeard();
+        resized();
+        repaint();
     }
 
     void resized() override
     {
         auto r = getLocalBounds();
-        selector.setBounds (r.removeFromTop (440));
-        r.reduce (16, 6);
-        caption.setBounds (r.removeFromTop (22));
-        help.setBounds (r.removeFromTop (52));
-        r.removeFromTop (6);
-        auto row = r.removeFromTop (28);
-        outBox.setBounds (row.removeFromLeft (150)); row.removeFromLeft (8);
-        inBox.setBounds (row.removeFromLeft (150)); row.removeFromLeft (8);
-        measure.setBounds (row.removeFromLeft (100)); row.removeFromLeft (8);
-        clear.setBounds (row.removeFromLeft (70));
-        r.removeFromTop (8);
-        result.setBounds (r.removeFromTop (44));
+        auto bar = r.removeFromTop (44).reduced (16, 8);
+        const int tw = bar.getWidth() / 3;
+        for (int i = 0; i < 3; ++i) tabs[i].setBounds (i < 2 ? bar.removeFromLeft (tw) : bar);
 
-        r.removeFromTop (14);
-        oscTop = r.getY() - 7;
+        if (page == 0) { selector.setBounds (r); return; }
+        r.reduce (16, 10);
+        if (page == 1)
+        {
+            caption.setBounds (r.removeFromTop (22));
+            help.setBounds (r.removeFromTop (52));
+            r.removeFromTop (10);
+            auto labels = r.removeFromTop (18);
+            sendLabel = labels.removeFromLeft (150); labels.removeFromLeft (8);
+            returnLabel = labels.removeFromLeft (150);
+            auto row = r.removeFromTop (28);
+            outBox.setBounds (row.removeFromLeft (150)); row.removeFromLeft (8);
+            inBox.setBounds (row.removeFromLeft (150)); row.removeFromLeft (8);
+            measure.setBounds (row.removeFromLeft (100)); row.removeFromLeft (8);
+            clear.setBounds (row.removeFromLeft (70));
+            r.removeFromTop (12);
+            result.setBounds (r.removeFromTop (44));
+            return;
+        }
         oscCaption.setBounds (r.removeFromTop (22));
         oscHelp.setBounds (r.removeFromTop (38));
         r.removeFromTop (6);
@@ -615,21 +656,21 @@ public:
         replyLabel.setBounds (row1.removeFromLeft (76)); row1.removeFromLeft (6);
         replyPort.setBounds (row1.removeFromLeft (64));
         r.removeFromTop (8);
-        oscStatus.setBounds (r.removeFromTop (54));
+        oscStatus.setBounds (r.removeFromTop (40));
 
         r.removeFromTop (12);
         devicesTop = r.getY() - 6;
         devicesCaption.setBounds (r.removeFromTop (22));
         devicesHelp.setBounds (r.removeFromTop (48));
         r.removeFromTop (6);
-        devices.setBounds (r.removeFromTop (116));
-        r.removeFromTop (8);
-        auto row3 = r.removeFromTop (26);
+        auto row4 = r.removeFromBottom (26);
+        r.removeFromBottom (10);
+        auto row3 = r.removeFromBottom (26);
+        r.removeFromBottom (8);
+        devices.setBounds (r);
         addDevice.setBounds (row3.removeFromLeft (110)); row3.removeFromLeft (8);
         editDeviceButton.setBounds (row3.removeFromLeft (70)); row3.removeFromLeft (8);
         removeDevice.setBounds (row3.removeFromLeft (80));
-        r.removeFromTop (10);
-        auto row4 = r.removeFromTop (26);
         addHeard.setBounds (row4.removeFromRight (120)); row4.removeFromRight (10);
         heardCaption.setBounds (row4);
     }
@@ -638,9 +679,15 @@ public:
     {
         g.fillAll (Colours::bg);
         g.setColour (Colours::line);
-        g.drawHorizontalLine (440, 12.0f, (float) getWidth() - 12.0f);
-        g.drawHorizontalLine (oscTop, 12.0f, (float) getWidth() - 12.0f);
-        g.drawHorizontalLine (devicesTop, 12.0f, (float) getWidth() - 12.0f);
+        g.drawHorizontalLine (43, 12.0f, (float) getWidth() - 12.0f);
+        if (page == 2) g.drawHorizontalLine (devicesTop, 12.0f, (float) getWidth() - 12.0f);
+        if (page == 1)
+        {
+            g.setColour (Colours::textDim);
+            g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+            g.drawText ("SEND THE CLICK OUT OF", sendLabel, juce::Justification::centredLeft);
+            g.drawText ("LISTEN FOR IT ON", returnLabel, juce::Justification::centredLeft);
+        }
     }
 
 private:
@@ -704,7 +751,7 @@ private:
                                   + (heard.size() > 1 ? ", and " + juce::String ((int) heard.size() - 1) + " more" : juce::String()),
                               juce::dontSendNotification);
         addHeard.setButtonText ("ADD " + melville::OscControl::deviceTypeName (c.type));
-        addHeard.setVisible (true);
+        addHeard.setVisible (page == 2);
     }
 
     /** Add the surface just heard from, as it says it is. */
@@ -835,7 +882,9 @@ private:
     juce::Label devicesCaption, devicesHelp, heardCaption;
     DeviceList devices;
     juce::TextButton addDevice { "ADD DEVICE" }, editDeviceButton { "EDIT" }, removeDevice { "REMOVE" }, addHeard { "ADD" };
-    int oscTop = 0, devicesTop = 0;
+    int oscTop = 0, devicesTop = 0, page = 0;
+    juce::TextButton tabs[3];
+    juce::Rectangle<int> sendLabel, returnLabel;
     struct Every : juce::Timer { std::function<void()> f; void timerCallback() override { if (f) f(); } } oscTimer;
 };
 
@@ -1090,7 +1139,7 @@ public:
         if (interfaceWindow == nullptr)
         {
             interfaceWindow = std::make_unique<ToolWindow> (juce::String (juce::CharPointer_UTF8 ("MELVILLE \xc2\xb7 INTERFACE")));
-            frameWindow (*interfaceWindow, new ScrollingPanel (new InterfacePanel (hub), 900), true, "Interface", Colours::accent, loadIcon ("melville", 64),
+            frameWindow (*interfaceWindow, new InterfacePanel (hub), true, "Interface", Colours::accent, loadIcon ("melville", 64),
                          WindowTitleBar::minimise | WindowTitleBar::close);
             interfaceWindow->setResizable (false, false);
             interfaceWindow->centreWithSize (interfaceWindow->getWidth(), interfaceWindow->getHeight());
