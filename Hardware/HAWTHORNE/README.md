@@ -14,7 +14,7 @@ Adafruit MCP23017 Arduino Library, TM1637 (Avishay Orpaz), LiquidCrystal_I2C. Op
 ## Pairing and updates (from MELVILLE, after that)
 
 1. MELVILLE → INTERFACE → DEVICES: the box shows up as heard from; **ADD HAWTHORNE**.
-2. **PAIR**: the box's LCD asks *PAIR W/ MELVILLE?* — press **PLAY** on the box (STOP says no).
+2. **PAIR**: the box's LCD asks *PAIR MELVILLE?* — press **PLAY** on the box (STOP says no).
    The box makes a new key and gives it to MELVILLE; MELVILLE keeps it with the device.
 3. When MELVILLE carries newer firmware than the box runs, the list says so: **UPDATE**. The box
    shows the progress, checks the signature, and restarts into the new firmware. If anything goes

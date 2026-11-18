@@ -10,7 +10,7 @@
 
    MELVILLE: PAIRING AND UPDATES
      - every 3 s (with the sync) it introduces itself:  /melville/hello "hawthorne" name serial firmware
-     - pairing: MELVILLE asks (/melville/pair, from its DEVICES list); the LCD asks "PAIR WITH MELVILLE?"
+     - pairing: MELVILLE asks (/melville/pair, from its DEVICES list); the LCD asks "PAIR MELVILLE?"
        and PLAY says yes (STOP no, or wait 30 s). Yes makes a new key for this box and sends it back
        (/melville/paired serial key); the old one, and any MELVILLE that had it, stops working.
      - updates: MELVILLE posts the firmware to http://<this box>/update with the key in X-Hawthorne-Key.
@@ -733,7 +733,7 @@ void showLCD() {
   uint8_t lines[2][16];
 
   if (pairAsking) {                                    // MELVILLE asked to pair: the question, until it's answered
-    fillText(lines[0], 0, "PAIR W/ MELVILLE?");
+    fillText(lines[0], 0, "PAIR MELVILLE?");
     fillText(lines[1], 0, "PLAY=YES STOP=NO");
     for (int r = 0; r < 2; r++) {
       if (memcmp(lines[r], lastLcd[r], 16) == 0) continue;
