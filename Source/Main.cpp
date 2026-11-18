@@ -1652,6 +1652,24 @@ public:
 } // namespace melville
 
 //==============================================================================
+//==============================================================================
+/** Tooltips for every MELVILLE window (TWAIN, the patchbay, the bar...). A part that brings its own
+    tooltip window keeps it: this one says nothing over that part, so a tip never shows twice. */
+class StudioTooltips : public juce::TooltipWindow
+{
+public:
+    StudioTooltips() : juce::TooltipWindow (nullptr, 600) {}
+
+    juce::String getTipFor (juce::Component& c) override
+    {
+        for (auto* p = &c; p != nullptr; p = p->getParentComponent())
+            for (auto* child : p->getChildren())
+                if (child != this && dynamic_cast<juce::TooltipWindow*> (child) != nullptr)
+                    return {};
+        return juce::TooltipWindow::getTipFor (c);
+    }
+};
+
 class MelvilleApplication : public juce::JUCEApplication
 {
 public:
@@ -1773,6 +1791,7 @@ public:
         parts.push_back (parts::makePequod());
         parts.push_back (parts::makeAlcott());
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);   // (Hawthorne sets its own as the default)
+        tooltips = std::make_unique<StudioTooltips>();
 
         // every part gets its own taskbar button and icon, in the same order every time:
         // Hawthorne up front, the rest down on the taskbar ready to click
@@ -2025,6 +2044,7 @@ public:
         while (! parts.empty()) parts.pop_back();               // the parts close their devices
         hub = nullptr;
         props.closeFiles();
+        tooltips = nullptr;
         juce::LookAndFeel::setDefaultLookAndFeel (nullptr);
     }
 
@@ -2377,6 +2397,7 @@ private:
     std::unique_ptr<juce::FileChooser> sessionChooser;
     melville::MelvilleLookAndFeel lookAndFeel;
     std::unique_ptr<melville::Hub> hub;
+    std::unique_ptr<StudioTooltips> tooltips;
     std::vector<std::unique_ptr<melville::PartUI>> parts;
     std::vector<std::unique_ptr<melville::PartWindow>> windows;
     std::unique_ptr<melville::BarWindow> bar;
