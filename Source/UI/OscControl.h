@@ -17,6 +17,15 @@
 // sends, so adding it is one click.
 //   /melville/hello  "hawthorne" | "twain" | "all"[, name[, serial[, firmware]]]    a device announcing itself
 //
+// FINDING THE HARDWARE: a box takes its address from the router and calls out to the whole network
+// (a broadcast hello) until MELVILLE answers; whoever answers is MELVILLE to it. A listed box is known
+// by its serial, so when the router gives it a new address MELVILLE follows it there (once the old
+// address has gone quiet). Its SETTINGS (once paired) can fix its address, or MELVILLE's for it:
+//   /melville/settings/get                         -> /melville/settings/now  serial, what it has (BoxNetwork::fromReport)
+//   /melville/settings  key, BoxNetwork::toStrings -> /melville/settings/done serial "kept" | "trying",
+//                                                     or /melville/settings/refused serial why
+//   a network change is tried for 30 s; when MELVILLE hears the box again: /melville/settings/result serial "kept" | "reverted"
+//
 // PAIRING AND FIRMWARE (the hardware): PAIR in INTERFACE sends the box /melville/pair; the box asks
 // on its own display and, if PLAY is pressed there, answers /melville/paired serial key (or
 // /melville/pair/declined serial). MELVILLE keeps the key with the device: it's what lets it put new
@@ -226,6 +235,74 @@ public:
         return upload != nullptr && upload->host == host ? upload.get() : nullptr;
     }
 
+    //==========================================================================
+    // the hardware's own settings (its SETTINGS window), by serial
+
+    /** The listed device with this serial, or nullptr. */
+    const Device* deviceWithSerial (const juce::String& serial) const
+    {
+        if (serial.isEmpty()) return nullptr;
+        for (auto& d : settings.devices)
+            if (d.serial == serial) return &d;
+        return nullptr;
+    }
+
+    /** Ask the box what it has (the answer arrives as boxSettings()). */
+    bool askBoxSettings (const juce::String& serial)
+    {
+        const auto* d = deviceWithSerial (serial);
+        if (d == nullptr || socket == nullptr) return false;
+        auto& sf = surfaceFor (d->host, d->type, d->replyPort);
+        return sf.connected && sf.sender->send (juce::OSCMessage ("/melville/settings/get"));
+    }
+
+    /** What the box last said it has, or nullptr (not asked, or no answer yet). */
+    const BoxNetwork* boxSettings (const juce::String& serial) const
+    {
+        const auto it = boxes.find (serial);
+        return it == boxes.end() || ! it->second.reported ? nullptr : &it->second.net;
+    }
+
+    /** Send the box new settings (it has to be paired). Returns why not, or "" if they've gone. */
+    juce::String sendBoxSettings (const juce::String& serial, const BoxNetwork& n)
+    {
+        const auto* d = deviceWithSerial (serial);
+        if (d == nullptr) return "it isn't on the list";
+        if (d->key.isEmpty()) return "pair it first (PAIR, then PLAY on the box)";
+        if (const auto why = n.problem(); why.isNotEmpty()) return why;
+        if (socket == nullptr) return "OSC is off";
+        auto& sf = surfaceFor (d->host, d->type, d->replyPort);
+        juce::OSCMessage m ("/melville/settings");
+        m.addString (d->key);
+        for (auto& v : n.toStrings()) m.addString (v);
+        if (! sf.connected || ! sf.sender->send (m)) return "couldn't reach the box";
+        auto& b = boxes[serial];
+        b.state = boxSending;
+        b.since = juce::jmax (1u, juce::Time::getMillisecondCounter());
+        b.why.clear();
+        return {};
+    }
+
+    /** Where a settings change has got to ("" when nothing's happening). */
+    juce::String boxSettingsStatus (const juce::String& serial) const
+    {
+        const auto it = boxes.find (serial);
+        if (it == boxes.end()) return {};
+        const auto& b = it->second;
+        const auto secs = (juce::Time::getMillisecondCounter() - b.since) / 1000u;
+        switch (b.state)
+        {
+            case boxSending:  return secs < 5 ? "sending..." : "no answer from the box: is it on the network?";
+            case boxKept:     return "done";
+            case boxTrying:   return secs < 75 ? "the box is trying them: it keeps them if it can reach MELVILLE with them (up to 30 s)..."
+                                               : "no word from the box since: if it can't find MELVILLE, hold its reset button 5 s to start over";
+            case boxTriedOk:  return "kept: the box reaches MELVILLE with them";
+            case boxReverted: return "the box couldn't reach MELVILLE with them, so it went back to what it had";
+            case boxRefused:  return "refused: " + b.why;
+            default:          return {};
+        }
+    }
+
     /** One line for the settings: off, listening where, and what's been heard. */
     juce::String getStatus() const
     {
@@ -360,6 +437,9 @@ private:
     void heard (const juce::String& from, const std::vector<Msg>& msgs)
     {
         const auto now = juce::jmax (1u, juce::Time::getMillisecondCounter());
+        if (deviceAt (from) == nullptr)              // (a listed box with a new address: follow it)
+            for (auto& m : msgs)
+                if (m.address == "/melville/hello" && m.strings.size() > 2) { followMove (from, m.strings[2].trim(), now); break; }
         const auto* dev = deviceAt (from);
         const bool listed = dev != nullptr;
         const bool openHouse = settings.devices.empty();       // nothing listed yet: anyone may play
@@ -372,7 +452,19 @@ private:
             {
                 auto& i = info[from];
                 if (m.strings.size() > 2) i.serial = m.strings[2].trim();
+                if (listed && dev->serial.isEmpty() && i.serial.isNotEmpty())    // (listed before it said its name)
+                    for (auto& d : settings.devices)
+                        if (d.host.equalsIgnoreCase (from)) { d.serial = i.serial; if (onSettingsChanged) onSettingsChanged (settings); }
                 if (m.strings.size() > 3) i.firmware = m.strings[3].trim();
+            }
+            else if (listed && dev->serial.isNotEmpty() && m.address.startsWith ("/melville/settings/"))
+            {
+                auto& b = boxes[dev->serial];
+                const auto what = m.strings.size() > 1 ? m.strings[1].trim() : juce::String();
+                if (m.address == "/melville/settings/now")          b.reported = BoxNetwork::fromReport (m.strings, b.net) || b.reported;
+                else if (m.address == "/melville/settings/done")    { b.state = what == "trying" ? boxTrying : boxKept; b.since = now; }
+                else if (m.address == "/melville/settings/refused") { b.state = boxRefused; b.why = what; b.since = now; }
+                else if (m.address == "/melville/settings/result")  { b.state = what == "kept" ? boxTriedOk : boxReverted; b.since = now; b.reported = false; }
             }
             else if (listed && (m.address == "/melville/paired" || m.address == "/melville/pair/declined"))
             {
@@ -421,6 +513,29 @@ private:
         if (! (listed || openHouse)) return;         // it may be heard, but it may not press anything
         for (auto& m : msgs)
             if (typeWants (type, m.address)) handle (m);
+    }
+
+    /** A hello from `from` with the serial of a listed box at another address: the router has given it a
+        new one. Follow it - unless the old address is still talking (then it's another box claiming the
+        name, and stays a stranger). */
+    void followMove (const juce::String& from, const juce::String& serial, juce::uint32 now)
+    {
+        if (serial.isEmpty()) return;
+        for (auto& d : settings.devices)
+        {
+            if (d.serial != serial || d.host.equalsIgnoreCase (from)) continue;
+            const auto old = d.host;
+            if (const auto it = surfaces.find (old); it != surfaces.end() && it->second.lastHeard != 0 && now - it->second.lastHeard < 4000u)
+                return;
+            d.host = from;
+            surfaces.erase (old);
+            auto rekey = [&] (auto& map) { if (auto it = map.find (old); it != map.end()) { map[from] = it->second; map.erase (old); } };
+            rekey (info);
+            rekey (pairing);
+            candidates.erase (from);
+            if (onSettingsChanged) onSettingsChanged (settings);
+            return;
+        }
     }
 
     //==========================================================================
@@ -657,6 +772,9 @@ private:
     struct Pairing { PairState state = pairNone; juce::uint32 since = 0; };
     std::map<juce::String, Pairing> pairing;        // by address
     std::unique_ptr<FirmwareUpload> upload;         // the one going (or last done)
+    enum BoxState { boxNone, boxSending, boxKept, boxTrying, boxTriedOk, boxReverted, boxRefused };
+    struct Box { BoxNetwork net; bool reported = false; BoxState state = boxNone; juce::uint32 since = 0; juce::String why; };
+    std::map<juce::String, Box> boxes;              // by serial: what each box has, and a change going to it
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (OscControl)
 };

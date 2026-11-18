@@ -8,6 +8,21 @@
      - sends /melville/sync every 3 s so MELVILLE keeps answering (and to spot a lost link)
    In MELVILLE: INTERFACE window -> OSC on, listen 8100, reply 9100 (the defaults).
 
+   FINDING EACH OTHER (nothing to type in)
+     - the box takes its address from the router (DHCP), unless MELVILLE's SETTINGS give it a fixed one
+     - until it hears MELVILLE it calls out to the whole network (a broadcast hello + sync every 3 s,
+       and to the last MELVILLE it knew); MELVILLE sees it by its name and serial ("hawthorne-3f2a")
+     - the first answer from MELVILLE tells the box where MELVILLE is; it remembers that, and calls
+       out again if MELVILLE goes quiet. MELVILLE knows the box by its serial, so a new address from
+       the router doesn't matter to either side
+     - MELVILLE's SETTINGS (INTERFACE -> DEVICES, once the box is paired) can fix the box's address
+       and MELVILLE's (for networks a broadcast can't cross). A change is tried for 30 s: if the box
+       can't reach MELVILLE with it, it goes back to what it had.
+     - NETWORK RESET: a push button from GPIO12 to GND (no pull-up resistor: GPIO12 must be low as the
+       ESP32 starts). Held 5 s, running or at power-up: back to DHCP and finding MELVILLE by itself.
+       Held at power-up at all: the Arduino IDE's network upload is on for 10 minutes, with the box's
+       key as its password (MELVILLE's SETTINGS window shows it).
+
    MELVILLE: PAIRING AND UPDATES
      - every 3 s (with the sync) it introduces itself:  /melville/hello "hawthorne" name serial firmware
      - pairing: MELVILLE asks (/melville/pair, from its DEVICES list); the LCD asks "PAIR MELVILLE?"
@@ -18,8 +33,12 @@
        half): anything else is refused. It goes into the spare half of the flash, so an update that
        fails or breaks off leaves the old firmware running; the new one only starts if it all went in
        and the signature checked out.
-     - the Arduino IDE's network upload is only on in settings mode (GPIO12 held at boot), with this
-       box's key as the password (the settings page shows it).
+     - the Arduino IDE's network upload is only on for 10 minutes after a power-up with GPIO12 held
+       (see NETWORK RESET), with this box's key as the password.
+     - settings: /melville/settings/get -> /melville/settings/now (what it has); /melville/settings
+       key, ip mode, ip, mask, gateway, dns, melville mode, melville ip, backlight -> /melville/settings/done
+       serial "kept" | "trying" (or /melville/settings/refused serial why); after a try, once MELVILLE
+       is heard again: /melville/settings/result serial "kept" | "reverted"
 
    PANEL (as built: displays on the left, a 3 x 5 key grid on the right, six lit keys along the bottom)
 
@@ -71,7 +90,7 @@
        GPA0-GPA7  LOC 1-8 lamps (lit: that locate holds a place);  GPB0, GPB1  IN, OUT lamps (lit: set)
        Not fitted on the current panel; nothing else needs it.
 
-   SETTINGS MODE: hold GPIO12 to GND during boot -> web page at the IP on the LCD
+   NETWORK RESET: a push button from GPIO12 to GND, held 5 s (see FINDING EACH OTHER)
 
    The first install is by USB (board "WT32-ETH01 Ethernet Module", partition scheme "Default 4MB
    with spiffs", which has the two app slots updates need); MELVILLE does the rest.
@@ -107,28 +126,42 @@
 const char* DEVICE_NAME = "HAWTHORNE";              // what it is (named after the software it controls)
 String deviceHostname = "hawthorne";                // this unit on the network: "hawthorne-" + the last four
                                                     // hex digits of its MAC, so several can share a network
-const char* DEFAULT_MELVILLE_IP = "192.168.1.111";
-const char* DEFAULT_MELVILLE_HOSTNAME = "";
 const unsigned int DEFAULT_MELVILLE_PORT = 8100;    // MELVILLE listens here
 const unsigned int DEFAULT_DEVICE_PORT = 9100;      // MELVILLE answers here
 String deviceKey;                                   // this box's key: MELVILLE needs it to update it (made on first start,
                                                     // and again each time it's paired)
 const char* PREFS_NS = "hawthorne-tx";
 
-String melvilleIPStr = DEFAULT_MELVILLE_IP;
-String melvilleHostname = DEFAULT_MELVILLE_HOSTNAME;
 unsigned int melvillePort = DEFAULT_MELVILLE_PORT;
 unsigned int devicePort = DEFAULT_DEVICE_PORT;
 bool lcdBacklight = true;
 
-IPAddress melvilleIP;
-bool hostnameResolved = false;
+// The network: the box's own address (from the router, or fixed) and how it finds MELVILLE.
+struct NetConfig {
+  bool fixedIp = false;               // false: DHCP
+  String ip, mask, gateway, dns;      // (fixedIp)
+  bool fixedMelville = false;         // false: found by itself
+  String melvilleIp;                  // (fixedMelville)
+};
+NetConfig net;
+String melvilleLast;                  // the last MELVILLE the box heard from (where it calls first)
+bool trial = false;                   // trying new settings: kept if MELVILLE is heard within TRIAL_MS
+bool reverted = false;                // a try failed: tell MELVILLE when it's heard again
+bool trialKept = false;
+const unsigned long TRIAL_MS = 30000;
+unsigned long trialFrom = 0;
+
+IPAddress melvilleIP;                 // where MELVILLE is (0.0.0.0: not known yet)
 
 // ---------- PINS ----------
 const uint8_t CLK1_PIN = 32, DIO1_PIN = 33;         // 6-digit
 const uint8_t CLK2_PIN = 2,  DIO2_PIN = 4;          // 4-digit
 const uint8_t I2C_SDA = 14,  I2C_SCL = 15;
-const uint8_t CONFIG_MODE_PIN = 12;
+const uint8_t RESET_PIN = 12;                       // NETWORK RESET: a button to GND
+const unsigned long RESET_HOLD_MS = 5000;
+const unsigned long IDE_UPLOAD_MS = 10UL * 60UL * 1000UL;
+unsigned long resetDownMs = 0;
+unsigned long ideUploadUntil = 0;                    // the Arduino IDE's network upload is on until then
 
 const uint8_t MCP_ADDR[3] = { 0x20, 0x21, 0x22 };
 
@@ -150,6 +183,12 @@ const unsigned long SYNC_INTERVAL_MS = 3000;
 unsigned long lastSyncMs = 0;
 
 bool melvilleOnline() { return lastHeardMs != 0 && millis() - lastHeardMs < LINK_TIMEOUT_MS; }
+
+// Where to send: MELVILLE, once it's known; everyone on the network until then.
+IPAddress melvilleTarget() {
+  if (melvilleIP != IPAddress((uint32_t)0)) return melvilleIP;
+  return ETH.broadcastIP();
+}
 
 // ---------- KEYS ----------
 enum KeyKind : uint8_t { K_PRESS, K_HOLD, K_IN, K_OUT, K_LOC };
@@ -261,7 +300,6 @@ uint8_t udpBuf[1536];
 WebServer server(80);
 Preferences preferences;
 static volatile bool eth_connected = false;
-bool configMode = false;
 
 // ---------- DECLARATIONS ----------
 void sendOSC(const char* address, float value);
@@ -275,28 +313,58 @@ void updateLamps();
 void updateDisplays();
 void flash(const String& msg);
 void createLCDCustomChars();
-void setupWebServer();
-void handleRoot();
-void handleNetworkSave();
-void handleLCDSave();
-void handleReset();
-void handleNewKey();
 void newDeviceKey();
 void sendHello();
 void sendOSCStrings(const char* address, std::initializer_list<const char*> args);
+void sendOSCStringsTo(IPAddress to, const char* address, std::initializer_list<const char*> args);
 void setupUpdateServer();
+void heardFrom(IPAddress from);
+void handleSettings(const String* args, int n);
+void sendSettingsNow();
+void networkReset();
+void checkResetButton();
+void revertTrial();
+bool fromMelville(IPAddress from);
+bool parseIPAddress(const String& s, IPAddress& ip);
 
 // ---------- CONFIG ----------
+static void loadNet(const char* prefix, NetConfig& n) {
+  auto k = [prefix](const char* name) { return String(prefix) + name; };
+  n.fixedIp       = preferences.getBool(k("fixip").c_str(), false);
+  n.ip            = preferences.getString(k("ip").c_str(), "");
+  n.mask          = preferences.getString(k("mask").c_str(), "255.255.255.0");
+  n.gateway       = preferences.getString(k("gw").c_str(), "");
+  n.dns           = preferences.getString(k("dns").c_str(), "");
+  n.fixedMelville = preferences.getBool(k("fixmel").c_str(), false);
+  n.melvilleIp    = preferences.getString(k("melip").c_str(), "");
+}
+
+static void saveNet(const char* prefix, const NetConfig& n) {
+  auto k = [prefix](const char* name) { return String(prefix) + name; };
+  preferences.putBool(k("fixip").c_str(), n.fixedIp);
+  preferences.putString(k("ip").c_str(), n.ip);
+  preferences.putString(k("mask").c_str(), n.mask);
+  preferences.putString(k("gw").c_str(), n.gateway);
+  preferences.putString(k("dns").c_str(), n.dns);
+  preferences.putBool(k("fixmel").c_str(), n.fixedMelville);
+  preferences.putString(k("melip").c_str(), n.melvilleIp);
+}
+
 void loadConfig() {
   preferences.begin(PREFS_NS, true);
-  melvilleIPStr    = preferences.getString("mel_ip", DEFAULT_MELVILLE_IP);
-  melvilleHostname = preferences.getString("mel_host", DEFAULT_MELVILLE_HOSTNAME);
+  loadNet("n_", net);
+  melvilleLast     = preferences.getString("mel_last", preferences.getString("mel_ip", ""));   // (3.1: the address typed in)
   melvillePort     = preferences.getUInt("mel_port", DEFAULT_MELVILLE_PORT);
   devicePort       = preferences.getUInt("dev_port", DEFAULT_DEVICE_PORT);
   lcdBacklight     = preferences.getBool("backlight", true);
   deviceKey        = preferences.getString("dev_key", "");
+  trial            = preferences.getBool("trial", false);
+  reverted         = preferences.getBool("reverted", false);
   preferences.end();
   if (deviceKey.length() != 32) newDeviceKey();      // (first start)
+  IPAddress last;
+  if (net.fixedMelville && parseIPAddress(net.melvilleIp, last)) melvilleIP = last;
+  else if (parseIPAddress(melvilleLast, last)) melvilleIP = last;
 }
 
 // A fresh random key (128 bits, as hex), kept in flash. Whoever had the old one can no longer update this box.
@@ -315,15 +383,6 @@ static bool sameKey(const String& a, const String& b) {
   uint8_t diff = 0;
   for (unsigned i = 0; i < a.length(); i++) diff |= (uint8_t)(a.charAt(i) ^ b.charAt(i));
   return diff == 0;
-}
-
-void saveNetworkConfig() {
-  preferences.begin(PREFS_NS, false);
-  preferences.putString("mel_ip", melvilleIPStr);
-  preferences.putString("mel_host", melvilleHostname);
-  preferences.putUInt("mel_port", melvillePort);
-  preferences.putUInt("dev_port", devicePort);
-  preferences.end();
 }
 
 void saveLCDConfig() {
@@ -353,17 +412,10 @@ bool parseIPAddress(const String& s, IPAddress& ip) {
   return true;
 }
 
-bool resolveMelvilleHost() {
-  if (melvilleHostname.length() > 0) {
-    IPAddress resolved;
-    if (WiFi.hostByName(melvilleHostname.c_str(), resolved) == 1) {
-      melvilleIP = resolved;
-      hostnameResolved = true;
-      return true;
-    }
-  }
-  hostnameResolved = false;
-  return parseIPAddress(melvilleIPStr, melvilleIP);
+// (a mask has its ones first: 255.255.255.0 yes, 255.0.255.0 no)
+static bool validMask(const IPAddress& m) {
+  const uint32_t v = (uint32_t(m[0]) << 24) | (uint32_t(m[1]) << 16) | (uint32_t(m[2]) << 8) | uint32_t(m[3]);
+  return v != 0 && ((~v + 1) & ~v) == 0;
 }
 
 // ---------- ETHERNET ----------
@@ -374,6 +426,9 @@ void onEthEvent(arduino_event_id_t event) {
       break;
     case ARDUINO_EVENT_ETH_GOT_IP:
       eth_connected = true;
+      break;
+    case ARDUINO_EVENT_ETH_CONNECTED:
+      if (net.fixedIp) eth_connected = true;       // (a fixed address: up as soon as the cable is)
       break;
     case ARDUINO_EVENT_ETH_DISCONNECTED:
     case ARDUINO_EVENT_ETH_STOP:
@@ -401,15 +456,19 @@ void sendOSC(const char* address, float value) {
   buf[i++] = (u >> 16) & 0xFF;
   buf[i++] = (u >> 8) & 0xFF;
   buf[i++] = u & 0xFF;
-  Udp.beginPacket(melvilleIP, melvillePort);
+  Udp.beginPacket(melvilleTarget(), melvillePort);
   Udp.write(buf, i);
   Udp.endPacket();
 }
 
-// An OSC message of strings (hello, paired).
+// An OSC message of strings (hello, paired, settings), to MELVILLE (or everyone, until it's found).
 void sendOSCStrings(const char* address, std::initializer_list<const char*> args) {
+  sendOSCStringsTo(melvilleTarget(), address, args);
+}
+
+void sendOSCStringsTo(IPAddress to, const char* address, std::initializer_list<const char*> args) {
   if (!eth_connected) return;
-  uint8_t buf[256];
+  uint8_t buf[512];
   int i = 0;
   auto put = [&](const char* str) -> bool {
     const int len = strlen(str);
@@ -420,13 +479,13 @@ void sendOSCStrings(const char* address, std::initializer_list<const char*> args
     i += padded;
     return true;
   };
-  char tags[12] = ",";
+  char tags[24] = ",";
   int n = 1;
-  for (size_t k = 0; k < args.size() && n < 11; k++) tags[n++] = 's';
+  for (size_t k = 0; k < args.size() && n < 23; k++) tags[n++] = 's';
   tags[n] = 0;
   if (!put(address) || !put(tags)) return;
   for (const char* a : args) if (!put(a)) return;
-  Udp.beginPacket(melvilleIP, melvillePort);
+  Udp.beginPacket(to, melvillePort);
   Udp.write(buf, i);
   Udp.endPacket();
 }
@@ -434,6 +493,18 @@ void sendOSCStrings(const char* address, std::initializer_list<const char*> args
 // Who this is: MELVILLE's DEVICES list shows it, with its firmware.
 void sendHello() {
   sendOSCStrings("/melville/hello", { "hawthorne", DEVICE_NAME, deviceHostname.c_str(), FIRMWARE_VERSION });
+}
+
+// Not hearing MELVILLE (and not told where it is): call out to the whole network, and to the last
+// MELVILLE it knew (which a broadcast may not reach). Whichever answers is MELVILLE.
+void callOut() {
+  sendOSCStringsTo(ETH.broadcastIP(), "/melville/hello", { "hawthorne", DEVICE_NAME, deviceHostname.c_str(), FIRMWARE_VERSION });
+  sendOSCStringsTo(ETH.broadcastIP(), "/melville/sync", {});
+  IPAddress last;
+  if (parseIPAddress(melvilleLast, last) && last != ETH.broadcastIP()) {
+    sendOSCStringsTo(last, "/melville/hello", { "hawthorne", DEVICE_NAME, deviceHostname.c_str(), FIRMWARE_VERSION });
+    sendOSCStringsTo(last, "/melville/sync", {});
+  }
 }
 
 // ---------- OSC IN ----------
@@ -470,7 +541,11 @@ void parseOSCPacket(const uint8_t* p, int len, int depth) {
   if (i < 0) return;
   const char* addr = (const char*)p;
 
-  if (i >= len || p[i] != ',') { handleOSC(addr, 0, 1.0f, nullptr); return; }
+  if (i >= len || p[i] != ',') {
+    if (strcmp(addr, "/melville/settings/get") == 0) { lastHeardMs = millis() ? millis() : 1; sendSettingsNow(); return; }
+    handleOSC(addr, 0, 1.0f, nullptr);
+    return;
+  }
   int tagsAt = i;
   i = oscString(p, len, i);
   if (i < 0) return;
@@ -487,7 +562,24 @@ void parseOSCPacket(const uint8_t* p, int len, int depth) {
     handleOSC(addr, 'f', type == 'T' ? 1.0f : 0.0f, nullptr);
   } else if (type == 's') {
     if (oscString(p, len, i) < 0) return;      // (it's 0-terminated inside the packet)
+    if (strncmp(addr, "/melville/settings", 18) == 0) {   // (several strings)
+      String args[12];
+      int n = 0, at = i;
+      const char* tags = (const char*)(p + tagsAt + 1);
+      while (n < 12 && tags[n] == 's') {
+        const int next = oscString(p, len, at);
+        if (next < 0) break;
+        args[n++] = String((const char*)(p + at));
+        at = next;
+      }
+      lastHeardMs = millis() ? millis() : 1;
+      if (strcmp(addr, "/melville/settings") == 0) handleSettings(args, n);
+      return;
+    }
     handleOSC(addr, 's', 0.0f, (const char*)(p + i));
+  } else if (strcmp(addr, "/melville/settings/get") == 0) {
+    lastHeardMs = millis() ? millis() : 1;
+    sendSettingsNow();
   }
 }
 
@@ -814,20 +906,43 @@ void lcdTwoLines(const String& a, const String& b) {
 }
 
 // ---------- SETUP HELPERS ----------
-bool checkConfigMode() {
-  pinMode(CONFIG_MODE_PIN, INPUT_PULLUP);
-  delay(10);
-  if (digitalRead(CONFIG_MODE_PIN)) return false;
+// Back to DHCP and finding MELVILLE by itself (the key, the backlight and the rest stay).
+void networkReset() {
+  preferences.begin(PREFS_NS, false);
+  NetConfig fresh;
+  saveNet("n_", fresh);
+  saveNet("b_", fresh);
+  preferences.putString("mel_last", "");
+  preferences.remove("mel_ip");
+  preferences.putBool("trial", false);
+  preferences.putBool("reverted", false);
+  preferences.end();
+}
 
-  lcdTwoLines("CONFIG MODE", "Connecting...");
-  for (int i = 0; i < 3; i++) {
-    disp4.setBrightness(0x0f); disp6.setBrightness(0x0f);
-    disp4.showNumberDec(0, true); disp6.showNumberDec(0, true);
-    delay(200);
-    disp4.clear(); disp6.clear();
-    delay(200);
+// GPIO12 held: a countdown on the LCD, and after RESET_HOLD_MS the network goes back to its start.
+// Returns true if it reset.
+bool resetCountdown() {
+  if (digitalRead(RESET_PIN)) { resetDownMs = 0; return false; }
+  if (resetDownMs == 0) resetDownMs = millis() ? millis() : 1;
+  const unsigned long held = millis() - resetDownMs;
+  if (held >= RESET_HOLD_MS) {
+    networkReset();
+    lcdTwoLines("NETWORK RESET", "DHCP, FIND AUTO");
+    delay(1500);
+    return true;
   }
-  return true;
+  if (held > 300) {
+    const int left = (int)((RESET_HOLD_MS - held + 999) / 1000);
+    lcdTwoLines("NETWORK RESET?", "HOLD " + String(left) + "s...");
+  }
+  return false;
+}
+
+// Running: held 5 s, reset and start again; let go sooner, nothing.
+void checkResetButton() {
+  const bool wasDown = resetDownMs != 0;
+  if (resetCountdown()) ESP.restart();
+  if (wasDown && resetDownMs == 0) { lcd.clear(); memset(lastLcd, 0xFF, sizeof(lastLcd)); lcdDirty = true; }
 }
 
 void setupMCPs() {
@@ -889,92 +1004,240 @@ void setup() {
   lcdTwoLines(DEVICE_NAME, "TRANSPORT");
   delay(1000);
 
-  configMode = checkConfigMode();
   loadConfig();
+
+  // GPIO12 held at power-up: the Arduino IDE's network upload for a while; held 5 s, a network reset too
+  pinMode(RESET_PIN, INPUT_PULLUP);
+  delay(10);
+  if (!digitalRead(RESET_PIN)) {
+    ideUploadUntil = IDE_UPLOAD_MS;
+    lcdTwoLines("IDE UPLOAD ON", "HOLD 5s: RESET");
+    const unsigned long t0 = millis();
+    while (!digitalRead(RESET_PIN) && millis() - t0 < RESET_HOLD_MS + 500) {
+      if (resetCountdown()) { loadConfig(); break; }
+      delay(50);
+    }
+    resetDownMs = 0;
+  }
 
   setupMCPs();
   if (!mcpOk[0] || !mcpOk[1]) {
     lcdTwoLines("MCP ERROR!", String(mcpOk[0] ? "" : "0x20 ") + (mcpOk[1] ? "" : "0x21"));
-    if (!configMode) while (1) delay(100);
-    delay(2000);
+    while (1) { if (resetCountdown()) ESP.restart(); delay(100); }
   }
 
   Network.onEvent(onEthEvent);
   ETH.begin(ETH_PHY_LAN8720, 1, 23, 18, 16, ETH_CLOCK_GPIO0_IN);
   ETH.setHostname(deviceHostname.c_str());
+  if (net.fixedIp) {
+    IPAddress ip, mask, gw, dns;
+    if (parseIPAddress(net.ip, ip) && parseIPAddress(net.mask, mask)) {
+      if (!parseIPAddress(net.gateway, gw)) gw = IPAddress((uint32_t)0);
+      if (!parseIPAddress(net.dns, dns)) dns = gw;
+      ETH.config(ip, gw, mask, dns);
+    }
+  }
 
-  lcdTwoLines(DEVICE_NAME, "Wait Ethernet...");
-  while (!eth_connected) delay(250);
+  lcdTwoLines(DEVICE_NAME, trial ? "TRYING NEW SETUP" : "Wait Ethernet...");
+  while (!eth_connected) {
+    if (resetCountdown()) ESP.restart();
+    // (trying new settings and the network never comes up: go back)
+    if (trial && millis() > TRIAL_MS + 15000) revertTrial();
+    delay(100);
+  }
+  trialFrom = millis();
 
   if (MDNS.begin(deviceHostname.c_str())) MDNS.addService("osc", "udp", devicePort);
 
-  if (configMode) {
-    lcdTwoLines("Config Mode", ETH.localIP().toString());
-    setupWebServer();
-    // the Arduino IDE's network upload: only here (someone at the box held GPIO12), with the box's key
-    ArduinoOTA.setHostname(deviceHostname.c_str());
-    ArduinoOTA.setPassword(deviceKey.c_str());
-    ArduinoOTA.begin();
-    return;
-  }
-
-  lcdTwoLines("Resolving...", melvilleHostname.length() ? melvilleHostname : melvilleIPStr);
-  resolveMelvilleHost();
-
   lcdTwoLines(deviceHostname, ETH.localIP().toString());
-  delay(3000);
-  lcdTwoLines("> MELVILLE", melvilleIP.toString() + ":" + String(melvillePort));
   delay(1500);
+  lcdTwoLines("> MELVILLE", net.fixedMelville ? net.melvilleIp : String("FINDING..."));
+  delay(800);
 
   if (!lcdBacklight) lcd.noBacklight();
 
   Udp.begin(devicePort);
   delay(100);
   setupUpdateServer();                             // (MELVILLE's firmware updates)
+  if (ideUploadUntil) {
+    // the Arduino IDE's network upload: only after a power-up with GPIO12 held (someone at the box), with its key
+    ArduinoOTA.setHostname(deviceHostname.c_str());
+    ArduinoOTA.setPassword(deviceKey.c_str());
+    ArduinoOTA.begin();
+    ideUploadUntil = millis() + IDE_UPLOAD_MS;
+  }
 
   lcd.clear();
   memset(lastLcd, 0xFF, sizeof(lastLcd));
-  sendHello();
-  sendOSC("/melville/sync", 1.0f);               // (MELVILLE answers with every lamp and readout)
+  if (net.fixedMelville) { sendHello(); sendOSC("/melville/sync", 1.0f); }
+  else callOut();
   lastSyncMs = millis();
 }
 
 // ---------- LOOP ----------
 void loop() {
-  if (configMode) {
-    server.handleClient();
-    ArduinoOTA.handle();
-    return;
-  }
-
   server.handleClient();                          // (a firmware update from MELVILLE)
+  if (ideUploadUntil) {
+    if ((long)(millis() - ideUploadUntil) < 0) ArduinoOTA.handle();
+    else { ArduinoOTA.end(); ideUploadUntil = 0; }
+  }
+  checkResetButton();
+  if (resetDownMs) return;                        // (the countdown has the LCD)
+
   if (pairAsking && millis() - pairAskedMs > PAIR_WAIT_MS) {   // (no answer: no)
     pairAsking = false;
     sendOSCStrings("/melville/pair/declined", { deviceHostname.c_str() });
     flash("NOT PAIRED");
   }
+  // trying new settings: MELVILLE heard - keep them; not heard in time - go back
+  if (trial && !trialKept && millis() - trialFrom > TRIAL_MS) revertTrial();
 
   for (int n = 0; n < 16; n++) {                  // (a sync answer is ~40 small packets)
     int size = Udp.parsePacket();
     if (size <= 0) break;
     if (size > (int)sizeof(udpBuf)) size = sizeof(udpBuf);
+    const IPAddress from = Udp.remoteIP();
     int got = Udp.read(udpBuf, size);
-    if (got > 0) parseOSCPacket(udpBuf, got, 0);
+    if (got <= 0) continue;
+    if (!fromMelville(from)) continue;            // (another MELVILLE, or something else: not ours)
+    const unsigned long before = lastHeardMs;
+    parseOSCPacket(udpBuf, got, 0);
+    if (lastHeardMs != before) heardFrom(from);
   }
 
   scanKeys();
 
   const unsigned long now = millis();
   if (now - lastSyncMs >= SYNC_INTERVAL_MS) {
-    // (if MELVILLE was found by hostname and has gone quiet, look it up again: its address may have changed)
-    if (hostnameResolved && !melvilleOnline() && lastHeardMs != 0) resolveMelvilleHost();
-    sendHello();
-    sendOSC("/melville/sync", 1.0f);
+    if (melvilleOnline() || net.fixedMelville) {
+      sendHello();
+      sendOSC("/melville/sync", 1.0f);
+    } else {
+      callOut();                                  // (MELVILLE gone quiet, or never found: ask everyone)
+    }
     lastSyncMs = now;
   }
 
   updateLamps();
   updateDisplays();
+}
+
+// Is this packet from MELVILLE? Told where MELVILLE is: only from there. Finding it by itself: from
+// the one it's talking to, or from anyone while it isn't hearing MELVILLE (that one is MELVILLE now).
+bool fromMelville(IPAddress from) {
+  if (net.fixedMelville) {
+    IPAddress fixed;
+    return parseIPAddress(net.melvilleIp, fixed) && from == fixed;
+  }
+  return !melvilleOnline() || from == melvilleIP;
+}
+
+// MELVILLE answered from here: remember it (in flash only when it moves), and finish a try.
+void heardFrom(IPAddress from) {
+  if (!net.fixedMelville && from != melvilleIP) {
+    melvilleIP = from;
+    const String a = from.toString();
+    if (a != melvilleLast) {
+      melvilleLast = a;
+      preferences.begin(PREFS_NS, false);
+      preferences.putString("mel_last", melvilleLast);
+      preferences.end();
+    }
+  }
+  if (trial && !trialKept) {                      // the new settings reach MELVILLE: keep them
+    trialKept = true;
+    trial = false;
+    preferences.begin(PREFS_NS, false);
+    preferences.putBool("trial", false);
+    preferences.end();
+    sendOSCStrings("/melville/settings/result", { deviceHostname.c_str(), "kept" });
+    flash("NEW SETUP KEPT");
+  }
+  if (reverted) {
+    reverted = false;
+    preferences.begin(PREFS_NS, false);
+    preferences.putBool("reverted", false);
+    preferences.end();
+    sendOSCStrings("/melville/settings/result", { deviceHostname.c_str(), "reverted" });
+    flash("WENT BACK");
+  }
+}
+
+// The new settings never reached MELVILLE: put the old ones back and start again with them.
+void revertTrial() {
+  preferences.begin(PREFS_NS, false);
+  NetConfig old;
+  loadNet("b_", old);
+  saveNet("n_", old);
+  preferences.putBool("trial", false);
+  preferences.putBool("reverted", true);
+  preferences.end();
+  lcdTwoLines("NO MELVILLE", "GOING BACK...");
+  delay(1500);
+  ESP.restart();
+}
+
+// ---------- SETTINGS (from MELVILLE's SETTINGS window) ----------
+static const char* yesNo(bool b) { return b ? "fixed" : "auto"; }
+
+// What the box has: serial, its address now (and how it got it), the fixed address it would use,
+// how it finds MELVILLE, the backlight and the firmware.
+void sendSettingsNow() {
+  const String ip = ETH.localIP().toString(), mask = ETH.subnetMask().toString(), gw = ETH.gatewayIP().toString(),
+               dns = ETH.dnsIP().toString(), mel = melvilleIP.toString();
+  sendOSCStrings("/melville/settings/now", { deviceHostname.c_str(),
+                                             net.fixedIp ? "fixed" : "dhcp", ip.c_str(), mask.c_str(), gw.c_str(), dns.c_str(),
+                                             net.ip.c_str(), net.mask.c_str(), net.gateway.c_str(), net.dns.c_str(),
+                                             yesNo(net.fixedMelville), net.melvilleIp.c_str(), mel.c_str(),
+                                             lcdBacklight ? "on" : "off", FIRMWARE_VERSION });
+}
+
+void refuse(const char* why) {
+  sendOSCStrings("/melville/settings/refused", { deviceHostname.c_str(), why });
+}
+
+// key, "dhcp" | "fixed", ip, mask, gateway, dns, "auto" | "fixed", melville ip, "on" | "off"
+void handleSettings(const String* a, int n) {
+  if (n < 9) { refuse("MELVILLE sent too little"); return; }
+  if (!sameKey(a[0], deviceKey)) { refuse("not paired with this MELVILLE: pair it again"); return; }
+  NetConfig want;
+  want.fixedIp = a[1] == "fixed";
+  want.ip = a[2]; want.mask = a[3]; want.gateway = a[4]; want.dns = a[5];
+  want.fixedMelville = a[6] == "fixed";
+  want.melvilleIp = a[7];
+  IPAddress t;
+  if (want.fixedIp) {
+    if (!parseIPAddress(want.ip, t)) { refuse("the box's address isn't an address"); return; }
+    if (!parseIPAddress(want.mask, t) || !validMask(t)) { refuse("the subnet mask isn't one"); return; }
+    if (want.gateway.length() && !parseIPAddress(want.gateway, t)) { refuse("the gateway isn't an address"); return; }
+    if (want.dns.length() && !parseIPAddress(want.dns, t)) { refuse("the DNS server isn't an address"); return; }
+  }
+  if (want.fixedMelville && !parseIPAddress(want.melvilleIp, t)) { refuse("MELVILLE's address isn't an address"); return; }
+
+  // the backlight: straight away
+  const bool light = a[8] != "off";
+  if (light != lcdBacklight) {
+    lcdBacklight = light;
+    if (lcdAvailable) { if (lcdBacklight) lcd.backlight(); else lcd.noBacklight(); }
+    saveLCDConfig();
+  }
+
+  const bool same = want.fixedIp == net.fixedIp && want.fixedMelville == net.fixedMelville
+                 && (!want.fixedIp || (want.ip == net.ip && want.mask == net.mask && want.gateway == net.gateway && want.dns == net.dns))
+                 && (!want.fixedMelville || want.melvilleIp == net.melvilleIp);
+  if (same) { sendOSCStrings("/melville/settings/done", { deviceHostname.c_str(), "kept" }); return; }
+
+  // the network: tried on a restart, kept only if MELVILLE is heard with it
+  preferences.begin(PREFS_NS, false);
+  saveNet("b_", net);
+  saveNet("n_", want);
+  preferences.putBool("trial", true);
+  preferences.putBool("reverted", false);
+  preferences.end();
+  sendOSCStrings("/melville/settings/done", { deviceHostname.c_str(), "trying" });
+  lcdTwoLines("NEW NETWORK", "RESTARTING...");
+  delay(600);
+  ESP.restart();
 }
 
 // ---------- FIRMWARE UPDATES (from MELVILLE) ----------
@@ -1064,156 +1327,6 @@ void setupUpdateServer() {
   server.begin();
 }
 
-// ---------- WEB SERVER (settings mode) ----------
-void setupWebServer() {
-  server.on("/", handleRoot);
-  server.on("/network", HTTP_POST, handleNetworkSave);
-  server.on("/lcd", HTTP_POST, handleLCDSave);
-  server.on("/reset", HTTP_POST, handleReset);
-  server.on("/newkey", HTTP_POST, handleNewKey);
-  server.begin();
-}
-
-static String htmlEscape(const String& s) {
-  String o;
-  for (unsigned int i = 0; i < s.length(); i++) {
-    char c = s.charAt(i);
-    if (c == '&') o += "&amp;"; else if (c == '<') o += "&lt;"; else if (c == '>') o += "&gt;";
-    else if (c == '\'') o += "&#39;"; else if (c == '"') o += "&quot;"; else o += c;
-  }
-  return o;
-}
-
 static String pinName(uint8_t chip, uint8_t pin) {
   return String("MCP") + String(chip + 1) + " " + (pin < 8 ? "GPA" : "GPB") + String(pin % 8);
-}
-
-void handleRoot() {
-  String html;
-  html.reserve(9000);
-  html += "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
-  html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
-  html += "<title>[HAWTHORNE] Transport Controller</title><style>";
-  // PEQUOD style - warm amber palette
-  html += "*{box-sizing:border-box}";
-  html += "body{font-family:Roboto,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:900px;margin:0 auto;padding:2rem;background:#1a1a1a;color:#e8e8e8}";
-  html += "h1{font-family:'Courier New',Courier,monospace;font-size:2.5rem;color:#f4b942;margin-bottom:.5rem;letter-spacing:.1em;text-transform:uppercase;border-bottom:2px solid #8b6f47;padding-bottom:1rem}";
-  html += "h2{font-family:'Courier New',Courier,monospace;font-size:1.3rem;color:#f4b942;margin-top:3rem;margin-bottom:1.5rem;letter-spacing:.05em;text-transform:uppercase;border-bottom:2px solid #8b6f47;padding-bottom:.5rem}";
-  html += "h3{font-family:'Courier New',Courier,monospace;font-size:1rem;margin-bottom:1rem;letter-spacing:.05em;text-transform:uppercase}";
-  html += ".card{background:#8b6f47;padding:1.5rem;margin:1rem 0;border-radius:4px;border:1px solid #a07f57;border-left:4px solid #f4b942}";
-  html += "label{display:block;margin:1rem 0 .5rem;color:#e8e8e8;font-size:.95rem}";
-  html += "input{width:100%;padding:.75rem 1rem;background:#252525;border:1px solid #8b6f47;color:#e8e8e8;border-radius:4px;font-size:.95rem}";
-  html += "input:focus{outline:none;border:2px solid #f4b942}input:disabled{background:#222;color:#8b6f47}";
-  html += ".btn{font-family:'Courier New',Courier,monospace;background:#f4b942;color:#1a1a1a;padding:.75rem 2rem;border:none;cursor:pointer;font-size:.9rem;font-weight:bold;letter-spacing:.1em;text-transform:uppercase;border-radius:4px;margin:1rem .5rem 1rem 0}";
-  html += ".btn:hover{filter:brightness(1.1)}.btn-danger{background:#e3a391}";
-  html += ".help{color:#d8c8a8;font-size:.85rem;margin:.5rem 0 1rem;line-height:1.5}";
-  html += "code{font-family:'Courier New',Courier,monospace;background:#252525;padding:.2rem .5rem;border-radius:3px;color:#f4b942}";
-  html += "table{width:100%;border-collapse:collapse;font-family:'Courier New',Courier,monospace;font-size:.85rem}";
-  html += "th,td{text-align:left;padding:.45rem .6rem;border-bottom:1px solid #3a3a3a}th{color:#f4b942}";
-  html += ".version{font-family:'Courier New',Courier,monospace;color:#8b6f47;font-size:.85rem;text-align:center;margin-top:3rem}";
-  html += "</style></head><body>";
-
-  html += "<h1>[HAWTHORNE]</h1>";
-  html += "<div style='font-family:\"Courier New\",monospace;color:#b0b0b0;margin-bottom:2rem'>Transport controller for Hawthorne &middot; via MELVILLE</div>";
-
-  // Network
-  html += "<h2>MELVILLE Connection</h2><form onsubmit='return post(event,\"/network\")'>";
-  html += "<div class='card'><h3>MELVILLE</h3>";
-  html += "<label>MELVILLE PC IP address:</label>";
-  html += "<input type='text' name='mel_ip' value='" + htmlEscape(melvilleIPStr) + "' maxlength='15' required>";
-  html += "<label>MELVILLE PC hostname (optional):</label>";
-  html += "<input type='text' name='mel_host' value='" + htmlEscape(melvilleHostname) + "' maxlength='64' placeholder='studio-pc.local'>";
-  html += "<p class='help'>Blank: use the IP address. If the name can't be found at boot, the IP is used.</p>";
-  html += "<label>MELVILLE OSC listen port:</label>";
-  html += "<input type='number' name='mel_port' value='" + String(melvillePort) + "' min='1' max='65535' required>";
-  html += "<label>Reply port (this device listens here):</label>";
-  html += "<input type='number' name='dev_port' value='" + String(devicePort) + "' min='1' max='65535' required>";
-  html += "<p class='help'>These must match MELVILLE's INTERFACE window &rarr; OSC: listen <code>8100</code>, reply <code>9100</code> by default.</p>";
-  html += "</div><div class='card'><h3>This device</h3>";
-  String lc = deviceHostname;
-  html += "<label>Hostname (fixed, from this unit's MAC):</label><input type='text' value='" + deviceHostname + "' disabled>";
-  html += "<p class='help'>mDNS: <code>" + lc + ".local</code> &middot; IP: <code>" + ETH.localIP().toString() + "</code></p></div>";
-  html += "<button type='submit' class='btn'>Save Connection</button></form>";
-
-  // Display
-  html += "<h2>Display</h2><form onsubmit='return post(event,\"/lcd\")'><div class='card'>";
-  html += "<label style='display:flex;align-items:center;gap:10px;cursor:pointer'>";
-  html += "<input type='checkbox' id='backlight' style='width:auto' " + String(lcdBacklight ? "checked" : "") + ">";
-  html += "<span>LCD backlight on</span></label>";
-  html += "<p class='help'>The I2C backpack only switches the backlight on or off.</p></div>";
-  html += "<button type='submit' class='btn'>Save Display</button></form>";
-
-  // Key map
-  // Pairing and firmware
-  html += "<h2>Pairing &amp; Firmware</h2><div class='card'>";
-  html += "<label>Firmware:</label><input type='text' value='" + String(FIRMWARE_VERSION) + "' disabled>";
-  html += "<label>This box's key:</label><input type='text' value='" + deviceKey + "' disabled style='font-family:\"Courier New\",monospace'>";
-  html += "<p class='help'>MELVILLE gets this key when you pair the box from its DEVICES list, and needs it to update the firmware. "
-          "It's also the password for the Arduino IDE's network upload, which only works in this settings mode.</p>";
-  html += "<button type='button' class='btn btn-danger' onclick='newKey()'>New Key</button>";
-  html += "<p class='help'>A new key unpairs MELVILLE: pair the box again from MELVILLE afterwards.</p></div>";
-
-  html += "<h2>Key Map</h2><div class='card' style='background:#252525;border-color:#3a3a3a'>";
-  html += "<table><tr><th>Key</th><th>Pin</th><th>Sends</th></tr>";
-  for (uint8_t k = 0; k < NUM_KEYS; k++) {
-    String sends = KEYS[k].addr;
-    if (KEYS[k].kind == K_HOLD) sends += " (1 held / 0 released)";
-    if (KEYS[k].kind == K_LOC) sends += " &middot; held: /hawthorne/store/" + String(KEYS[k].loc);
-    if (KEYS[k].kind == K_IN)  sends = "/hawthorne/goto/in &middot; held: /hawthorne/in";
-    if (KEYS[k].kind == K_OUT) sends = "/hawthorne/goto/out &middot; held: /hawthorne/out";
-    html += "<tr><td>" + String(KEYS[k].label) + "</td><td>" + pinName(KEYS[k].chip, KEYS[k].pin) + "</td><td>" + sends + "</td></tr>";
-  }
-  html += "</table><p class='help'>The key layout is set in the firmware (the <code>KEYS</code> table).</p></div>";
-  html += "<p class='help'>MCP chips found: 0x20 " + String(mcpOk[0] ? "&#10003;" : "&#10007;") + " &middot; 0x21 " + String(mcpOk[1] ? "&#10003;" : "&#10007;") + " &middot; 0x22 (LOC lamps, optional) " + String(mcpOk[2] ? "&#10003;" : "&#10007;") + "</p>";
-
-  html += "<button type='button' class='btn btn-danger' onclick='resetAll()'>Reset to Defaults</button>";
-  html += "<div class='version'>HAWTHORNE TRANSPORT CONTROLLER v3.0 | PEQUOD DESIGN SYSTEM</div>";
-
-  html += "<script>";
-  html += "function post(e,url){e.preventDefault();const f=new FormData(e.target);";
-  html += "const b=document.getElementById('backlight');if(url=='/lcd')f.set('backlight',b.checked?'true':'false');";
-  html += "fetch(url,{method:'POST',body:f}).then(r=>r.text().then(t=>alert(r.ok?'Saved. Restart the device (without GPIO12 held) to use it.':'Error: '+t)));return false}";
-  html += "function newKey(){if(confirm('Make a new key? MELVILLE will need to pair with this box again.'))fetch('/newkey',{method:'POST'}).then(()=>location.reload())}";
-  html += "function resetAll(){if(confirm('Reset all settings to defaults?'))fetch('/reset',{method:'POST'}).then(()=>location.reload())}";
-  html += "</script></body></html>";
-
-  server.send(200, "text/html", html);
-}
-
-void handleNetworkSave() {
-  String ip = server.hasArg("mel_ip") ? server.arg("mel_ip") : melvilleIPStr;
-  ip.trim();
-  IPAddress test;
-  if (!parseIPAddress(ip, test)) { server.send(400, "text/plain", "Invalid IP address"); return; }
-  long mp = server.hasArg("mel_port") ? server.arg("mel_port").toInt() : melvillePort;
-  long dp = server.hasArg("dev_port") ? server.arg("dev_port").toInt() : devicePort;
-  if (mp < 1 || mp > 65535 || dp < 1 || dp > 65535) { server.send(400, "text/plain", "Invalid port"); return; }
-
-  melvilleIPStr = ip;
-  if (server.hasArg("mel_host")) { melvilleHostname = server.arg("mel_host"); melvilleHostname.trim(); }
-  melvillePort = mp;
-  devicePort = dp;
-  saveNetworkConfig();
-  server.send(200, "text/plain", "OK");
-}
-
-void handleLCDSave() {
-  if (server.hasArg("backlight")) lcdBacklight = server.arg("backlight") == "true";
-  if (lcdAvailable) { if (lcdBacklight) lcd.backlight(); else lcd.noBacklight(); }
-  saveLCDConfig();
-  server.send(200, "text/plain", "OK");
-}
-
-void handleNewKey() {
-  newDeviceKey();
-  ArduinoOTA.setPassword(deviceKey.c_str());
-  server.send(200, "text/plain", "OK");
-}
-
-void handleReset() {
-  preferences.begin(PREFS_NS, false);
-  preferences.clear();
-  preferences.end();
-  loadConfig();
-  server.send(200, "text/plain", "OK");
 }

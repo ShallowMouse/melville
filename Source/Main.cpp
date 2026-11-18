@@ -453,7 +453,7 @@ public:
         g.setColour (Colours::text);
         g.drawText (d.name.isNotEmpty() ? d.name : d.host, r.removeFromLeft (150), juce::Justification::centredLeft);
         g.setColour (Colours::textDim);
-        g.drawText (d.host, r.removeFromLeft (112), juce::Justification::centredLeft);
+        g.drawText (d.serial.isNotEmpty() ? d.serial : d.host, r.removeFromLeft (112), juce::Justification::centredLeft);
         juce::String heard;
         auto* o = melville::OscControl::instance();
         if (o != nullptr) heard = o->lastHeard (d.host);
@@ -495,6 +495,228 @@ private:
     std::vector<Device> devices;
 };
 
+/** A paired hardware box's network settings (its SETTINGS key in INTERFACE): its own address - from
+    the router or fixed - and how it finds MELVILLE - by itself or at a fixed address - and its LCD's
+    backlight. It asks the box what it has, and sends a change with the key the box gave at pairing.
+    The box tries a network change for 30 s and keeps it only if it can still reach MELVILLE. */
+class BoxSettingsPanel : public juce::Component, private juce::Timer
+{
+public:
+    BoxSettingsPanel (juce::String boxSerial, juce::String boxName) : serial (std::move (boxSerial)), name (std::move (boxName))
+    {
+        auto caption = [this] (juce::Label& l, const juce::String& t)
+        {
+            l.setText (t, juce::dontSendNotification);
+            l.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
+            l.setColour (juce::Label::textColourId, Colours::accent);
+            addAndMakeVisible (l);
+        };
+        caption (addressCaption, "THIS BOX'S ADDRESS");
+        caption (melvilleCaption, "FINDING MELVILLE");
+        caption (otherCaption, "THE BOX");
+        auto radio = [this] (juce::ToggleButton& b, const juce::String& t, int group)
+        {
+            b.setButtonText (t);
+            b.setRadioGroupId (group);
+            b.setClickingTogglesState (true);
+            b.onClick = [this] { enableFields(); };
+            addAndMakeVisible (b);
+        };
+        radio (dhcp, "From the router (DHCP)", 1);
+        radio (fixedIp, "Fixed", 1);
+        radio (findAuto, "By itself (it calls out on the network)", 2);
+        radio (findFixed, "At a fixed address (for a network a call-out can't cross)", 2);
+        for (auto* l : { &ipLabel, &maskLabel, &gwLabel, &dnsLabel, &melLabel })
+        {
+            l->setColour (juce::Label::textColourId, Colours::text);
+            l->setJustificationType (juce::Justification::centredRight);
+            addAndMakeVisible (l);
+        }
+        ipLabel.setText ("Address", juce::dontSendNotification);
+        maskLabel.setText ("Subnet mask", juce::dontSendNotification);
+        gwLabel.setText ("Gateway", juce::dontSendNotification);
+        dnsLabel.setText ("DNS", juce::dontSendNotification);
+        melLabel.setText ("MELVILLE at", juce::dontSendNotification);
+        for (auto* e : { &ip, &mask, &gateway, &dns, &melville })
+        {
+            e->setInputRestrictions (15, "0123456789.");
+            e->setJustification (juce::Justification::centredLeft);
+            addAndMakeVisible (e);
+        }
+        for (auto* l : { &ipNow, &melNow, &status, &keyLine })
+        {
+            l->setColour (juce::Label::textColourId, Colours::textDim);
+            l->setJustificationType (juce::Justification::centredLeft);
+            addAndMakeVisible (l);
+        }
+        status.setJustificationType (juce::Justification::topLeft);
+        status.setColour (juce::Label::textColourId, Colours::text);
+        backlight.setButtonText ("LCD backlight");
+        addAndMakeVisible (backlight);
+        showKey.setButtonText ("SHOW");
+        showKey.setTooltip ("The box's key: the password for the Arduino IDE's network upload (on for 10 minutes after the box "
+                            "is switched on with its reset button held)");
+        showKey.onClick = [this] { keyShown = ! keyShown; showKeyLine(); };
+        addAndMakeVisible (showKey);
+        apply.setButtonText ("APPLY");
+        apply.onClick = [this] { send(); };
+        addAndMakeVisible (apply);
+        close.setButtonText ("CLOSE");
+        close.onClick = [this] { if (auto* w = findParentComponentOfClass<juce::DialogWindow>()) w->exitModalState (0); };
+        addAndMakeVisible (close);
+        help.setText ("Leave both on their own unless the network needs it. A change to the network is tried for 30 s: if the box "
+                      "can't reach MELVILLE with it, it goes back to what it had. Its reset button (GPIO12, held 5 s) also puts "
+                      "it back to the router's address and finding MELVILLE by itself.", juce::dontSendNotification);
+        help.setJustificationType (juce::Justification::topLeft);
+        help.setColour (juce::Label::textColourId, Colours::textDim);
+        addAndMakeVisible (help);
+
+        dhcp.setToggleState (true, juce::dontSendNotification);
+        findAuto.setToggleState (true, juce::dontSendNotification);
+        showKeyLine();
+        setControlsEnabled (false);
+        status.setText ("Asking the box...", juce::dontSendNotification);
+        ask();
+        startTimer (250);
+        setSize (560, 520);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (18, 14);
+        auto field = [&r] (juce::Label& l, juce::TextEditor& e, juce::Label* note)
+        {
+            auto row = r.removeFromTop (26);
+            row.removeFromLeft (24);
+            l.setBounds (row.removeFromLeft (96));
+            row.removeFromLeft (8);
+            e.setBounds (row.removeFromLeft (140));
+            if (note != nullptr) { row.removeFromLeft (10); note->setBounds (row); }
+            r.removeFromTop (4);
+        };
+        addressCaption.setBounds (r.removeFromTop (22));
+        auto row = r.removeFromTop (24);
+        dhcp.setBounds (row.removeFromLeft (200));
+        fixedIp.setBounds (row.removeFromLeft (100));
+        r.removeFromTop (4);
+        field (ipLabel, ip, &ipNow);
+        field (maskLabel, mask, nullptr);
+        field (gwLabel, gateway, nullptr);
+        field (dnsLabel, dns, nullptr);
+        r.removeFromTop (10);
+        melvilleCaption.setBounds (r.removeFromTop (22));
+        findAuto.setBounds (r.removeFromTop (24));
+        findFixed.setBounds (r.removeFromTop (24));
+        r.removeFromTop (4);
+        field (melLabel, melville, &melNow);
+        r.removeFromTop (10);
+        otherCaption.setBounds (r.removeFromTop (22));
+        row = r.removeFromTop (24);
+        backlight.setBounds (row.removeFromLeft (160));
+        showKey.setBounds (row.removeFromRight (64).reduced (0, 1));
+        row.removeFromRight (8);
+        keyLine.setBounds (row);
+        auto buttons = r.removeFromBottom (30);
+        close.setBounds (buttons.removeFromRight (90));
+        buttons.removeFromRight (8);
+        apply.setBounds (buttons.removeFromRight (90));
+        r.removeFromBottom (8);
+        r.removeFromTop (8);
+        help.setBounds (r.removeFromBottom (54));
+        status.setBounds (r);
+    }
+
+    void paint (juce::Graphics& g) override { g.fillAll (Colours::bg); }
+
+private:
+    void ask()
+    {
+        if (auto* o = melville::OscControl::instance()) o->askBoxSettings (serial);
+        askedAt = juce::Time::getMillisecondCounter();
+    }
+
+    void timerCallback() override
+    {
+        auto* o = melville::OscControl::instance();
+        if (o == nullptr) return;
+        const auto line = o->boxSettingsStatus (serial);
+        if (const auto* n = o->boxSettings (serial))
+        {
+            if (! filled) { fill (*n); filled = true; setControlsEnabled (true); }
+            ipNow.setText ("now " + n->nowIp, juce::dontSendNotification);
+            melNow.setText (n->nowMelville.isNotEmpty() && n->nowMelville != "0.0.0.0" ? "talking to " + n->nowMelville : juce::String(),
+                            juce::dontSendNotification);
+        }
+        else if (juce::Time::getMillisecondCounter() - askedAt > 3000u)
+            ask();                                    // (no answer yet, or the box restarted: ask again)
+        if (line.isNotEmpty()) status.setText (line, juce::dontSendNotification);
+        else if (! filled) status.setText ("Asking the box... (is it switched on and on the network?)", juce::dontSendNotification);
+        else status.setText ({}, juce::dontSendNotification);
+        // (after a try, the box says what it has again)
+        if (line.startsWith ("kept") || line.startsWith ("the box couldn't")) { if (! retold) { retold = true; filled = false; ask(); } }
+        else retold = false;
+    }
+
+    void fill (const melville::BoxNetwork& n)
+    {
+        (n.fixedIp ? fixedIp : dhcp).setToggleState (true, juce::dontSendNotification);
+        (n.fixedMelville ? findFixed : findAuto).setToggleState (true, juce::dontSendNotification);
+        ip.setText (n.ip, false);
+        mask.setText (n.mask, false);
+        gateway.setText (n.gateway, false);
+        dns.setText (n.dns, false);
+        melville.setText (n.melvilleIp, false);
+        backlight.setToggleState (n.backlight, juce::dontSendNotification);
+        enableFields();
+    }
+
+    void setControlsEnabled (bool on)
+    {
+        for (auto* c : std::initializer_list<juce::Component*> { &dhcp, &fixedIp, &findAuto, &findFixed, &backlight, &apply })
+            c->setEnabled (on);
+        enableFields();
+        if (! on) for (auto* e : { &ip, &mask, &gateway, &dns, &melville }) e->setEnabled (false);
+    }
+
+    void enableFields()
+    {
+        const bool ready = apply.isEnabled();
+        for (auto* e : { &ip, &mask, &gateway, &dns }) e->setEnabled (ready && fixedIp.getToggleState());
+        melville.setEnabled (ready && findFixed.getToggleState());
+    }
+
+    void showKeyLine()
+    {
+        juce::String key;
+        if (auto* o = melville::OscControl::instance())
+            if (const auto* d = o->deviceWithSerial (serial)) key = d->key;
+        keyLine.setText ("IDE upload password  " + (keyShown ? key : juce::String::repeatedString ("*", 12)), juce::dontSendNotification);
+        showKey.setButtonText (keyShown ? "HIDE" : "SHOW");
+    }
+
+    void send()
+    {
+        auto* o = melville::OscControl::instance();
+        if (o == nullptr) return;
+        melville::BoxNetwork n;
+        n.fixedIp = fixedIp.getToggleState();
+        n.ip = ip.getText(); n.mask = mask.getText(); n.gateway = gateway.getText(); n.dns = dns.getText();
+        n.fixedMelville = findFixed.getToggleState();
+        n.melvilleIp = melville.getText();
+        n.backlight = backlight.getToggleState();
+        if (const auto why = o->sendBoxSettings (serial, n); why.isNotEmpty())
+            status.setText ("Can't send them: " + why + ".", juce::dontSendNotification);
+    }
+
+    const juce::String serial, name;
+    juce::Label addressCaption, melvilleCaption, otherCaption, ipLabel, maskLabel, gwLabel, dnsLabel, melLabel, ipNow, melNow, status, keyLine, help;
+    juce::ToggleButton dhcp, fixedIp, findAuto, findFixed, backlight;
+    juce::TextEditor ip, mask, gateway, dns, melville;
+    juce::TextButton showKey, apply, close;
+    bool filled = false, keyShown = false, retold = false;
+    juce::uint32 askedAt = 0;
+};
+
 /** INTERFACE: the device selector, a round-trip latency measurement, and the control surface (OSC). */
 class InterfacePanel : public juce::Component, private juce::Timer
 {
@@ -531,8 +753,9 @@ public:
         oscCaption.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
         oscCaption.setColour (juce::Label::textColourId, Colours::accent);
         addAndMakeVisible (oscCaption);
-        oscHelp.setText ("The hardware (TWAIN, the HAWTHORNE transport) or TouchOSC. Point each at this computer's address "
-                         "and the listen port, then add it below; MELVILLE lights its keys back on the reply port.",
+        oscHelp.setText ("The hardware (the HAWTHORNE transport, TWAIN) finds MELVILLE by itself: plug it into the network and it "
+                         "shows up below. TouchOSC: point it at this computer's address and the listen port. MELVILLE lights "
+                         "the keys back on the reply port.",
                          juce::dontSendNotification);
         oscHelp.setJustificationType (juce::Justification::topLeft);
         oscHelp.setColour (juce::Label::textColourId, Colours::textDim);
@@ -559,7 +782,8 @@ public:
         devicesHelp.setText ("Each surface, with what it drives. A device is sent only its own pages and can press only "
                              "its own keys, so a transport can't touch the monitoring. With devices listed, anything else "
                              "on the network is ignored; with none listed MELVILLE answers whatever it hears. "
-                             "Hardware: PAIR it (PLAY on the box says yes), then UPDATE puts the firmware this MELVILLE carries on it.",
+                             "Hardware: PAIR it (PLAY on the box says yes); then UPDATE puts the firmware this MELVILLE carries on it, "
+                             "and SETTINGS sets its network.",
                              juce::dontSendNotification);
         devicesHelp.setJustificationType (juce::Justification::topLeft);
         devicesHelp.setColour (juce::Label::textColourId, Colours::textDim);
@@ -624,6 +848,29 @@ public:
                 go();
         };
         addAndMakeVisible (updateDevice);
+        settingsDevice.setTooltip ("The network settings of the hardware picked out above: its own address, and how it finds MELVILLE "
+                                   "(it has to be paired)");
+        settingsDevice.onClick = [this]
+        {
+            auto* o = melville::OscControl::instance();
+            const int row = devices.chosen();
+            if (o == nullptr || ! juce::isPositiveAndBelow (row, (int) o->getSettings().devices.size())) return;
+            const auto d = o->getSettings().devices[(size_t) row];
+            if (d.serial.isEmpty() || o->firmwareOf (d.host).isEmpty())
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Settings",
+                                                        d.name + " isn't MELVILLE hardware (or hasn't said so yet): its settings are on the device itself.");
+                return;
+            }
+            if (d.key.isEmpty())
+            {
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::InfoIcon, "Settings",
+                                                        "Pair " + d.name + " first: PAIR, then PLAY on the box. Only a paired MELVILLE can change its settings.");
+                return;
+            }
+            showBoxSettings (d);
+        };
+        addAndMakeVisible (settingsDevice);
         heardCaption.setJustificationType (juce::Justification::topLeft);
         heardCaption.setColour (juce::Label::textColourId, Colours::text);
         addAndMakeVisible (heardCaption);
@@ -653,27 +900,69 @@ public:
         };
         oscTimer.startTimer (500);
 
-        setSize (620, 1030);
+        // three tabs, so nothing needs scrolling to
+        static const char* names[3] = { "AUDIO & MIDI", "LATENCY", "CONTROL SURFACE" };
+        for (int i = 0; i < 3; ++i)
+        {
+            auto& t = tabs[i];
+            t.setButtonText (names[i]);
+            t.setClickingTogglesState (true);
+            t.setRadioGroupId (71);
+            t.setConnectedEdges ((i > 0 ? juce::Button::ConnectedOnLeft : 0) | (i < 2 ? juce::Button::ConnectedOnRight : 0));
+            t.setColour (juce::TextButton::buttonOnColourId, Colours::accent);
+            t.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+            t.setColour (juce::TextButton::textColourOffId, Colours::text);
+            t.onClick = [this, i] { if (tabs[i].getToggleState()) showPage (i); };
+            addAndMakeVisible (t);
+        }
+        tabs[0].setToggleState (true, juce::dontSendNotification);
+        setSize (620, 500);
+        showPage (juce::SystemStats::getEnvironmentVariable ("MELVILLE_INTERFACE_PAGE", "0").getIntValue());     // (for pictures)
+    }
+
+    /** 0 the interface and MIDI inputs, 1 the latency measurement, 2 the control surfaces. */
+    void showPage (int p)
+    {
+        page = juce::jlimit (0, 2, p);
+        tabs[page].setToggleState (true, juce::dontSendNotification);
+        selector.setVisible (page == 0);
+        for (auto* c : std::initializer_list<juce::Component*> { &caption, &help, &outBox, &inBox, &measure, &clear, &result })
+            c->setVisible (page == 1);
+        for (auto* c : std::initializer_list<juce::Component*> { &oscCaption, &oscHelp, &oscOn, &listenLabel, &listenPort, &replyLabel, &replyPort, &oscStatus,
+                                                                 &devicesCaption, &devicesHelp, &devices, &addDevice, &editDeviceButton, &removeDevice, &heardCaption,
+                                                                 &pairDevice, &updateDevice, &settingsDevice })
+            c->setVisible (page == 2);
+        showHeard();
+        resized();
+        repaint();
     }
 
     void resized() override
     {
         auto r = getLocalBounds();
-        selector.setBounds (r.removeFromTop (440));
-        r.reduce (16, 6);
-        caption.setBounds (r.removeFromTop (22));
-        help.setBounds (r.removeFromTop (52));
-        r.removeFromTop (6);
-        auto row = r.removeFromTop (28);
-        outBox.setBounds (row.removeFromLeft (150)); row.removeFromLeft (8);
-        inBox.setBounds (row.removeFromLeft (150)); row.removeFromLeft (8);
-        measure.setBounds (row.removeFromLeft (100)); row.removeFromLeft (8);
-        clear.setBounds (row.removeFromLeft (70));
-        r.removeFromTop (8);
-        result.setBounds (r.removeFromTop (44));
+        auto bar = r.removeFromTop (44).reduced (16, 8);
+        const int tw = bar.getWidth() / 3;
+        for (int i = 0; i < 3; ++i) tabs[i].setBounds (i < 2 ? bar.removeFromLeft (tw) : bar);
 
-        r.removeFromTop (14);
-        oscTop = r.getY() - 7;
+        if (page == 0) { selector.setBounds (r); return; }
+        r.reduce (16, 10);
+        if (page == 1)
+        {
+            caption.setBounds (r.removeFromTop (22));
+            help.setBounds (r.removeFromTop (52));
+            r.removeFromTop (10);
+            auto labels = r.removeFromTop (18);
+            sendLabel = labels.removeFromLeft (150); labels.removeFromLeft (8);
+            returnLabel = labels.removeFromLeft (150);
+            auto row = r.removeFromTop (28);
+            outBox.setBounds (row.removeFromLeft (150)); row.removeFromLeft (8);
+            inBox.setBounds (row.removeFromLeft (150)); row.removeFromLeft (8);
+            measure.setBounds (row.removeFromLeft (100)); row.removeFromLeft (8);
+            clear.setBounds (row.removeFromLeft (70));
+            r.removeFromTop (12);
+            result.setBounds (r.removeFromTop (44));
+            return;
+        }
         oscCaption.setBounds (r.removeFromTop (22));
         oscHelp.setBounds (r.removeFromTop (38));
         r.removeFromTop (6);
@@ -684,23 +973,24 @@ public:
         replyLabel.setBounds (row1.removeFromLeft (76)); row1.removeFromLeft (6);
         replyPort.setBounds (row1.removeFromLeft (64));
         r.removeFromTop (8);
-        oscStatus.setBounds (r.removeFromTop (54));
+        oscStatus.setBounds (r.removeFromTop (40));
 
         r.removeFromTop (12);
         devicesTop = r.getY() - 6;
         devicesCaption.setBounds (r.removeFromTop (22));
         devicesHelp.setBounds (r.removeFromTop (62));
         r.removeFromTop (6);
-        devices.setBounds (r.removeFromTop (116));
-        r.removeFromTop (8);
-        auto row3 = r.removeFromTop (26);
+        auto row4 = r.removeFromBottom (26);
+        r.removeFromBottom (10);
+        auto row3 = r.removeFromBottom (26);
+        r.removeFromBottom (8);
+        devices.setBounds (r);
         addDevice.setBounds (row3.removeFromLeft (110)); row3.removeFromLeft (8);
         editDeviceButton.setBounds (row3.removeFromLeft (70)); row3.removeFromLeft (8);
         removeDevice.setBounds (row3.removeFromLeft (80)); row3.removeFromLeft (16);
         pairDevice.setBounds (row3.removeFromLeft (70)); row3.removeFromLeft (8);
-        updateDevice.setBounds (row3.removeFromLeft (90));
-        r.removeFromTop (10);
-        auto row4 = r.removeFromTop (26);
+        updateDevice.setBounds (row3.removeFromLeft (90)); row3.removeFromLeft (8);
+        settingsDevice.setBounds (row3.removeFromLeft (100));
         addHeard.setBounds (row4.removeFromRight (120)); row4.removeFromRight (10);
         heardCaption.setBounds (row4);
     }
@@ -709,9 +999,15 @@ public:
     {
         g.fillAll (Colours::bg);
         g.setColour (Colours::line);
-        g.drawHorizontalLine (440, 12.0f, (float) getWidth() - 12.0f);
-        g.drawHorizontalLine (oscTop, 12.0f, (float) getWidth() - 12.0f);
-        g.drawHorizontalLine (devicesTop, 12.0f, (float) getWidth() - 12.0f);
+        g.drawHorizontalLine (43, 12.0f, (float) getWidth() - 12.0f);
+        if (page == 2) g.drawHorizontalLine (devicesTop, 12.0f, (float) getWidth() - 12.0f);
+        if (page == 1)
+        {
+            g.setColour (Colours::textDim);
+            g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+            g.drawText ("SEND THE CLICK OUT OF", sendLabel, juce::Justification::centredLeft);
+            g.drawText ("LISTEN FOR IT ON", returnLabel, juce::Justification::centredLeft);
+        }
     }
 
 private:
@@ -775,7 +1071,7 @@ private:
                                   + (heard.size() > 1 ? ", and " + juce::String ((int) heard.size() - 1) + " more" : juce::String()),
                               juce::dontSendNotification);
         addHeard.setButtonText ("ADD " + melville::OscControl::deviceTypeName (c.type));
-        addHeard.setVisible (true);
+        addHeard.setVisible (page == 2);
     }
 
     /** Add the surface just heard from, as it says it is. */
@@ -790,6 +1086,20 @@ private:
         s2.devices.push_back ({ c.type, c.name.isNotEmpty() ? c.name : melville::OscControl::deviceTypeName (c.type), host, 0, c.serial, {} });
         o->apply (s2);
         showOsc();
+    }
+
+    /** A paired box's network settings, in their own window. */
+    void showBoxSettings (const melville::OscControl::Device& d)
+    {
+        juce::DialogWindow::LaunchOptions o;
+        o.content.setOwned (new BoxSettingsPanel (d.serial, d.name));
+        o.dialogTitle = d.name + " settings";
+        o.dialogBackgroundColour = Colours::bg;
+        o.escapeKeyTriggersCloseButton = true;
+        o.useNativeTitleBar = true;
+        o.resizable = false;
+        o.componentToCentreAround = this;
+        o.launchAsync();
     }
 
     /** Add a device, or change one: its type, what to call it and where it is. */
@@ -907,8 +1217,10 @@ private:
     juce::Label devicesCaption, devicesHelp, heardCaption;
     DeviceList devices;
     juce::TextButton addDevice { "ADD DEVICE" }, editDeviceButton { "EDIT" }, removeDevice { "REMOVE" }, addHeard { "ADD" },
-                     pairDevice { "PAIR" }, updateDevice { "UPDATE" };
-    int oscTop = 0, devicesTop = 0;
+                     pairDevice { "PAIR" }, updateDevice { "UPDATE" }, settingsDevice { "SETTINGS..." };
+    int oscTop = 0, devicesTop = 0, page = 0;
+    juce::TextButton tabs[3];
+    juce::Rectangle<int> sendLabel, returnLabel;
     struct Every : juce::Timer { std::function<void()> f; void timerCallback() override { if (f) f(); } } oscTimer;
 };
 
@@ -1163,7 +1475,7 @@ public:
         if (interfaceWindow == nullptr)
         {
             interfaceWindow = std::make_unique<ToolWindow> (juce::String (juce::CharPointer_UTF8 ("MELVILLE \xc2\xb7 INTERFACE")));
-            frameWindow (*interfaceWindow, new ScrollingPanel (new InterfacePanel (hub), 900), true, "Interface", Colours::accent, loadIcon ("melville", 64),
+            frameWindow (*interfaceWindow, new InterfacePanel (hub), true, "Interface", Colours::accent, loadIcon ("melville", 64),
                          WindowTitleBar::minimise | WindowTitleBar::close);
             interfaceWindow->setResizable (false, false);
             interfaceWindow->centreWithSize (interfaceWindow->getWidth(), interfaceWindow->getHeight());
@@ -1508,6 +1820,37 @@ public:
         showFromCommandLine (commandLine);
 
         // Test hook (the workflow's smoke test): report which parts came up, then quit
+        if (const auto boxTest = juce::SystemStats::getEnvironmentVariable ("MELVILLE_BOX_TEST", {}); boxTest.isNotEmpty())
+            juce::Timer::callAfterDelay (1500, [boxTest]
+            {
+                // (a box on the list, to try the SETTINGS window and following a box to a new address: pictures and its address in boxTest)
+                auto* o = melville::OscControl::instance();
+                if (o == nullptr) return;
+                auto st = o->getSettings();
+                st.devices = { { melville::typeHawthorne, "Deck", "127.0.0.1", 0, "hawthorne-test", "0123456789abcdef0123456789abcdef" } };
+                o->apply (st);
+                auto* panel = new BoxSettingsPanel ("hawthorne-test", "Deck");
+                juce::Timer::callAfterDelay (6000, [boxTest, panel]
+                {
+                    juce::FileOutputStream out (juce::File (boxTest).getChildFile ("box-settings.png"));
+                    out.setPosition (0); out.truncate();
+                    juce::PNGImageFormat().writeImageToStream (panel->createComponentSnapshot (panel->getLocalBounds()), out);
+                    delete panel;
+                });
+                juce::Timer::callAfterDelay (9000, [boxTest]
+                {
+                    melville::BoxNetwork n;
+                    n.fixedIp = true; n.ip = "192.168.1.50"; n.gateway = "192.168.1.1"; n.backlight = false;
+                    if (auto* o2 = melville::OscControl::instance())
+                        juce::File (boxTest).getChildFile ("box-send.txt").replaceWithText ("sent: [" + o2->sendBoxSettings ("hawthorne-test", n) + "]");
+                });
+                juce::Timer::callAfterDelay (25000, [boxTest]
+                {
+                    if (auto* o2 = melville::OscControl::instance())
+                        juce::File (boxTest).getChildFile ("box-host.txt").replaceWithText (o2->getSettings().devices.empty() ? juce::String()
+                                                                                            : o2->getSettings().devices[0].host);
+                });
+            });
         const auto quitAfter = juce::SystemStats::getEnvironmentVariable ("MELVILLE_QUIT_AFTER_MS", {}).getIntValue();
         if (quitAfter > 0)
             juce::Timer::callAfterDelay (quitAfter, [this]

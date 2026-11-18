@@ -102,6 +102,77 @@ inline FirmwareFile bundledFirmware (const juce::File& folder, int type)
     return best;
 }
 
+/** A hardware box's network settings, as MELVILLE's SETTINGS window shows and sends them: its own
+    address (from the router, or fixed) and how it finds MELVILLE (by itself, or at a fixed address).
+    The box tries a change for 30 s and keeps it only if it can still reach MELVILLE. */
+struct BoxNetwork
+{
+    bool fixedIp = false;                     // false: DHCP
+    juce::String ip, mask { "255.255.255.0" }, gateway, dns;
+    bool fixedMelville = false;               // false: found by itself
+    juce::String melvilleIp;
+    bool backlight = true;
+
+    // what the box reported it has now (read only)
+    juce::String nowIp, nowMask, nowGateway, nowDns, nowMelville, firmware;
+
+    static bool isAddress (const juce::String& a)
+    {
+        const auto parts = juce::StringArray::fromTokens (a.trim(), ".", "");
+        if (parts.size() != 4) return false;
+        for (auto& p : parts)
+            if (p.isEmpty() || p.length() > 3 || ! p.containsOnly ("0123456789") || p.getIntValue() > 255) return false;
+        return true;
+    }
+
+    static bool isMask (const juce::String& m)
+    {
+        if (! isAddress (m)) return false;
+        const auto parts = juce::StringArray::fromTokens (m.trim(), ".", "");
+        juce::uint32 v = 0;
+        for (auto& p : parts) v = (v << 8) | (juce::uint32) p.getIntValue();
+        return v != 0 && ((~v + 1u) & ~v) == 0;      // (its ones first)
+    }
+
+    /** Why these can't be sent, or "" if they can. */
+    juce::String problem() const
+    {
+        if (fixedIp)
+        {
+            if (! isAddress (ip))                               return "the box's address isn't an address (like 192.168.1.50)";
+            if (! isMask (mask))                                return "the subnet mask isn't one (like 255.255.255.0)";
+            if (gateway.trim().isNotEmpty() && ! isAddress (gateway)) return "the gateway isn't an address";
+            if (dns.trim().isNotEmpty() && ! isAddress (dns))   return "the DNS server isn't an address";
+        }
+        if (fixedMelville && ! isAddress (melvilleIp))          return "MELVILLE's address isn't an address";
+        return {};
+    }
+
+    /** What /melville/settings carries after the key. */
+    juce::StringArray toStrings() const
+    {
+        return { fixedIp ? "fixed" : "dhcp", ip.trim(), mask.trim(), gateway.trim(), dns.trim(),
+                 fixedMelville ? "fixed" : "auto", melvilleIp.trim(), backlight ? "on" : "off" };
+    }
+
+    /** From /melville/settings/now: serial, ip mode, ip, mask, gateway, dns (now), fixed ip, mask,
+        gateway, dns (what it would use), melville mode, melville fixed, melville now, backlight, firmware. */
+    static bool fromReport (const juce::StringArray& a, BoxNetwork& n)
+    {
+        if (a.size() < 15) return false;
+        n.fixedIp = a[1] == "fixed";
+        n.nowIp = a[2]; n.nowMask = a[3]; n.nowGateway = a[4]; n.nowDns = a[5];
+        n.ip = a[6]; n.mask = a[7].isNotEmpty() ? a[7] : juce::String ("255.255.255.0"); n.gateway = a[8]; n.dns = a[9];
+        n.fixedMelville = a[10] == "fixed";
+        n.melvilleIp = a[11]; n.nowMelville = a[12];
+        n.backlight = a[13] != "off";
+        n.firmware = a[14];
+        if (! n.fixedIp && n.ip.isEmpty()) { n.ip = n.nowIp; n.gateway = n.nowGateway; n.dns = n.nowDns; n.mask = n.nowMask; }   // (a start for fixing it)
+        if (! n.fixedMelville && n.melvilleIp.isEmpty()) n.melvilleIp = n.nowMelville;
+        return true;
+    }
+};
+
 /** The OSC settings: the port, and the devices on the list. */
 struct OscSettings
 {

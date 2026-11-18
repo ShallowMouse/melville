@@ -364,6 +364,27 @@ int main()
         CHECK (Osc::bundledFirmware (folder.getChildFile ("none"), Osc::typeHawthorne).version.isEmpty());
         folder.deleteRecursively();
         std::printf ("    OSC: firmware %s is the newest MELVILLE would carry\n", fw.version.toRawUTF8());
+
+        // a box's network settings: what's sendable, what goes, and reading what the box reports
+        Osc::BoxNetwork n;
+        CHECK (n.problem().isEmpty());                                       // (DHCP, found by itself)
+        n.fixedIp = true; n.ip = "192.168.1.50";
+        CHECK (n.problem().isEmpty());
+        n.ip = "192.168.1.300";  CHECK (n.problem().contains ("address"));
+        n.ip = "192.168.1";      CHECK (n.problem().contains ("address"));
+        n.ip = "192.168.1.50"; n.mask = "255.0.255.0"; CHECK (n.problem().contains ("mask"));
+        n.mask = "255.255.254.0"; n.gateway = "192.168.1.x"; CHECK (n.problem().contains ("gateway"));
+        n.gateway = ""; n.fixedMelville = true; n.melvilleIp = ""; CHECK (n.problem().contains ("MELVILLE"));
+        n.melvilleIp = "10.0.0.5"; n.backlight = false;
+        CHECK (n.problem().isEmpty());
+        CHECK (n.toStrings() == juce::StringArray ({ "fixed", "192.168.1.50", "255.255.254.0", "", "", "fixed", "10.0.0.5", "off" }));
+        Osc::BoxNetwork r;
+        CHECK (! Osc::BoxNetwork::fromReport ({ "hawthorne-3a7f", "dhcp" }, r));
+        CHECK (Osc::BoxNetwork::fromReport ({ "hawthorne-3a7f", "dhcp", "192.168.1.42", "255.255.255.0", "192.168.1.1", "192.168.1.1",
+                                              "", "", "", "", "auto", "", "192.168.1.10", "on", "3.2.0" }, r));
+        CHECK (! r.fixedIp && r.nowIp == "192.168.1.42" && r.ip == "192.168.1.42" && r.gateway == "192.168.1.1");   // (a start for fixing it)
+        CHECK (! r.fixedMelville && r.melvilleIp == "192.168.1.10" && r.backlight && r.firmware == "3.2.0");
+        std::printf ("    OSC: a box's network settings check out before they go\n");
     }
 
     std::printf (failures == 0 ? "MELVILLE core: all tests passed\n" : "MELVILLE core: %d failure(s)\n", failures);
