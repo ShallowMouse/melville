@@ -194,18 +194,11 @@ public:
         g.fillAll (Colours::bg);
         for (auto& [area, title] : { std::pair (tempoArea, "TEMPO"), std::pair (clickArea, "CLICK"), std::pair (tcArea, "TIMECODE") })
         {
-            // a module of the clock's panel, screwed in at the corners
-            const auto a = area.toFloat();
-            g.setColour (juce::Colours::black.withAlpha (0.5f));
-            g.fillRoundedRectangle (a.translated (0.0f, 2.0f), 5.0f);
-            Pequod::hw::panel (g, a, Colours::panel, 5.0f);
-            g.setColour (juce::Colours::black.withAlpha (0.55f));
-            g.drawRoundedRectangle (a.reduced (0.5f), 5.0f, 1.0f);
-            for (auto p : { a.getTopRight() + juce::Point<float> (-9.0f, 9.0f), a.getBottomRight() + juce::Point<float> (-9.0f, -9.0f),
-                            a.getBottomLeft() + juce::Point<float> (9.0f, -9.0f) })
-                Pequod::hw::screw (g, p, 3.0f, p.x * 0.02f + p.y * 0.01f);
+            g.setColour (Colours::panel);
+            g.fillRoundedRectangle (area.toFloat(), 6.0f);
+            g.setColour (Colours::accent);
             g.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
-            Pequod::hw::engraved (g, title, area.reduced (14, 8).removeFromTop (18).toFloat(), Colours::accent, juce::Justification::centredLeft);
+            g.drawText (title, area.reduced (14, 8).removeFromTop (18), juce::Justification::centredLeft);
         }
         g.setColour (Colours::textDim);
         g.setFont (juce::Font (juce::FontOptions (11.0f)));

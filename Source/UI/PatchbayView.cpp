@@ -1,5 +1,4 @@
 #include "PatchbayView.h"
-#include "Hardware.h"
 #include "MelvilleLookAndFeel.h"
 #include "../Core/NetworkNode.h"
 #include "../Core/Bridges.h"
@@ -516,15 +515,19 @@ void PatchCanvas::drawPanel (juce::Graphics& g, const Panel& p) const
     const auto ink = face.getPerceivedBrightness() > 0.55f ? juce::Colour (0xff1d1b18) : juce::Colour (0xfff2ede2);
     const auto inkDim = ink.withAlpha (0.65f);
 
-    // the faceplate: powder-coated in the part's colour, a shadow under it, rack screws
-    g.setColour (juce::Colours::black.withAlpha (0.45f));
-    g.fillRoundedRectangle (p.area.translated (0.0f, 2.0f), 4.0f);
-    Pequod::hw::panel (g, p.area, face, 4.0f);
-    g.setColour (face.darker (0.5f));
+    // the faceplate, with rack screws
+    g.setColour (face);
+    g.fillRoundedRectangle (p.area, 4.0f);
+    g.setColour (face.darker (0.35f));
     g.drawRoundedRectangle (p.area.reduced (0.5f), 4.0f, 1.0f);
     for (auto corner : { p.area.getTopLeft() + juce::Point<float> (9, 9), p.area.getBottomLeft() + juce::Point<float> (9, -9),
                          p.area.getTopRight() + juce::Point<float> (-9, 9), p.area.getBottomRight() + juce::Point<float> (-9, -9) })
-        Pequod::hw::screw (g, corner, 3.5f, corner.x * 0.01f + corner.y * 0.013f);
+    {
+        g.setColour (face.darker (0.45f));
+        g.fillEllipse (juce::Rectangle<float> (7, 7).withCentre (corner));
+        g.setColour (face.brighter (0.3f));
+        g.drawLine (corner.x - 2.5f, corner.y, corner.x + 2.5f, corner.y, 1.0f);
+    }
 
     // the name
     auto nameArea = juce::Rectangle<float> (p.area.getX() + 20.0f, p.area.getY(), nameColumn - 28.0f, p.area.getHeight());
@@ -603,16 +606,12 @@ void PatchCanvas::drawPanel (juce::Graphics& g, const Panel& p) const
             }
             else
             {
-            // a jack socket: its nickel nut, and the hole
-            const auto nut = r.expanded (2.5f);
-            g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe2e1dc), nut.getX(), nut.getY(), juce::Colour (0xff6d6c69), nut.getRight(), nut.getBottom(), false));
-            g.fillEllipse (nut);
-            g.setColour (juce::Colour (0xff0c0c0c));
-            g.fillEllipse (r);
-            g.setColour (juce::Colours::white.withAlpha (0.12f));
-            g.drawEllipse (r.reduced (1.2f).translated (0.0f, 0.8f), 0.8f);    // (the sleeve inside, catching the light)
-            g.setColour (lit ? Colours::accent : juce::Colours::black.withAlpha (0.45f));
-            g.drawEllipse (nut, lit ? 2.0f : 0.8f);
+            g.setColour (face.darker (0.5f));
+            g.fillEllipse (r.expanded (2.5f));                 // the nut
+            g.setColour (juce::Colour (0xff141414));
+            g.fillEllipse (r);                                 // the hole
+            g.setColour (lit ? Colours::accent : face.darker (0.2f));
+            g.drawEllipse (r.expanded (2.5f), lit ? 2.0f : 1.0f);
             }
 
             g.setColour (inkDim);

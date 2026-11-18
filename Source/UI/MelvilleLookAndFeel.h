@@ -4,7 +4,6 @@
 // colour of old ship's brass) so it reads as the hub rather than one of the parts.
 
 #include <juce_gui_basics/juce_gui_basics.h>
-#include "Hardware.h"
 #include "BinaryData.h"
 
 namespace melville
@@ -79,41 +78,13 @@ public:
 
     void drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour& bgColour, bool over, bool down) override
     {
-        // a key standing proud of the panel; a latched one lights up
-        auto r = b.getLocalBounds().toFloat().reduced (1.0f);
-        Pequod::hw::key (g, r, over && ! down ? bgColour.brighter (0.08f) : bgColour, down, b.getToggleState(),
-                         b.findColour (juce::TextButton::buttonOnColourId).brighter (0.15f));
-        if (! b.isEnabled())
-        {
-            g.setColour (Colours::bg.withAlpha (0.35f));
-            g.fillRoundedRectangle (r, 2.5f);
-        }
-    }
-
-    void drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float minPos, float maxPos,
-                           juce::Slider::SliderStyle style, juce::Slider& s) override
-    {
-        if (style != juce::Slider::LinearHorizontal)
-            return juce::LookAndFeel_V4::drawLinearSlider (g, x, y, w, h, pos, minPos, maxPos, style, s);
-        // a fader: a slot with a scale, and a metal cap with a line across it in MELVILLE's colour
-        auto r = juce::Rectangle<float> ((float) x, (float) y, (float) w, (float) h);
-        Pequod::hw::slot (g, r.withSizeKeepingCentre (r.getWidth(), 4.0f));
-        g.setColour (Colours::textDim.withAlpha (0.5f));
-        for (int k = 0; k <= 10; ++k)
-        {
-            const float tx = r.getX() + r.getWidth() * (float) k / 10.0f;
-            const float len = k % 5 == 0 ? 5.0f : 3.0f;
-            g.drawVerticalLine (juce::roundToInt (tx), r.getCentreY() - 6.0f - len, r.getCentreY() - 6.0f);
-        }
-        auto cap = juce::Rectangle<float> (12.0f, juce::jmin (22.0f, r.getHeight())).withCentre ({ pos, r.getCentreY() });
-        g.setColour (juce::Colours::black.withAlpha (0.5f));
-        g.fillRoundedRectangle (cap.translated (1.0f, 2.0f), 2.0f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffd0d0cc), cap.getX(), cap.getY(), juce::Colour (0xff5a5a58), cap.getX(), cap.getBottom(), false));
-        g.fillRoundedRectangle (cap, 2.0f);
-        g.setColour (juce::Colour (0xff202020));
-        g.fillRect (cap.withSizeKeepingCentre (cap.getWidth(), 2.0f));
-        g.setColour (Colours::accent);
-        g.fillRect (cap.withSizeKeepingCentre (cap.getWidth() - 4.0f, 1.0f));
+        auto r = b.getLocalBounds().toFloat().reduced (0.5f);
+        auto c = b.getToggleState() ? findColour (juce::TextButton::buttonOnColourId) : bgColour;
+        if (down) c = c.brighter (0.15f); else if (over) c = c.brighter (0.07f);
+        g.setColour (c);
+        g.fillRoundedRectangle (r, 3.0f);
+        g.setColour (b.getToggleState() ? Colours::accent : Colours::line);
+        g.drawRoundedRectangle (r, 3.0f, 1.0f);
     }
 
 private:

@@ -10,6 +10,7 @@
 #include "Core/Hub.h"
 #include "Parts/Parts.h"
 #include "UI/MelvilleLookAndFeel.h"
+#include "UI/NearestTooltips.h"
 #include "UI/PatchbayView.h"
 #include "UI/Taskbar.h"
 #include "UI/WindowFrame.h"
@@ -276,19 +277,18 @@ public:
     {
         auto& t = melville::transport();
         // the counter, like a tape machine's: hours, minutes, seconds, frames
-        Pequod::hw::window (g, counterArea.toFloat().reduced (1.5f));
+        g.setColour (juce::Colour (0xff101112));
+        g.fillRoundedRectangle (counterArea.toFloat(), 4.0f);
         const double rate = juce::jmax (1.0, t.reelRate.load());
         const double secs = (double) t.position.load() / rate;
         const int h = (int) (secs / 3600.0), m = (int) std::fmod (secs / 60.0, 60.0), sec = (int) std::fmod (secs, 60.0);
         const int fr = (int) (std::fmod (secs, 1.0) * 30.0);
         const auto text = juce::String (h) + ":" + juce::String (m).paddedLeft ('0', 2) + ":" + juce::String (sec).paddedLeft ('0', 2)
                           + ":" + juce::String (fr).paddedLeft ('0', 2);
+        g.setColour (t.recording.load() ? Colours::warn : t.rolling.load() ? Colours::accent : Colours::text);
         g.setFont (juce::Font (juce::FontOptions (22.0f, juce::Font::bold)));
         auto c = counterArea.reduced (8, 2);
-        juce::String ghost;
-        for (auto ch : text) ghost += juce::CharacterFunctions::isDigit (ch) ? juce::juce_wchar ('8') : ch;
-        Pequod::hw::lit (g, text, c.removeFromTop (c.getHeight() * 3 / 5).toFloat(),
-                         t.recording.load() ? Colours::warn.brighter (0.3f) : t.rolling.load() ? Colours::accent.brighter (0.3f) : Colours::text, juce::Justification::centred, ghost);
+        g.drawText (text, c.removeFromTop (c.getHeight() * 3 / 5), juce::Justification::centred);
         g.setFont (juce::Font (juce::FontOptions (11.0f)));
         g.setColour (Colours::textDim);
         juce::String sub = t.available.load() && t.reelLoaded.load() ? juce::String ("TAPE") : juce::String ("CLOCK");
@@ -303,7 +303,6 @@ public:
             sub = "BAR " + juce::String (bar) + "  BEAT " + juce::String (beat);
         }
         g.drawText (sub, c, juce::Justification::centred);
-        Pequod::hw::glass (g, counterArea.toFloat().reduced (1.5f));
 
         g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
         g.setColour (Colours::textDim);
@@ -1093,15 +1092,8 @@ private:
     /** A paired box's network settings, in their own window. */
     void showBoxSettings (const melville::OscControl::Device& d)
     {
-        juce::DialogWindow::LaunchOptions o;
-        o.content.setOwned (new BoxSettingsPanel (d.serial, d.name));
-        o.dialogTitle = d.name + " settings";
-        o.dialogBackgroundColour = Colours::bg;
-        o.escapeKeyTriggersCloseButton = true;
-        o.useNativeTitleBar = true;
-        o.resizable = false;
-        o.componentToCentreAround = this;
-        o.launchAsync();
+        // (in MELVILLE's own frame, like its other windows - not the system's dialog)
+        melville::showPanel (std::make_unique<BoxSettingsPanel> (d.serial, d.name), (d.name + " settings").toUpperCase(), "melville");
     }
 
     /** Add a device, or change one: its type, what to call it and where it is. */
@@ -1664,22 +1656,9 @@ public:
 
     juce::String getTipFor (juce::Component& c) override
     {
-        // (asked several times a second while the mouse rests: the search up the windows is done
-        //  once for each thing the mouse comes to rest on)
-        if (&c != lastAsked.getComponent())
-        {
-            lastAsked = &c;
-            partHasOwn = false;
-            for (auto* p = &c; p != nullptr && ! partHasOwn; p = p->getParentComponent())
-                for (auto* child : p->getChildren())
-                    if (child != this && dynamic_cast<juce::TooltipWindow*> (child) != nullptr) { partHasOwn = true; break; }
-        }
-        return partHasOwn ? juce::String() : juce::TooltipWindow::getTipFor (c);
+        // (only where no part has a tooltip window of its own: one tip, never two)
+        return NearestTooltips::nearestFor (c) == nullptr ? juce::TooltipWindow::getTipFor (c) : juce::String();
     }
-
-private:
-    juce::Component::SafePointer<juce::Component> lastAsked;
-    bool partHasOwn = false;
 };
 
 class MelvilleApplication : public juce::JUCEApplication
