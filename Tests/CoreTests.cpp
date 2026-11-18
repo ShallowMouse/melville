@@ -344,6 +344,26 @@ int main()
                && moved.devices[1].type == Osc::typeEverything);
         std::printf ("    OSC: %d devices kept, %d brought over from the old settings\n",
                      (int) back.devices.size(), (int) moved.devices.size());
+
+        // the hardware: its pairing key is kept, and the firmware MELVILLE carries is the newest one there
+        Osc::OscSettings paired;
+        paired.devices.push_back ({ Osc::typeHawthorne, "Deck", "192.168.1.20", 0, "hawthorne-3a7f", "0123456789abcdef0123456789abcdef" });
+        CHECK (Osc::OscSettings::fromXml (paired.toXml().get()).devices[0].key == "0123456789abcdef0123456789abcdef");
+        CHECK (Osc::versionOlder ("3.1.0", "3.1.1") && ! Osc::versionOlder ("3.1.1", "3.1.0"));
+        CHECK (Osc::versionOlder ("3.1.9", "3.1.10"));                 // (number by number, not as text)
+        CHECK (Osc::versionOlder ("3.1", "3.1.1") && ! Osc::versionOlder ("3.1.0", "3.1"));
+        CHECK (Osc::versionOlder ("3.1.0-dev", "3.1.0") && ! Osc::versionOlder ("3.1.0", "3.1.0"));
+        const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("melville-fw-test");
+        folder.deleteRecursively();
+        folder.createDirectory();
+        for (auto* n : { "HAWTHORNE-3.1.0.bin", "HAWTHORNE-3.1.10.bin", "HAWTHORNE-3.1.9.bin", "TWAIN-9.0.0.bin", "notes.txt" })
+            folder.getChildFile (n).replaceWithText ("x");
+        const auto fw = Osc::bundledFirmware (folder, Osc::typeHawthorne);
+        CHECK (fw.version == "3.1.10" && fw.file.getFileName() == "HAWTHORNE-3.1.10.bin");
+        CHECK (Osc::bundledFirmware (folder, Osc::typeTwain).version == "9.0.0");
+        CHECK (Osc::bundledFirmware (folder.getChildFile ("none"), Osc::typeHawthorne).version.isEmpty());
+        folder.deleteRecursively();
+        std::printf ("    OSC: firmware %s is the newest MELVILLE would carry\n", fw.version.toRawUTF8());
     }
 
     std::printf (failures == 0 ? "MELVILLE core: all tests passed\n" : "MELVILLE core: %d failure(s)\n", failures);

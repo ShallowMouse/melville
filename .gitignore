@@ -1,2 +1,6 @@
 build*/
 parts/
+
+# signing keys: only the public half (Hardware/HAWTHORNE/signing_key.pem) belongs here
+*.pem
+!Hardware/HAWTHORNE/signing_key.pem

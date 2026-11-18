@@ -15,7 +15,14 @@
 // MELVILLE answers whatever it hears, so a new setup works before you've listed anything. Either
 // way every surface MELVILLE hears from shows in INTERFACE, with its type guessed from what it
 // sends, so adding it is one click.
-//   /melville/hello  "hawthorne" | "twain" | "all"[, name[, serial]]    a device announcing itself
+//   /melville/hello  "hawthorne" | "twain" | "all"[, name[, serial[, firmware]]]    a device announcing itself
+//
+// PAIRING AND FIRMWARE (the hardware): PAIR in INTERFACE sends the box /melville/pair; the box asks
+// on its own display and, if PLAY is pressed there, answers /melville/paired serial key (or
+// /melville/pair/declined serial). MELVILLE keeps the key with the device: it's what lets it put new
+// firmware on the box (Core/FirmwareUpload.h) - the signed firmware it carries in its "firmware"
+// folder, offered when it's newer than what the box says it runs. A key only counts if MELVILLE
+// asked that box to pair in the last minute, so nothing else on the network can slip one in.
 //
 // TWAIN
 //   /twain/source/mix  /twain/source/2track  /twain/source/ext1  /twain/source/ext2     press
@@ -54,6 +61,7 @@
 
 #include <JuceHeader.h>
 #include "../Core/OscDevices.h"
+#include "../Core/FirmwareUpload.h"
 #include "../Core/TwainNode.h"
 #include "../Core/ClockNode.h"
 #include "../Hosted/MelvilleHosted.h"
@@ -82,7 +90,7 @@ public:
     {
         int type = typeEverything;       // what it looks like, or said it is
         bool announced = false;          // it introduced itself (/melville/hello)
-        juce::String name, serial;
+        juce::String name, serial, firmware;
         juce::uint32 lastHeard = 0;
     };
 
@@ -154,6 +162,68 @@ public:
         if (secs < 2)   return "just now";
         if (secs < 120) return juce::String ((int) secs) + " s ago";
         return juce::String ((int) (secs / 60u)) + " min ago";
+    }
+
+    //==========================================================================
+    // the hardware: its firmware, pairing and updates
+
+    /** The firmware a device said it runs (in its hello), or "". */
+    juce::String firmwareOf (const juce::String& host) const
+    {
+        const auto it = info.find (host);
+        return it == info.end() ? juce::String() : it->second.firmware;
+    }
+
+    /** The firmware MELVILLE carries for a type of hardware (none: an empty file). */
+    static FirmwareFile carriedFirmware (int type)
+    {
+        const auto folder = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile ("firmware");
+        return bundledFirmware (folder, type);
+    }
+
+    /** Ask the listed device at this address to pair: it asks on its own display (PLAY: yes). */
+    bool requestPair (const juce::String& host)
+    {
+        const auto* d = deviceAt (host);
+        if (d == nullptr || socket == nullptr) return false;
+        auto& sf = surfaceFor (host, d->type, d->replyPort);
+        if (! sf.connected || ! sf.sender->send ("/melville/pair", juce::String ("MELVILLE"))) return false;
+        pairing[host] = { pairAsking, juce::jmax (1u, juce::Time::getMillisecondCounter()) };
+        return true;
+    }
+
+    /** Where pairing with this device has got to ("" when nothing's happening). */
+    juce::String pairStatus (const juce::String& host) const
+    {
+        const auto it = pairing.find (host);
+        if (it == pairing.end()) return {};
+        switch (it->second.state)
+        {
+            case pairAsking:   return "pairing: press PLAY on the box";
+            case pairDone:     return "paired";
+            case pairDeclined: return "not paired: it was turned down on the box";
+            case pairNoAnswer: return "not paired: no answer from the box";
+            default:           return {};
+        }
+    }
+
+    /** Put the firmware MELVILLE carries on this (paired) device. Returns why not, or "" if it has started. */
+    juce::String startUpdate (const juce::String& host)
+    {
+        const auto* d = deviceAt (host);
+        if (d == nullptr) return "it isn't on the list";
+        if (d->key.isEmpty()) return "pair it first (PAIR, then PLAY on the box)";
+        if (upload != nullptr && upload->getState() == FirmwareUpload::sending) return "another update is still going";
+        const auto fw = carriedFirmware (d->type);
+        if (! fw.file.existsAsFile()) return "MELVILLE has no firmware for " + deviceTypeName (d->type);
+        upload = std::make_unique<FirmwareUpload> (host, d->key, fw.file, fw.version);
+        return {};
+    }
+
+    /** The update going (or last done) to this device, or nullptr. */
+    const FirmwareUpload* updateFor (const juce::String& host) const
+    {
+        return upload != nullptr && upload->host == host ? upload.get() : nullptr;
     }
 
     /** One line for the settings: off, listening where, and what's been heard. */
@@ -295,6 +365,32 @@ private:
         const bool openHouse = settings.devices.empty();       // nothing listed yet: anyone may play
         const int type = listed ? dev->type : typeEverything;
 
+        // who it says it is (its firmware shows in the list), and a pairing answer to a question MELVILLE asked
+        for (auto& m : msgs)
+        {
+            if (m.address == "/melville/hello")
+            {
+                auto& i = info[from];
+                if (m.strings.size() > 2) i.serial = m.strings[2].trim();
+                if (m.strings.size() > 3) i.firmware = m.strings[3].trim();
+            }
+            else if (listed && (m.address == "/melville/paired" || m.address == "/melville/pair/declined"))
+            {
+                auto p = pairing.find (from);
+                if (p == pairing.end() || p->second.state != pairAsking) continue;          // (not asked: ignored)
+                if (m.address == "/melville/pair/declined") { p->second.state = pairDeclined; continue; }
+                if (m.strings.size() < 2 || m.strings[1].trim().length() < 16) continue;
+                for (auto& d : settings.devices)
+                    if (d.host.equalsIgnoreCase (from))
+                    {
+                        d.serial = m.strings[0].trim();
+                        d.key = m.strings[1].trim();
+                    }
+                p->second.state = pairDone;
+                if (onSettingsChanged) onSettingsChanged (settings);
+            }
+        }
+
         if (listed || openHouse)
         {
             auto& sf = surfaceFor (from, type, listed ? dev->replyPort : 0);
@@ -317,6 +413,7 @@ private:
                     }
                     if (m.strings.size() > 1) c.name = m.strings[1].trim();
                     if (m.strings.size() > 2) c.serial = m.strings[2].trim();
+                    if (m.strings.size() > 3) c.firmware = m.strings[3].trim();
                 }
                 else if (! c.announced && c.type == typeEverything)
                     c.type = typeOf (m.address);
@@ -521,6 +618,8 @@ private:
         const auto gone = juce::Time::getMillisecondCounter() - 60u * 60u * 1000u;
         for (auto it = candidates.begin(); it != candidates.end();)
             it = it->second.lastHeard < gone ? candidates.erase (it) : std::next (it);
+        for (auto& [host, p] : pairing)              // (the box asks for 30 s; a minute and it's no)
+            if (p.state == pairAsking && juce::Time::getMillisecondCounter() - p.since > 60000u) p.state = pairNoAnswer;
         if (surfaces.empty()) return;
         const bool everything = ++ticks % 30 == 0;   // (every two seconds: a surface that's just woken up)
         const auto now = state();
@@ -551,6 +650,13 @@ private:
     int ticks = 0;
     std::map<juce::String, Surface> surfaces;
     std::map<juce::String, Candidate> candidates;
+
+    struct Info { juce::String serial, firmware; };
+    std::map<juce::String, Info> info;              // what each box said in its hello, by address
+    enum PairState { pairNone, pairAsking, pairDone, pairDeclined, pairNoAnswer };
+    struct Pairing { PairState state = pairNone; juce::uint32 since = 0; };
+    std::map<juce::String, Pairing> pairing;        // by address
+    std::unique_ptr<FirmwareUpload> upload;         // the one going (or last done)
 
     JUCE_DECLARE_WEAK_REFERENCEABLE (OscControl)
 };

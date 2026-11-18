@@ -59,7 +59,48 @@ struct OscDevice
     juce::String name, host;         // what you call it; its address on the network
     int replyPort = 0;               // 0: the shared reply port
     juce::String serial;             // if it announced itself
+    juce::String key;                // the key it gave when it was paired: what its firmware updates need
 };
+
+/** Is version a older than b? Dotted numbers, compared number by number ("3.1.10" is newer than
+    "3.1.9"); a version with a suffix ("3.1.0-dev") is older than the same one without. */
+inline bool versionOlder (const juce::String& a, const juce::String& b)
+{
+    auto split = [] (const juce::String& v, juce::String& suffix)
+    {
+        const auto core = v.trim().upToFirstOccurrenceOf ("-", false, false);
+        suffix = v.trim().fromFirstOccurrenceOf ("-", false, false);
+        auto parts = juce::StringArray::fromTokens (core, ".", "");
+        juce::Array<int> n;
+        for (auto& p : parts) n.add (p.getIntValue());
+        return n;
+    };
+    juce::String sa, sb;
+    const auto na = split (a, sa), nb = split (b, sb);
+    for (int k = 0; k < juce::jmax (na.size(), nb.size()); ++k)
+    {
+        const int x = na[k], y = nb[k];          // (a missing number is 0)
+        if (x != y) return x < y;
+    }
+    return sa.isNotEmpty() && sb.isEmpty();
+}
+
+/** The firmware MELVILLE carries for a type of hardware: "<TYPE>-<version>.bin" in its firmware
+    folder (signed by MELVILLE's build). The newest, or none (an empty file). */
+struct FirmwareFile { juce::File file; juce::String version; };
+
+inline FirmwareFile bundledFirmware (const juce::File& folder, int type)
+{
+    FirmwareFile best;
+    const auto prefix = deviceTypeName (type) + "-";
+    for (const auto& f : folder.findChildFiles (juce::File::findFiles, false, prefix + "*.bin"))
+    {
+        const auto v = f.getFileNameWithoutExtension().fromFirstOccurrenceOf (prefix, false, true);
+        if (v.isNotEmpty() && (best.version.isEmpty() || versionOlder (best.version, v)))
+            best = { f, v };
+    }
+    return best;
+}
 
 /** The OSC settings: the port, and the devices on the list. */
 struct OscSettings
@@ -92,6 +133,7 @@ struct OscSettings
             e->setAttribute ("host", d.host);
             if (d.replyPort > 0) e->setAttribute ("replyPort", d.replyPort);
             if (d.serial.isNotEmpty()) e->setAttribute ("serial", d.serial);
+            if (d.key.isNotEmpty()) e->setAttribute ("key", d.key);
         }
         return x;
     }
@@ -112,12 +154,13 @@ struct OscSettings
             d.host = e->getStringAttribute ("host").trim();
             d.replyPort = juce::jlimit (0, 65535, e->getIntAttribute ("replyPort", 0));
             d.serial = e->getStringAttribute ("serial").trim();
+            d.key = e->getStringAttribute ("key").trim();
             if (d.host.isNotEmpty()) s.devices.push_back (d);
         }
         // (from before the device list: the addresses it answered become devices)
         if (s.devices.empty())
             for (auto& h : s.fixedHosts())
-                s.devices.push_back ({ typeEverything, h, h, 0, {} });
+                s.devices.push_back ({ typeEverything, h, h, 0, {}, {} });
         return s;
     }
 };

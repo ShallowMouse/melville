@@ -38,6 +38,8 @@ Name: "desktopicon"; Description: "Put a MELVILLE shortcut on the desktop"; Grou
 Source: "..\build\Melville_artefacts\Release\MELVILLE.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\Resources\Licences\*.txt"; DestDir: "{app}\Licences"; Flags: ignoreversion
+; the hardware's firmware (signed), for MELVILLE to put on paired boxes
+Source: "..\firmware\*.bin"; DestDir: "{app}\firmware"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 Name: "{autoprograms}\MELVILLE"; Filename: "{app}\MELVILLE.exe"

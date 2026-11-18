@@ -411,8 +411,9 @@ private:
 };
 
 //==============================================================================
-/** The surfaces MELVILLE talks to: one row each, with its type, name, address and when it was
-    last heard from. Under it the ones it has heard from that aren't on the list yet. */
+/** The surfaces MELVILLE talks to: one row each, with its type, name, address, its firmware (and
+    whether it's paired, or an update is going) and when it was last heard from. Under it the ones
+    it has heard from that aren't on the list yet. */
 class DeviceList : public juce::Component, public juce::ListBoxModel
 {
 public:
@@ -452,11 +453,38 @@ public:
         g.setColour (Colours::text);
         g.drawText (d.name.isNotEmpty() ? d.name : d.host, r.removeFromLeft (150), juce::Justification::centredLeft);
         g.setColour (Colours::textDim);
-        g.drawText (d.host, r.removeFromLeft (130), juce::Justification::centredLeft);
+        g.drawText (d.host, r.removeFromLeft (112), juce::Justification::centredLeft);
         juce::String heard;
-        if (auto* o = melville::OscControl::instance()) heard = o->lastHeard (d.host);
+        auto* o = melville::OscControl::instance();
+        if (o != nullptr) heard = o->lastHeard (d.host);
         g.setColour (heard.isEmpty() ? Colours::textDim : Colours::text);
-        g.drawText (heard.isEmpty() ? "not heard from" : heard, r, juce::Justification::centredRight);
+        g.drawText (heard.isEmpty() ? "not heard from" : heard, r.removeFromRight (86), juce::Justification::centredRight);
+        // the hardware: firmware, pairing, an update
+        if (o != nullptr)
+        {
+            const auto [text, warn] = hardwareLine (*o, d);
+            g.setColour (warn ? Colours::accent : Colours::textDim);
+            g.drawText (text, r.reduced (6, 0), juce::Justification::centredLeft, true);
+        }
+    }
+
+    /** What to say about a device's firmware: an update going, pairing, or the version (and a newer one). */
+    static std::pair<juce::String, bool> hardwareLine (const melville::OscControl& o, const Device& listed)
+    {
+        // (the live entry: pairing changes it under the list's copy)
+        Device d = listed;
+        for (auto& live : o.getSettings().devices)
+            if (live.host.equalsIgnoreCase (listed.host)) d = live;
+        if (auto* u = o.updateFor (d.host)) return { u->describe(), u->getState() != melville::FirmwareUpload::done };
+        if (const auto p = o.pairStatus (d.host); p.isNotEmpty() && p != "paired") return { p, true };
+        const auto fw = o.firmwareOf (d.host);
+        if (fw.isEmpty()) return { d.key.isNotEmpty() ? "paired" : juce::String(), false };
+        juce::String line = "firmware " + fw;
+        const auto carried = melville::OscControl::carriedFirmware (d.type);
+        const bool newer = carried.version.isNotEmpty() && melville::versionOlder (fw, carried.version);
+        if (d.key.isEmpty()) line << "  -  not paired";
+        else if (newer) line << "  -  " << carried.version << " ready: UPDATE";
+        return { line, newer || d.key.isEmpty() };
     }
 
     void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override { if (onChosen) onChosen (row); }
@@ -530,7 +558,8 @@ public:
         addAndMakeVisible (devicesCaption);
         devicesHelp.setText ("Each surface, with what it drives. A device is sent only its own pages and can press only "
                              "its own keys, so a transport can't touch the monitoring. With devices listed, anything else "
-                             "on the network is ignored; with none listed MELVILLE answers whatever it hears.",
+                             "on the network is ignored; with none listed MELVILLE answers whatever it hears. "
+                             "Hardware: PAIR it (PLAY on the box says yes), then UPDATE puts the firmware this MELVILLE carries on it.",
                              juce::dontSendNotification);
         devicesHelp.setJustificationType (juce::Justification::topLeft);
         devicesHelp.setColour (juce::Label::textColourId, Colours::textDim);
@@ -555,6 +584,46 @@ public:
             showOsc();
         };
         addAndMakeVisible (removeDevice);
+        pairDevice.setTooltip ("Pair the hardware picked out above with this MELVILLE: the box asks on its own display, and PLAY "
+                               "there says yes. Pairing is what lets MELVILLE update its firmware.");
+        pairDevice.onClick = [this]
+        {
+            auto* o = melville::OscControl::instance();
+            const int row = devices.chosen();
+            if (o == nullptr || ! juce::isPositiveAndBelow (row, (int) o->getSettings().devices.size())) return;
+            const auto host = o->getSettings().devices[(size_t) row].host;
+            if (! o->requestPair (host))
+                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Pair",
+                                                        "Couldn't reach " + host + ". Is OSC on, and the box on the network?");
+            devices.repaint();
+        };
+        addAndMakeVisible (pairDevice);
+        updateDevice.setTooltip ("Put the firmware this MELVILLE carries on the hardware picked out above (it has to be paired). "
+                                 "If the update fails or breaks off, the box keeps running its old firmware.");
+        updateDevice.onClick = [this]
+        {
+            auto* o = melville::OscControl::instance();
+            const int row = devices.chosen();
+            if (o == nullptr || ! juce::isPositiveAndBelow (row, (int) o->getSettings().devices.size())) return;
+            const auto& d = o->getSettings().devices[(size_t) row];
+            const auto fw = o->firmwareOf (d.host);
+            const auto carried = melville::OscControl::carriedFirmware (d.type);
+            auto go = [this, host = d.host]
+            {
+                if (auto* o2 = melville::OscControl::instance())
+                    if (const auto why = o2->startUpdate (host); why.isNotEmpty())
+                        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Update", "Can't update: " + why + ".");
+                devices.repaint();
+            };
+            if (carried.version.isNotEmpty() && fw.isNotEmpty() && ! melville::versionOlder (fw, carried.version))
+                juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Update",
+                                                    d.name + " already runs " + fw + " (MELVILLE carries " + carried.version + "). Put it on again?",
+                                                    "Put it on", "Cancel", nullptr,
+                                                    juce::ModalCallbackFunction::create ([go] (int r) { if (r == 1) go(); }));
+            else
+                go();
+        };
+        addAndMakeVisible (updateDevice);
         heardCaption.setJustificationType (juce::Justification::topLeft);
         heardCaption.setColour (juce::Label::textColourId, Colours::text);
         addAndMakeVisible (heardCaption);
@@ -584,7 +653,7 @@ public:
         };
         oscTimer.startTimer (500);
 
-        setSize (620, 1016);
+        setSize (620, 1030);
     }
 
     void resized() override
@@ -620,14 +689,16 @@ public:
         r.removeFromTop (12);
         devicesTop = r.getY() - 6;
         devicesCaption.setBounds (r.removeFromTop (22));
-        devicesHelp.setBounds (r.removeFromTop (48));
+        devicesHelp.setBounds (r.removeFromTop (62));
         r.removeFromTop (6);
         devices.setBounds (r.removeFromTop (116));
         r.removeFromTop (8);
         auto row3 = r.removeFromTop (26);
         addDevice.setBounds (row3.removeFromLeft (110)); row3.removeFromLeft (8);
         editDeviceButton.setBounds (row3.removeFromLeft (70)); row3.removeFromLeft (8);
-        removeDevice.setBounds (row3.removeFromLeft (80));
+        removeDevice.setBounds (row3.removeFromLeft (80)); row3.removeFromLeft (16);
+        pairDevice.setBounds (row3.removeFromLeft (70)); row3.removeFromLeft (8);
+        updateDevice.setBounds (row3.removeFromLeft (90));
         r.removeFromTop (10);
         auto row4 = r.removeFromTop (26);
         addHeard.setBounds (row4.removeFromRight (120)); row4.removeFromRight (10);
@@ -673,7 +744,7 @@ private:
     {
         auto* o = melville::OscControl::instance();
         for (auto* c : std::initializer_list<juce::Component*> { &oscOn, &listenPort, &replyPort, &devices,
-                                                                 &addDevice, &editDeviceButton, &removeDevice })
+                                                                 &addDevice, &editDeviceButton, &removeDevice, &pairDevice, &updateDevice })
             c->setEnabled (o != nullptr);
         if (o == nullptr) { oscStatus.setText ("Not running.", juce::dontSendNotification); return; }
         const auto& s = o->getSettings();
@@ -716,7 +787,7 @@ private:
         if (heard.empty()) return;
         const auto& [host, c] = heard.front();
         auto s2 = o->getSettings();
-        s2.devices.push_back ({ c.type, c.name.isNotEmpty() ? c.name : melville::OscControl::deviceTypeName (c.type), host, 0, c.serial });
+        s2.devices.push_back ({ c.type, c.name.isNotEmpty() ? c.name : melville::OscControl::deviceTypeName (c.type), host, 0, c.serial, {} });
         o->apply (s2);
         showOsc();
     }
@@ -760,6 +831,7 @@ private:
                         else if (juce::isPositiveAndBelow (row, (int) s2.devices.size()))
                         {
                             nd.serial = s2.devices[(size_t) row].serial;
+                            nd.key = s2.devices[(size_t) row].key;
                             s2.devices[(size_t) row] = nd;
                         }
                         o2->apply (s2);
@@ -834,7 +906,8 @@ private:
     juce::TextEditor listenPort, replyPort;
     juce::Label devicesCaption, devicesHelp, heardCaption;
     DeviceList devices;
-    juce::TextButton addDevice { "ADD DEVICE" }, editDeviceButton { "EDIT" }, removeDevice { "REMOVE" }, addHeard { "ADD" };
+    juce::TextButton addDevice { "ADD DEVICE" }, editDeviceButton { "EDIT" }, removeDevice { "REMOVE" }, addHeard { "ADD" },
+                     pairDevice { "PAIR" }, updateDevice { "UPDATE" };
     int oscTop = 0, devicesTop = 0;
     struct Every : juce::Timer { std::function<void()> f; void timerCallback() override { if (f) f(); } } oscTimer;
 };
