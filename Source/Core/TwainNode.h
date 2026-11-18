@@ -24,7 +24,7 @@ public:
     static constexpr int numIns = cueIn0 + numCues;
 
     // settings (any thread)
-    std::atomic<int> source { twoTrack }, speakers { 0 };
+    std::atomic<int> source { mix }, speakers { 0 };
     std::atomic<float> monitorLevel { 1.0f }, dimLevel { 0.1f }, talkLevel { 1.0f };
     std::atomic<bool> dim { false }, mute { false }, mono { false }, talk { false };
     std::atomic<float> speakerTrim[numSpeakers] { { 1.0f }, { 1.0f }, { 1.0f } };
@@ -42,7 +42,7 @@ public:
         own settings stay - the monitor level, which speakers, their trims, how far DIM goes. */
     void freshSession() noexcept
     {
-        source = twoTrack;
+        source = mix;
         dim = false; mute = false; mono = false; talk = false;
         talkLevel = 1.0f;
         for (auto& f : feeds)

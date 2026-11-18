@@ -1953,14 +1953,14 @@ public:
                 {
                     auto before = studioXml();
                     hub->getTwain().feeds[0].cue[0] = 0.7f;          // (a cue mix from the last reel)
-                    hub->getTwain().source = melville::TwainNode::mix;
+                    hub->getTwain().source = melville::TwainNode::ext1;
                     melville::NewStudio made;
                     made.desk = 9; made.usualCables = false; made.bpm = 96.0; made.beatsPerBar = 3;
                     freshStudio (made);
                     const int desk = melville::currentDesk ? melville::currentDesk() : -1;
                     const auto cords = hub->getPatchbay().getAllCords().size();
                     freshOk = (desk == 9 || ! melville::currentDesk) && cords == 0 && melville::transport().beatsPerBar.load() == 3
-                              && hub->getTwain().feeds[0].cue[0].load() == 0.0f && hub->getTwain().source.load() == melville::TwainNode::twoTrack;
+                              && hub->getTwain().feeds[0].cue[0].load() == 0.0f && hub->getTwain().source.load() == melville::TwainNode::mix;
                     std::printf ("MELVILLE smoke: a new reel's studio %s (desk %d, %d cords, %d/4)\n", freshOk ? "is clean" : "NOT CLEAN",
                                  desk, (int) cords, melville::transport().beatsPerBar.load());
                     made.usualCables = true;
