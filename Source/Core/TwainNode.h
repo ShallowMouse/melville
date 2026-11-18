@@ -38,6 +38,21 @@ public:
     };
     std::array<Feed, numFeeds> feeds;
 
+    /** A new reel: the headphone mixes and what's being listened to go back to nothing. The room's
+        own settings stay - the monitor level, which speakers, their trims, how far DIM goes. */
+    void freshSession() noexcept
+    {
+        source = twoTrack;
+        dim = false; mute = false; mono = false; talk = false;
+        talkLevel = 1.0f;
+        for (auto& f : feeds)
+        {
+            for (auto& c : f.cue) c = 0.0f;
+            for (auto& p : f.pan) p = 0.0f;
+            f.mixLevel = 0.0f; f.clickLevel = 0.5f; f.level = 0.8f;
+        }
+    }
+
     // meters (audio -> UI): peak of the monitor and of each feed
     std::atomic<float> monitorPeak { 0.0f };
     std::array<std::atomic<float>, numFeeds> feedPeak {};
