@@ -407,15 +407,27 @@ public:
 
         // the cue grid: row names, column heads, a meter and a level per feed
         g.setFont (juce::Font (juce::FontOptions (11.0f)));
-        for (int r = 0; r < (int) rowAreas.size(); ++r)
+        for (int i = 0; i < (int) rowAreas.size() && i < (int) shownRows.size(); ++i)
         {
+            const int r = shownRows[(size_t) i];
+            const auto ra = rowAreas[(size_t) i];
             if (r == TwainNode::numCues)
             {
                 g.setColour (silk.withAlpha (0.2f));
-                g.drawHorizontalLine (rowAreas[(size_t) r].getY(), (float) rowAreas[(size_t) r].getX(), (float) feedsArea.getRight() - 24.0f);
+                g.drawHorizontalLine (ra.getY(), (float) ra.getX(), (float) feedsArea.getRight() - 24.0f);
+                if (i == 0)
+                {
+                    // nothing cabled into any cue input: say where they come from
+                    g.setColour (silk.withAlpha (0.45f));
+                    g.drawText ("Nothing is cabled into TWAIN's cue inputs - patch tracks to TWAIN Cue 1-16 to give each player their own mix",
+                                ra.withY (ra.getY() - 30).withHeight (24).withTrimmedLeft (6), juce::Justification::centredLeft);
+                }
             }
-            g.setColour (r < TwainNode::numCues && rowNames[r].contains ("nothing") ? silk.withAlpha (0.35f) : silk.withAlpha (0.9f));
-            g.drawFittedText (rowNames[r], rowAreas[(size_t) r].withWidth (rowLabelW - 6).reduced (6, 0), juce::Justification::centredLeft, 1);
+            if (juce::isPositiveAndBelow (r, rowNames.size()))
+            {
+                g.setColour (silk.withAlpha (0.9f));
+                g.drawFittedText (rowNames[r], ra.withWidth (rowLabelW - 6).reduced (6, 0), juce::Justification::centredLeft, 1);
+            }
         }
         // where the players set their own mixes
         if (phonesUrl)
@@ -508,10 +520,17 @@ public:
                 feedMeters.push_back (lv.removeFromRight (10));
                 feedLevels[f]->setBounds (lv.withTrimmedRight (6));
             }
-            const int rows = TwainNode::numCues + 2;
-            const int rowH = juce::jmax (18, a.getHeight() / rows);
+            // only the cue inputs with something cabled into them get a row of knobs (then MIX and CLICK)
+            shownRows.clear();
+            for (int c = 0; c < TwainNode::numCues; ++c)
+                if (rowNames.isEmpty() || ! cueEmpty (c)) shownRows.push_back (c);
+                else for (int f = 0; f < TwainNode::numFeeds; ++f) cells[f * TwainNode::numCues + c]->setVisible (false);
+            shownRows.push_back (TwainNode::numCues);
+            shownRows.push_back (TwainNode::numCues + 1);
+            if (shownRows.size() == 2) a.removeFromTop (34);       // (room for the hint)
+            const int rowH = juce::jmax (18, a.getHeight() / (TwainNode::numCues + 2));     // (the knobs keep their size; the rows close up)
             rowAreas.clear();
-            for (int row = 0; row < rows; ++row)
+            for (int row : shownRows)
             {
                 auto rr = a.removeFromTop (rowH);
                 rowAreas.push_back (rr);
@@ -522,6 +541,7 @@ public:
                     juce::Slider* k = row < TwainNode::numCues ? cells[f * TwainNode::numCues + row]
                                     : row == TwainNode::numCues ? mixKnobs[f] : clickKnobs[f];
                     k->setBounds (cell);
+                    k->setVisible (true);
                 }
             }
         }
@@ -588,9 +608,14 @@ private:
     // a cue row is named after what's cabled into it
     void updateRowNames()
     {
+        const auto was = rowNames;
         rowNames = twainCueNames (hub);
         rowNames.add ("MIX");
         rowNames.add ("CLICK");
+        bool layoutChanged = was.size() != rowNames.size();
+        for (int c = 0; c < TwainNode::numCues && ! layoutChanged; ++c)
+            layoutChanged = was[c].contains ("nothing cabled") != rowNames[c].contains ("nothing cabled");
+        if (layoutChanged) { resized(); repaint(); }
         for (int f = 0; f < TwainNode::numFeeds; ++f)
             for (int c = 0; c < TwainNode::numCues; ++c)
                 cells[f * TwainNode::numCues + c]->setTooltip ("Cue " + rowNames[c] + " in headphone feed " + juce::String (f + 1)
@@ -727,6 +752,8 @@ private:
     juce::Rectangle<int> roomArea, feedsArea, sourceCaption, speakerCaption, talkCaption, monitorMeter;
     std::vector<juce::Rectangle<int>> rowAreas, colHeads, feedMeters;
     juce::StringArray rowNames;
+    std::vector<int> shownRows;                     // the rows drawn: cue inputs with something cabled, then MIX and CLICK
+    bool cueEmpty (int c) const { return c < rowNames.size() && rowNames[c].contains ("nothing cabled"); }
     float shownMonitor = 0.0f;
     std::array<float, TwainNode::numFeeds> shownFeed {};
 };

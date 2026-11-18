@@ -1952,12 +1952,15 @@ public:
                 bool freshOk = true;
                 {
                     auto before = studioXml();
+                    hub->getTwain().feeds[0].cue[0] = 0.7f;          // (a cue mix from the last reel)
+                    hub->getTwain().source = melville::TwainNode::mix;
                     melville::NewStudio made;
                     made.desk = 9; made.usualCables = false; made.bpm = 96.0; made.beatsPerBar = 3;
                     freshStudio (made);
                     const int desk = melville::currentDesk ? melville::currentDesk() : -1;
                     const auto cords = hub->getPatchbay().getAllCords().size();
-                    freshOk = (desk == 9 || ! melville::currentDesk) && cords == 0 && melville::transport().beatsPerBar.load() == 3;
+                    freshOk = (desk == 9 || ! melville::currentDesk) && cords == 0 && melville::transport().beatsPerBar.load() == 3
+                              && hub->getTwain().feeds[0].cue[0].load() == 0.0f && hub->getTwain().source.load() == melville::TwainNode::twoTrack;
                     std::printf ("MELVILLE smoke: a new reel's studio %s (desk %d, %d cords, %d/4)\n", freshOk ? "is clean" : "NOT CLEAN",
                                  desk, (int) cords, melville::transport().beatsPerBar.load());
                     made.usualCables = true;
@@ -2272,6 +2275,7 @@ public:
         for (auto& [id, sp] : melville::sessionParts())
             if (id != "hawthorne" && sp.fresh)
                 sp.fresh (made);
+        hub->getTwain().freshSession();            // (the players' mixes were the last reel's)
         if (made.usualCables) hub->defaultPatch();
         else                  hub->getPatchbay().clearAll();
         if (made.bpm > 0.0) melville::setTempo (made.bpm, made.beatsPerBar, 0.0);
