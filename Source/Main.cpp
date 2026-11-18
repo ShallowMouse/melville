@@ -1662,12 +1662,22 @@ public:
 
     juce::String getTipFor (juce::Component& c) override
     {
-        for (auto* p = &c; p != nullptr; p = p->getParentComponent())
-            for (auto* child : p->getChildren())
-                if (child != this && dynamic_cast<juce::TooltipWindow*> (child) != nullptr)
-                    return {};
-        return juce::TooltipWindow::getTipFor (c);
+        // (asked several times a second while the mouse rests: the search up the windows is done
+        //  once for each thing the mouse comes to rest on)
+        if (&c != lastAsked.getComponent())
+        {
+            lastAsked = &c;
+            partHasOwn = false;
+            for (auto* p = &c; p != nullptr && ! partHasOwn; p = p->getParentComponent())
+                for (auto* child : p->getChildren())
+                    if (child != this && dynamic_cast<juce::TooltipWindow*> (child) != nullptr) { partHasOwn = true; break; }
+        }
+        return partHasOwn ? juce::String() : juce::TooltipWindow::getTipFor (c);
     }
+
+private:
+    juce::Component::SafePointer<juce::Component> lastAsked;
+    bool partHasOwn = false;
 };
 
 class MelvilleApplication : public juce::JUCEApplication
