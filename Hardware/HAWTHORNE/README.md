@@ -6,7 +6,7 @@ Firmware for the HAWTHORNE hardware: a WT32-ETH01 (ESP32 with Ethernet) with two
 
 ## The first install (USB, once)
 
-Arduino IDE with the **esp32 by Espressif** boards (3.3.x), board **WT32-ETH01 Ethernet Module**,
+Arduino IDE with the **esp32 by Espressif Systems** boards, **3.3.5 or newer** (signed updates need it), board **WT32-ETH01 Ethernet Module**,
 partition scheme **Default 4MB with spiffs** (it has the two app slots updates need). Libraries:
 Adafruit MCP23017 Arduino Library, TM1637 (Avishay Orpaz), LiquidCrystal_I2C. Open this folder's
 `HAWTHORNE.ino` and upload. (`build_opt.h` turns on the signature check; leave it in the folder.)

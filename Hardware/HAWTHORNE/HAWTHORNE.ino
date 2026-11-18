@@ -93,6 +93,13 @@
 #include <LiquidCrystal_I2C.h>
 #include <ESPmDNS.h>
 #include <Update.h>
+// (signed updates: the "esp32 by Espressif Systems" boards 3.3.5 or newer, and build_opt.h in this folder)
+#if !__has_include(<Updater_Signing.h>)
+#error "Update the boards: Tools > Board > Boards Manager > esp32 by Espressif Systems > 3.3.5 or newer (signed updates need it)"
+#endif
+#ifndef UPDATE_SIGN
+#error "build_opt.h is missing from the sketch folder (it turns on the signature check): keep all of HAWTHORNE's files together"
+#endif
 #include "firmware_version.h"
 #include "signing_key.h"
 
