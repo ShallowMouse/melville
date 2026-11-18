@@ -45,24 +45,6 @@ public:
             setColour (id, fresh.findColour (id));
     }
 
-    void drawLinearSlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float minPos, float maxPos,
-                           juce::Slider::SliderStyle style, juce::Slider& s) override
-    {
-        if (style != juce::Slider::LinearHorizontal)
-            return PequodLookAndFeel::drawLinearSlider (g, x, y, w, h, pos, minPos, maxPos, style, s);
-        auto r = juce::Rectangle<float> ((float) x, (float) y, (float) w, (float) h);
-        auto track = r.withSizeKeepingCentre (r.getWidth(), 4.0f);
-        g.setColour (Pequod::Colours::well);
-        g.fillRoundedRectangle (track, 2.0f);
-        g.setColour (Pequod::Colours::line);
-        g.drawLine (r.getCentreX(), track.getY() - 4, r.getCentreX(), track.getBottom() + 4, 1.0f);
-        auto thumb = juce::Rectangle<float> (10.0f, juce::jmin (18.0f, r.getHeight())).withCentre ({ pos, r.getCentreY() });
-        g.setColour (plum());
-        g.fillRoundedRectangle (thumb, 2.0f);
-        g.setColour (Pequod::Colours::bg);
-        g.drawLine (thumb.getCentreX(), thumb.getY() + 3, thumb.getCentreX(), thumb.getBottom() - 3, 1.0f);
-    }
-
     void drawPopupMenuBackground (juce::Graphics& g, int w, int h) override
     {
         g.fillAll (Pequod::Colours::panel);
@@ -86,18 +68,14 @@ public:
     PowerLight() : Button ("power") { setClickingTogglesState (true); }
     void paintButton (juce::Graphics& g, bool over, bool) override
     {
-        auto r = getLocalBounds().toFloat().withSizeKeepingCentre (14.0f, 14.0f);
-        if (getToggleState())
+        // a pilot lamp, plum glass
+        const float rad = juce::jmin (getWidth(), getHeight()) * 0.3f;
+        Pequod::hw::lamp (g, getLocalBounds().toFloat().getCentre(), rad, LookAndFeel::plum().brighter (0.3f), getToggleState());
+        if (over)
         {
-            g.setColour (LookAndFeel::plum().withAlpha (0.25f));
-            g.fillEllipse (r.expanded (3.0f));
-            g.setColour (LookAndFeel::plum());
+            g.setColour (juce::Colours::white.withAlpha (0.08f));
+            g.fillEllipse (getLocalBounds().toFloat().withSizeKeepingCentre (rad * 2.6f, rad * 2.6f));
         }
-        else
-            g.setColour (over ? juce::Colour (0xff4a4a4a) : juce::Colour (0xff333333));
-        g.fillEllipse (r);
-        g.setColour (Pequod::Colours::rail);
-        g.drawEllipse (r, 1.5f);
     }
 };
 
@@ -144,7 +122,7 @@ private:
     juce::TextButton mute { "MUTE" }, clear { "CLEAR" };
 
     juce::Viewport rackView;
-    juce::Component rack;
+    struct Cabinet : juce::Component { void paint (juce::Graphics&) override; } rack;      // (the rails, behind the units)
     juce::OwnedArray<Unit> units;
     std::unique_ptr<Blank> chooseInstrument, addEffect;
 

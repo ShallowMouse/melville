@@ -276,18 +276,19 @@ public:
     {
         auto& t = melville::transport();
         // the counter, like a tape machine's: hours, minutes, seconds, frames
-        g.setColour (juce::Colour (0xff101112));
-        g.fillRoundedRectangle (counterArea.toFloat(), 4.0f);
+        Pequod::hw::window (g, counterArea.toFloat().reduced (1.5f));
         const double rate = juce::jmax (1.0, t.reelRate.load());
         const double secs = (double) t.position.load() / rate;
         const int h = (int) (secs / 3600.0), m = (int) std::fmod (secs / 60.0, 60.0), sec = (int) std::fmod (secs, 60.0);
         const int fr = (int) (std::fmod (secs, 1.0) * 30.0);
         const auto text = juce::String (h) + ":" + juce::String (m).paddedLeft ('0', 2) + ":" + juce::String (sec).paddedLeft ('0', 2)
                           + ":" + juce::String (fr).paddedLeft ('0', 2);
-        g.setColour (t.recording.load() ? Colours::warn : t.rolling.load() ? Colours::accent : Colours::text);
         g.setFont (juce::Font (juce::FontOptions (22.0f, juce::Font::bold)));
         auto c = counterArea.reduced (8, 2);
-        g.drawText (text, c.removeFromTop (c.getHeight() * 3 / 5), juce::Justification::centred);
+        juce::String ghost;
+        for (auto ch : text) ghost += juce::CharacterFunctions::isDigit (ch) ? juce::juce_wchar ('8') : ch;
+        Pequod::hw::lit (g, text, c.removeFromTop (c.getHeight() * 3 / 5).toFloat(),
+                         t.recording.load() ? Colours::warn.brighter (0.3f) : t.rolling.load() ? Colours::accent.brighter (0.3f) : Colours::text, juce::Justification::centred, ghost);
         g.setFont (juce::Font (juce::FontOptions (11.0f)));
         g.setColour (Colours::textDim);
         juce::String sub = t.available.load() && t.reelLoaded.load() ? juce::String ("TAPE") : juce::String ("CLOCK");
@@ -302,6 +303,7 @@ public:
             sub = "BAR " + juce::String (bar) + "  BEAT " + juce::String (beat);
         }
         g.drawText (sub, c, juce::Justification::centred);
+        Pequod::hw::glass (g, counterArea.toFloat().reduced (1.5f));
 
         g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
         g.setColour (Colours::textDim);

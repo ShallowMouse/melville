@@ -27,37 +27,58 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (Pequod::Colours::panel);
+        // a strip of panel per slot: its number stamped in, the instrument's name on a strip of
+        // tape, a lamp that flickers with its notes and an LED meter
         for (int i = 0; i < Engine::numSlots; ++i)
         {
             auto& s = owner.engine.slot (i);
-            auto r = juce::Rectangle<int> (0, i * rowH, getWidth(), rowH - 2);
+            auto r = juce::Rectangle<int> (0, i * rowH, getWidth(), rowH);
+            if (! g.clipRegionIntersects (r)) continue;
             const bool sel = i == owner.current;
-            g.setColour (sel ? Pequod::Colours::well.brighter (0.15f) : Pequod::Colours::well);
-            g.fillRect (r);
+            Pequod::hw::panel (g, r.toFloat(), sel ? juce::Colour (0xff34313a) : juce::Colour (i % 2 == 0 ? 0xff26252a : 0xff222126));
+            g.setColour (juce::Colours::black.withAlpha (0.55f));
+            g.fillRect (r.removeFromBottom (1));
             if (sel) { g.setColour (accent()); g.fillRect (r.removeFromLeft (3)); } else r.removeFromLeft (3);
 
             auto num = r.removeFromLeft (34);
             g.setFont (Pequod::heading (16.0f));
-            g.setColour (sel ? accent() : Pequod::Colours::textDim);
-            g.drawText (juce::String (i + 1), num, juce::Justification::centred);
+            Pequod::hw::engraved (g, juce::String (i + 1), num.toFloat(), sel ? accent() : Pequod::Colours::textDim, juce::Justification::centred);
 
             // the meter and the note lamp, right
             auto m = r.removeFromRight (16).reduced (4, 8);
-            g.setColour (juce::Colours::black);
-            g.fillRect (m);
             const float pk = juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (shown[(size_t) i], -60.0f) + 60.0f) / 66.0f);
-            g.setColour (pk > 0.95f ? juce::Colour (0xffd04a3a) : accent());
-            g.fillRect (m.withTrimmedTop (juce::roundToInt ((float) m.getHeight() * (1.0f - pk))));
-            auto lamp = r.removeFromRight (16);
-            g.setColour (accent().withAlpha (0.15f + 0.85f * lamps[(size_t) i]));
-            g.fillEllipse (lamp.toFloat().withSizeKeepingCentre (7.0f, 7.0f));
+            Pequod::hw::ledLadder (g, m.toFloat(), pk, 10, accent().brighter (0.3f));
+            auto lamp = r.removeFromRight (18);
+            Pequod::hw::lamp (g, lamp.toFloat().getCentre(), 3.5f, accent().brighter (0.4f), lamps[(size_t) i] > 0.05f);
 
             r.reduce (4, 8);
             const auto name = s.shownName();
-            g.setFont (Pequod::body (14.0f, true));
-            g.setColour (name.isEmpty() ? Pequod::Colours::textDim : Pequod::Colours::text);
-            g.drawText (name.isEmpty() ? juce::String ("Empty") : name, r.removeFromTop (r.getHeight() / 2), juce::Justification::centredLeft, true);
+            auto top = r.removeFromTop (r.getHeight() / 2).toFloat();
+            if (name.isNotEmpty())
+            {
+                // (on tape, in pen)
+                g.setFont (Pequod::body (14.0f, true));
+                auto tape = top.withWidth (juce::jmin (top.getWidth(), (float) juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), name) + 16.0f)).reduced (0.0f, 1.0f);
+                juce::Path strip;
+                juce::Random rng (i * 13 + 5);
+                strip.startNewSubPath (tape.getTopLeft());
+                strip.lineTo (tape.getTopRight());
+                for (int k = 1; k <= 5; ++k) strip.lineTo (tape.getRight() + (rng.nextFloat() - 0.5f) * 2.4f, tape.getY() + tape.getHeight() * (float) k / 5.0f);
+                strip.lineTo (tape.getBottomLeft());
+                for (int k = 4; k >= 1; --k) strip.lineTo (tape.getX() + (rng.nextFloat() - 0.5f) * 2.4f, tape.getY() + tape.getHeight() * (float) k / 5.0f);
+                strip.closeSubPath();
+                g.setColour (juce::Colours::black.withAlpha (0.35f));
+                g.fillPath (strip, juce::AffineTransform::translation (0.6f, 1.0f));
+                g.setColour (s.mute.load() ? juce::Colour (0xffa9a291) : juce::Colour (0xffe9e0c7));
+                g.fillPath (strip);
+                g.setColour (juce::Colour (0xff1c2a52));
+                g.drawText (name, tape.withTrimmedLeft (8.0f), juce::Justification::centredLeft, true);
+            }
+            else
+            {
+                g.setFont (Pequod::heading (13.0f));
+                Pequod::hw::engraved (g, "EMPTY", top, Pequod::Colours::textDim, juce::Justification::centredLeft);
+            }
             g.setFont (Pequod::body (11.5f));
             g.setColour (Pequod::Colours::textDim);
             juce::String sub = s.instrument == nullptr ? juce::String ("Click to choose an instrument")
@@ -105,10 +126,15 @@ public:
         for (int i = 0; i < Engine::numSlots; ++i)
         {
             auto& s = owner.engine.slot (i);
+            const float was = shown[(size_t) i], wasLamp = lamps[(size_t) i];
             shown[(size_t) i] = juce::jmax (s.peak.exchange (0.0f), shown[(size_t) i] * 0.8f);
             lamps[(size_t) i] = juce::jmax (s.noteLamp.exchange (0.0f), lamps[(size_t) i] * 0.7f);
+            if (shown[(size_t) i] < 1.0e-4f) shown[(size_t) i] = 0.0f;
+            if (lamps[(size_t) i] < 0.01f) lamps[(size_t) i] = 0.0f;
+            // (only the lamp and meter end of a row that moved)
+            if (std::abs (was - shown[(size_t) i]) > 1.0e-4f || (was > 0.05f) != (shown[(size_t) i] > 0.05f) || (wasLamp > 0.05f) != (lamps[(size_t) i] > 0.05f))
+                repaint (getWidth() - 50, i * rowH, 50, rowH);
         }
-        repaint();
     }
 
 private:
@@ -187,9 +213,8 @@ public:
     {
         auto r = getLocalBounds().toFloat();
         const float ear = (float) earFor (getWidth());
-        g.setColour (juce::Colour (0xff2a2b2e));
-        g.fillRect (r);
-        g.setColour (juce::Colour (0xff3a3b3f));
+        Pequod::hw::panel (g, r, juce::Colour (0xff2a2b2e));
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
         g.drawRect (r, 1.0f);
         const float u = (float) unitFor (getWidth());
         const int n = juce::jmax (1, juce::roundToInt (r.getHeight() / u));
@@ -198,8 +223,8 @@ public:
             for (int k : { 0, n - 1 })
             {
                 const float cy = r.getY() + u * ((float) k + 0.5f);
-                Pequod::drawScrew (g, { x, cy - half }, screw);
-                if (n == 1 || k == n - 1) Pequod::drawScrew (g, { x, cy + half }, screw);
+                Pequod::hw::screw (g, { x, cy - half }, screw, 0.4f + (float) k);
+                if (n == 1 || k == n - 1) Pequod::hw::screw (g, { x, cy + half }, screw, 1.3f + (float) k);
             }
         g.setColour (juce::Colour (0xff1c1d1f));
         g.fillRect (face.getBounds());
@@ -285,18 +310,28 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        auto r = getLocalBounds().toFloat().reduced ((float) earFor (getWidth()), 2.0f);
-        g.setColour (isMouseOver() ? accent().withAlpha (0.18f) : Pequod::Colours::well);
-        g.fillRoundedRectangle (r, 3.0f);
-        juce::Path p, d;
-        p.addRoundedRectangle (r, 3.0f);
-        const float dash[] = { 5.0f, 4.0f };
-        juce::PathStrokeType (1.2f).createDashedStroke (d, p, dash, 2);
-        g.setColour (accent().withAlpha (0.6f));
-        g.fillPath (d);
-        g.setFont (Pequod::heading (14.0f));
-        g.setColour (accent());
-        g.drawText (text, r, juce::Justification::centred);
+        // the next space in the rack, closed with a vented blank plate - click to fill it
+        auto r = getLocalBounds().toFloat();
+        const float ear = (float) earFor (getWidth()), u = (float) unitFor (getWidth());
+        Pequod::hw::panel (g, r, juce::Colour (isMouseOver() ? 0xff302e34 : 0xff27262b));
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.drawRect (r, 1.0f);
+        const float half = u * (float) (holeSpanMm / unitMm) * 0.5f, screw = juce::jmax (2.5f, u * 0.055f);
+        const int n = juce::jmax (1, juce::roundToInt (r.getHeight() / u));
+        for (float x : { ear * 0.5f, r.getRight() - ear * 0.5f })
+            for (int k : { 0, n - 1 })
+            {
+                const float cy = u * ((float) k + 0.5f);
+                if (k == 0 || n > 1) { Pequod::hw::screw (g, { x, cy - half }, screw, 0.9f); Pequod::hw::screw (g, { x, cy + half }, screw, 2.1f); }
+            }
+        auto vents = r.reduced (ear + u * 0.6f, u * 0.3f);
+        const float slotW = juce::jmax (3.0f, u * 0.07f), gap = slotW * 2.2f;
+        auto words = vents.withSizeKeepingCentre (juce::jmin (vents.getWidth(), 300.0f), vents.getHeight());
+        for (float x = vents.getX(); x + slotW < vents.getRight(); x += gap)
+            if (! (x + slotW > words.getX() - gap && x < words.getRight() + gap))
+                Pequod::hw::slot (g, { x, vents.getY(), slotW, vents.getHeight() });
+        g.setFont (Pequod::heading (juce::jlimit (12.0f, 16.0f, u * 0.3f)));
+        Pequod::hw::engraved (g, text, words, isMouseOver() ? accent().brighter (0.3f) : accent(), juce::Justification::centred);
     }
     void mouseEnter (const juce::MouseEvent&) override { repaint(); }
     void mouseExit (const juce::MouseEvent&) override  { repaint(); }
@@ -574,9 +609,37 @@ void View::timerCallback()
     if (ticks % 10 == 0) repaint (statusArea);
 }
 
+void View::Cabinet::paint (juce::Graphics& g)
+{
+    // inside the cabinet: dark, with the two rails running down it
+    const int w = getWidth();
+    const float ear = (float) earFor (w), u = (float) unitFor (w);
+    g.fillAll (juce::Colour (0xff0d0d0e));
+    for (float x : { 0.0f, (float) w - ear })
+        Pequod::hw::rail (g, { x, 0.0f, ear, (float) getHeight() }, u + 1.0f, 6.0f);
+}
+
 void View::paint (juce::Graphics& g)
 {
     g.fillAll (Pequod::Colours::bg);
+    {
+        // the rack's top panel (the slot's channel, level, mute), and the cabinet's sides
+        auto top = controlsArea.toFloat().expanded (0.0f, 2.0f);
+        Pequod::hw::panel (g, top, juce::Colour (0xff29282d), 3.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.drawRoundedRectangle (top, 3.0f, 1.0f);
+        auto cab = rackView.getBounds().withTrimmedRight (rackView.getScrollBarThickness()).expanded (6, 4).toFloat();
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff1e1f22), cab.getX(), 0.0f, juce::Colour (0xff0e0e0f), cab.getX() + 8.0f, 0.0f, false));
+        g.fillRoundedRectangle (cab, 4.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
+        g.drawRoundedRectangle (cab.reduced (0.5f), 4.0f, 1.0f);
+        auto frame = list->getBounds().withTrimmedTop (-24).toFloat();
+        Pequod::hw::panel (g, frame, juce::Colour (0xff1b1a1e), 3.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.drawRoundedRectangle (frame, 3.0f, 1.0f);
+        Pequod::hw::screw (g, frame.getTopLeft() + juce::Point<float> (9.0f, 12.0f), 3.0f, 0.5f);
+        Pequod::hw::screw (g, frame.getTopRight() + juce::Point<float> (-9.0f, 12.0f), 3.0f, 1.7f);
+    }
     partui::drawBar (g, headerArea, accent());
     partui::drawWordmark (g, headerArea.reduced (18, 0).removeFromLeft (190), "ALCOTT", "INSTRUMENT RACK", accent(), Pequod::heading (30.0f));
     g.setFont (Pequod::heading (13.0f));
@@ -589,13 +652,11 @@ void View::paint (juce::Graphics& g)
 
     // the list's heading, and the slot's
     g.setFont (Pequod::heading (12.0f));
-    g.setColour (Pequod::Colours::textDim);
-    g.drawText ("SLOTS", list->getBounds().withY (list->getY() - 24).withHeight (24).reduced (12, 0), juce::Justification::centredLeft);
+    Pequod::hw::engraved (g, "SLOTS", list->getBounds().withY (list->getY() - 24).withHeight (24).reduced (20, 0).toFloat(), Pequod::Colours::textDim, juce::Justification::centredLeft);
     g.setFont (Pequod::heading (16.0f));
-    g.setColour (accent());
     auto& s = const_cast<Engine&> (engine).slot (current);
-    g.drawText ("SLOT " + juce::String (current + 1) + (s.shownName().isNotEmpty() ? "   " + s.shownName().toUpperCase() : juce::String()),
-                controlsArea.withWidth (channel.getX() - controlsArea.getX() - 10), juce::Justification::centredLeft, true);
+    Pequod::hw::engraved (g, "SLOT " + juce::String (current + 1) + (s.shownName().isNotEmpty() ? "   " + s.shownName().toUpperCase() : juce::String()),
+                          controlsArea.withWidth (channel.getX() - controlsArea.getX() - 10).withTrimmedLeft (12).toFloat(), accent(), juce::Justification::centredLeft);
 }
 
 void View::resized()
@@ -613,8 +674,8 @@ void View::resized()
     list->setBounds (left.withHeight (SlotList::rowH * Engine::numSlots));
     r.removeFromLeft (10);
 
-    controlsArea = r.removeFromTop (40);
-    auto c = controlsArea.reduced (0, 6);
+    controlsArea = r.removeFromTop (44);
+    auto c = controlsArea.reduced (10, 7);
     clear.setBounds (c.removeFromRight (80));
     c.removeFromRight (6);
     mute.setBounds (c.removeFromRight (70));
@@ -622,8 +683,8 @@ void View::resized()
     level.setBounds (c.removeFromRight (230));
     c.removeFromRight (10);
     channel.setBounds (c.removeFromRight (190));
-    r.removeFromTop (4);
-    rackView.setBounds (r);
+    r.removeFromTop (10);
+    rackView.setBounds (r.reduced (6, 4));
     layoutRack();
 }
 
