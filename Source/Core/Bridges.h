@@ -129,6 +129,9 @@ namespace names
         s.addArray ({ "Mix L", "Mix R" });
         return s;
     }
+
+    /** POE's control voltages, in its device-channel order (poe::Engine::Outs). */
+    inline juce::StringArray poeOuts() { return { "Pitch CV", "Gate", "Trigger", "CV B", "CV C" }; }
 }
 
 } // namespace melville

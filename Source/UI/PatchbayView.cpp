@@ -308,9 +308,18 @@ void PatchCanvas::rebuild()
                      slotOuts, slotShort }, none);
         juce::StringArray slotIns, slotInShort;
         for (int k = 1; k <= MidiNode::numAlcottSlots; ++k) { slotIns.add ("ALCOTT slot " + juce::String (k)); slotInShort.add (juce::String (k)); }
-        column (p, none, { "MIDI IN", "midi", "Each slot's MIDI in: what plays its instrument. A keyboard, THOREAU's steps (pick its pad by the slot's channel), "
+        column (p, none, { "MIDI IN", "midi", "Each slot's MIDI in: what plays its instrument. A keyboard, POE, THOREAU's steps (pick its pad by the slot's channel), "
                                               "the clock for arpeggiators. Several into one slot merge.",
                            slotIns, slotInShort }); }
+
+    {   auto& p = panel ("poe", "POE");
+        column (p, { "CV OUT", "poe", "POE's control voltages, for analogue synths through a DC-coupled interface output: pitch at 1 V an octave "
+                                      "(0 V is C2), gate and a 1 ms trigger at 5 V, and rows B and C as 0-5 V. Set your interface's full scale in POE.",
+                     names::poeOuts(), { "CV", "GATE", "TRIG", "B", "C" } }, none);
+        column (p, { "MIDI OUT", "midi", "POE's notes as MIDI (and rows B and C as CCs if POE sends them): cable to ALCOTT's slots or a MIDI OUT for hardware.",
+                     { "POE" }, { "POE" } },
+                   { "TRANSPOSE", "midi", "A keyboard here transposes the sequence: middle C plays it as written.",
+                     { "POE transpose" }, { "KEY" } }); }
 
     {   auto& p = panel ("hawthorne", "HAWTHORNE");
         column (p, { "TRACK OUT", "route", "Each tape track playing back (or its input, while the track monitors input). To EMERSON by default.",

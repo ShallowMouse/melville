@@ -184,6 +184,13 @@ melville_part(NAME "ALCOTT" DIR "${CMAKE_CURRENT_SOURCE_DIR}/Alcott" MAKER MakeA
     DEFS "hawthorne=pequod_hawthorne;IRVING_LOOK=1"
     INCLUDES "${PEQUOD_HOST_DIR}/Source")
 
+# POE: MELVILLE's step sequencer (its own code, in PEQUOD's look and hardware drawing)
+melville_part(NAME "POE" DIR "${CMAKE_CURRENT_SOURCE_DIR}/Poe" MAKER MakePoe.cpp
+    SOURCES
+        Source/PoeEngine.cpp Source/PoeView.cpp
+    DEFS "hawthorne=pequod_hawthorne;IRVING_LOOK=1"
+    INCLUDES "${PEQUOD_HOST_DIR}/Source")
+
 # ---------------------------------------------------------------------------
 target_compile_definitions(Melville PRIVATE ${COMMON_DEFS}
     JUCE_ASIO=1

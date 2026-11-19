@@ -4,8 +4,9 @@
 // cable carrying all sixteen channels from one OUT to one IN (and a mult for THRU).
 //
 //   sources:       Keyboards (every MIDI input merged), In: <each MIDI input>,
-//                  THOREAU steps (each pad on its own channel), Clock (24 a beat, start / stop)
-//   destinations:  ALCOTT slot 1 - 8, Out: <each MIDI output>
+//                  THOREAU steps (each pad on its own channel), Clock (24 a beat, start / stop),
+//                  POE (the step sequencer's notes and CCs)
+//   destinations:  ALCOTT slot 1 - 8, POE transpose, Out: <each MIDI output>
 //
 // It's a node like the others, so its jacks are patchbay channels, saved with the patch and
 // cabled the same way; the patchbay only lets MIDI go to MIDI. Its audio is silence. The
@@ -35,7 +36,9 @@ public:
         for (auto& d : inputs) port.sources.add ("In: " + d.name);
         port.sources.add ("THOREAU steps");
         port.sources.add ("Clock");
+        port.sources.add ("POE");
         for (int k = 1; k <= numAlcottSlots; ++k) port.dests.add ("ALCOTT slot " + juce::String (k));
+        port.dests.add ("POE transpose");
         for (auto& d : outputs) port.dests.add ("Out: " + d.name);
         buffers.resize ((size_t) port.sources.size());
         for (auto& b : buffers) b.ensureSize (2048);
@@ -51,8 +54,10 @@ public:
     int input (int i) const noexcept    { return 1 + i; }
     int thoreauSteps() const noexcept   { return 1 + inputs.size(); }
     int clock() const noexcept          { return 2 + inputs.size(); }
+    int poe() const noexcept            { return 3 + inputs.size(); }
     int alcottSlot (int k) const noexcept { return k; }                    // (destination)
-    int output (int i) const noexcept   { return numAlcottSlots + i; }    // (destination)
+    int poeTranspose() const noexcept   { return numAlcottSlots; }         // (destination)
+    int output (int i) const noexcept   { return numAlcottSlots + 1 + i; } // (destination)
 
     juce::MidiBuffer& source (int i) noexcept { return buffers[(size_t) i]; }
 
@@ -173,6 +178,13 @@ public:
         const double len = sr * 60.0 / juce::jmax (20.0, getBpm ? getBpm() : 120.0) * 4.0
                            / juce::jlimit (1, 64, stepLength.load (std::memory_order_relaxed)) * 0.9;
         o = at + juce::jmax (64, (int) len);
+    }
+
+    /** POE's turn (audio thread): a message from the sequencer, `offset` samples into the block
+        (POE lets its own notes go). */
+    void postPoe (const juce::MidiMessage& m, int offset) noexcept
+    {
+        buffers[(size_t) poe()].addEvent (m, juce::jlimit (0, juce::jmax (0, frameN - 1), offset));
     }
 
     /** A destination's MIDI: everything cabled into it this block (audio thread). */

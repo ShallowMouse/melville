@@ -12,6 +12,7 @@
 #include "../Source/Hosted/MelvilleHosted.h"
 #include "../Source/Core/OscDevices.h"
 #include "../Source/Core/AsioNode.h"
+#include "../Poe/Source/PoeEngine.h"
 #include <cstdio>
 
 using namespace melville;
@@ -68,7 +69,7 @@ int main()
     // --- parts' devices show the right channels
     {
         PartDeviceType all (hub);
-        CHECK (all.getDeviceNames().size() == 5 + Hub::maxIrvings);   // (Hawthorne, EMERSON, WHITMAN, THOREAU, ALCOTT and the IRVINGs)
+        CHECK (all.getDeviceNames().size() == 6 + Hub::maxIrvings);   // (Hawthorne, EMERSON, WHITMAN, THOREAU, ALCOTT, POE and the IRVINGs)
         PartDeviceType one (hub, "emerson");
         CHECK (one.getDeviceNames() == juce::StringArray ("Hawthorne Route (MELVILLE)"));
     }
@@ -310,6 +311,124 @@ int main()
         CHECK (ticks == 47 || ticks == 48);
         std::printf ("    MIDI: clock %d ticks in a second at 120, %d start\n", ticks, starts);
         clock.getState = oldState;
+    }
+
+    // --- POE: its jacks, its MIDI reaching what it's cabled to (ALCOTT slot 1 by default), and the sequencer itself
+    {
+        auto& mpb = hub.getPatchbay();
+        auto* midi = hub.getMidi();
+        const int poeOut = mpb.findSource ("midi", "POE"), poeIn = mpb.findDest ("midi", "POE transpose");
+        const int slot1 = mpb.findDest ("midi", "ALCOTT slot 1"), slot2 = mpb.findDest ("midi", "ALCOTT slot 2");
+        CHECK (poeOut >= 0 && poeIn >= 0 && slot1 >= 0);
+        CHECK (mpb.isConnected (poeOut, slot1) && ! mpb.isConnected (poeOut, slot2));
+        CHECK (mpb.findSource ("poe", "Pitch CV") >= 0 && mpb.findSource ("poe", "Gate") >= 0 && mpb.findSource ("poe", "CV C") >= 0);
+        juce::AudioBuffer<float> silence (juce::jmax (1, midi->port.sources.size()), 512);
+        midi->pull (silence.getArrayOfWritePointers(), 512);
+        midi->postPoe (juce::MidiMessage::noteOn (1, 57, 0.8f), 100);
+        juce::MidiBuffer s1, s2;
+        midi->take (slot1 - mpb.findPort ("midi")->firstDest, s1);
+        midi->take (slot2 - mpb.findPort ("midi")->firstDest, s2);
+        int at = -1;
+        for (const auto meta : s1) if (meta.getMessage().isNoteOn() && meta.getMessage().getNoteNumber() == 57) at = meta.samplePosition;
+        int any2 = 0;
+        for (const auto meta : s2) if (meta.getMessage().getNoteNumber() == 57) ++any2;
+        CHECK (at == 100 && any2 == 0);
+
+        // the sequencer, offline: 120 BPM, 1/16 = 6000 samples a step at 48 kHz
+        poe::Engine e;
+        e.prepare (48000.0);
+        e.run = true;
+        e.scale = 0; e.octave = 3; e.root = 0; e.range = 1;          // chromatic, from C3 (48), one octave
+        auto& p = e.pattern (0);
+        for (int i = 0; i < poe::Engine::numSteps; ++i) { p.steps[(size_t) i].a = (float) i / 12.0f; p.steps[(size_t) i].c = 0.5f; }
+        struct Ev { juce::int64 at; int note; bool on; };
+        auto runFor = [&] (int samples, double startTape, std::vector<Ev>& evs, std::vector<float>* pitch = nullptr, std::vector<float>* gate = nullptr,
+                           bool rolling = true)
+        {
+            juce::AudioBuffer<float> out (poe::Engine::numOutputs, 512);
+            juce::MidiBuffer none, m;
+            for (int done = 0, n = 512; done < samples; done += n)
+            {
+                n = juce::jmin (512, samples - done);     // (exactly `samples`)
+                poe::Engine::Clock c;
+                c.running = rolling; c.tapePos = startTape + done; c.tapePerSample = 1.0; c.bpm = 120.0; c.reelRate = 48000.0;
+                out.clear(); m.clear();
+                e.process (out.getArrayOfWritePointers(), out.getNumChannels(), n, c, none, m);
+                for (const auto meta : m)
+                {
+                    const auto msg = meta.getMessage();
+                    if (msg.isNoteOnOrOff()) evs.push_back ({ done + meta.samplePosition, msg.getNoteNumber(), msg.isNoteOn() });
+                }
+                if (pitch) for (int i = 0; i < n; ++i) pitch->push_back (out.getSample (poe::Engine::pitchCv, i));
+                if (gate) for (int i = 0; i < n; ++i) gate->push_back (out.getSample (poe::Engine::gateOut, i));
+            }
+        };
+        std::vector<Ev> ev;
+        std::vector<float> pitch, gate;
+        runFor (4 * 6000, 0.0, ev, &pitch, &gate);
+        std::vector<Ev> ons;
+        for (auto& x : ev) if (x.on) ons.push_back (x);
+        CHECK (ons.size() == 4);
+        CHECK (ons.size() == 4 && ons[0].at == 0 && ons[1].at == 6000 && ons[2].at == 12000 && ons[3].at == 18000);
+        CHECK (ons.size() == 4 && ons[0].note == 48 && ons[1].note == 49 && ons[3].note == 51);
+        // gate time 0.5 holds 52.5 % of the step; the CV: 1 V an octave from C2 at 10 V full scale (C3 = 1 V = 0.1)
+        juce::int64 firstOff = -1;
+        for (auto& x : ev) if (! x.on) { firstOff = x.at; break; }
+        CHECK (firstOff == 3150);
+        CHECK (std::abs (pitch[100] - 0.1f) < 1e-5f && std::abs (pitch[6100] - (13.0f / 12.0f) / 10.0f) < 1e-5f);
+        CHECK (gate[100] > 0.49f && gate[100] < 0.51f && gate[4000] == 0.0f);
+
+        // a TIE: step 2 carries straight on from step 1 (step 1's note holds; no new gate)
+        p.steps[1].mode = poe::Engine::tie;
+        ev.clear(); gate.clear();
+        runFor (2 * 6000, 0.0, ev, nullptr, &gate);
+        int ons2 = 0;
+        juce::int64 off48 = -1;
+        for (auto& x : ev) { if (x.on) ++ons2; if (! x.on && x.note == 48) off48 = x.at; }
+        CHECK (ons2 == 2 && off48 == 6000);                                // (49 on, then 48 off, at the tie)
+        CHECK (gate[5990] > 0.4f && gate[6010] > 0.4f);                    // the gate holds through
+        p.steps[1].mode = poe::Engine::play;
+
+        // LENGTH 4 with step 2 skipped: steps 1, 3, 4, 1 ...; and PENDULUM over four steps
+        p.length = 4;
+        p.steps[1].mode = poe::Engine::skip;
+        CHECK (e.stepAt (0) == 0 && e.stepAt (1) == 2 && e.stepAt (2) == 3 && e.stepAt (3) == 0);
+        p.steps[1].mode = poe::Engine::play;
+        e.direction = poe::Engine::pendulum;
+        CHECK (e.stepAt (3) == 3 && e.stepAt (4) == 2 && e.stepAt (6) == 0 && e.stepAt (7) == 1);
+        e.direction = poe::Engine::randomly;
+        CHECK (e.stepAt (123) == e.stepAt (123));                           // (the same at the same place)
+        e.direction = poe::Engine::forward;
+        p.length = poe::Engine::numSteps;
+
+        // SWING at 75 %: the second step of each pair comes at 1.5 steps
+        e.swing = 0.5f;
+        ev.clear();
+        runFor (2 * 6000, 0.0, ev);
+        juce::int64 second = -1;
+        for (auto& x : ev) if (x.on && x.note == 49) second = x.at;
+        CHECK (second == 9000);
+        e.swing = 0.0f;
+
+        // following the tape: started mid-way into step 6 it plays step 7 next; stopping lets the note go
+        ev.clear();
+        runFor (6000, 6.5 * 6000.0, ev);
+        juce::int64 at54 = -1;
+        for (auto& x : ev) if (x.on && x.note == 54 && at54 < 0) at54 = x.at;
+        CHECK (at54 == 0);                                                  // (the step it's in, at once)
+        bool next = false;
+        for (auto& x : ev) if (x.on && x.note == 55 && x.at == 3000) next = true;
+        CHECK (next);
+        ev.clear();
+        runFor (512, 0.0, ev, nullptr, nullptr, false);
+        CHECK (ev.size() == 1 && ! ev[0].on);
+
+        // and it keeps in the session
+        e.pattern (3).steps[5].a = 0.25f; e.pattern (3).length = 7; e.rate = 4;
+        poe::Engine f;
+        f.fromXml (*e.toXml());
+        CHECK (f.pattern (3).steps[5].a.load() == 0.25f && f.pattern (3).length.load() == 7 && f.rate.load() == 4 && f.run.load());
+        std::printf ("    POE: steps every 6000 samples at 120, gates, ties, skips, swing, the tape's place and the session\n");
     }
 
     // --- control surfaces: a device is sent only its own pages, and presses only its own keys

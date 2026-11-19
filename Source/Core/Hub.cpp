@@ -44,6 +44,7 @@ Hub::Hub()
     addNode (std::make_unique<PartNode> ("whitman", "WHITMAN", names::linkToWhitman(), names::linkFromWhitman()));
     addNode (std::make_unique<PartNode> ("thoreau", "THOREAU", juce::StringArray(), names::thoreauOuts()));
     addNode (std::make_unique<PartNode> ("alcott", "ALCOTT", juce::StringArray(), names::alcottOuts()));
+    addNode (std::make_unique<PartNode> ("poe", "POE", juce::StringArray(), names::poeOuts()));
     // IRVING (PEQUOD Host): up to four at once, "pequod", "pequod2" ... (each its own patch panel)
     for (int n = 1; n <= maxIrvings; ++n)
         addNode (std::make_unique<PartNode> (irvingId (n), irvingTitle (n), names::numbered ("In ", 8), names::numbered ("Out ", 8)));
@@ -95,6 +96,7 @@ Hub::Hub()
         { Step::process, node ("pequod2") },
         { Step::process, node ("pequod3") },
         { Step::process, node ("pequod4") },
+        { Step::process, node ("poe") },         // (first of the players: its notes play ALCOTT in the same block)
         { Step::process, node ("thoreau") },
         { Step::process, node ("alcott") },     // (after THOREAU: its steps play ALCOTT in the same block)
         { Step::process, node ("hawthorne") },
@@ -240,6 +242,7 @@ void Hub::midiDefaults()
     if (midi == nullptr) return;
     for (int k = 1; k <= MidiNode::numAlcottSlots; ++k)
         patchbay.connect (patchbay.findSource ("midi", "Keyboards"), patchbay.findDest ("midi", "ALCOTT slot " + juce::String (k)));
+    patchbay.connect (patchbay.findSource ("midi", "POE"), patchbay.findDest ("midi", "ALCOTT slot 1"));     // (POE plays slot 1 until it's re-cabled)
 }
 
 //==============================================================================

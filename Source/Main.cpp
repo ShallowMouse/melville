@@ -88,6 +88,34 @@ static juce::Image loadIcon (const juce::String& id, int px = 128)
             g.fillRect (kb.getX() + kw * (float) k - kw * 0.3f, kb.getY(), kw * 0.6f, kb.getHeight() * 0.58f);
         return img;
     }
+    if (id == "poe")
+    {
+        // POE's mark, drawn: a row of step lamps over sixteen knobs' worth of a stepped line
+        juce::Image img (juce::Image::ARGB, px, px, true);
+        juce::Graphics g (img);
+        const float s = (float) px;
+        const auto cyan = Colours::forPart ("poe");
+        g.setColour (juce::Colour (0xff1c1d1f));
+        g.fillRoundedRectangle (0.0f, 0.0f, s, s, s * 0.16f);
+        const float heights[] = { 0.30f, 0.30f, 0.55f, 0.20f, 0.45f, 0.62f, 0.38f, 0.50f };
+        const float x0 = s * 0.14f, w = s * 0.72f / 8.0f, base = s * 0.80f;
+        juce::Path steps;
+        steps.startNewSubPath (x0, base - s * 0.5f * heights[0]);
+        for (int k = 0; k < 8; ++k)
+        {
+            const float y = base - s * 0.5f * heights[k];
+            steps.lineTo (x0 + w * (float) k, y);
+            steps.lineTo (x0 + w * (float) (k + 1), y);
+        }
+        g.setColour (cyan);
+        g.strokePath (steps, juce::PathStrokeType (s * 0.05f, juce::PathStrokeType::mitered, juce::PathStrokeType::square));
+        for (int k = 0; k < 8; ++k)
+        {
+            g.setColour (k == 2 ? juce::Colour (0xffff4a2e) : cyan.withAlpha (0.35f));
+            g.fillEllipse (juce::Rectangle<float> (s * 0.06f, s * 0.06f).withCentre ({ x0 + w * ((float) k + 0.5f), s * 0.20f }));
+        }
+        return img;
+    }
     if (data == nullptr) return {};
     // scaled down once, so the bar draws it crisply and cheaply
     auto big = juce::ImageCache::getFromMemory (data, size);
@@ -1854,6 +1882,7 @@ public:
         parts.push_back (parts::makeThoreau());
         parts.push_back (parts::makePequod());
         parts.push_back (parts::makeAlcott());
+        parts.push_back (parts::makePoe());
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);   // (Hawthorne sets its own as the default)
         tooltips = std::make_unique<StudioTooltips>();
 

@@ -166,6 +166,12 @@ void postNote (int channel, int note, float velocity, int offset) noexcept
         if (auto* m = h->getMidi()) m->postStep (channel, note, velocity, offset);
 }
 
+void postPoe (const juce::MidiMessage& msg, int offset) noexcept
+{
+    if (auto* h = Hub::getIfExists())
+        if (auto* m = h->getMidi()) m->postPoe (msg, offset);
+}
+
 int midiJack (const juce::String& name)
 {
     if (auto* h = Hub::getIfExists())

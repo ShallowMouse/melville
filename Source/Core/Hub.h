@@ -8,7 +8,7 @@
 //
 // Order in a block (Hub::buildSteps):
 //
-//   interface in, network in -> PEQUOD Host -> THOREAU -> ALCOTT -> Hawthorne
+//   interface in, network in -> PEQUOD Host -> POE -> THOREAU -> ALCOTT -> Hawthorne
 //     -> Route bridge (Hawthorne's tracks out)  -> EMERSON -> Route bridge (back into Hawthorne)
 //     -> Link bridge (EMERSON to the desk)      -> WHITMAN -> Link bridge (the mix and sends back)
 //     -> interface out
@@ -124,7 +124,7 @@ public:
 
     /** The MIDI patch bay (null in a hub without one). */
     MidiNode* getMidi() const noexcept { return midi; }
-    /** MIDI's usual cords: every keyboard to every ALCOTT slot. */
+    /** MIDI's usual cords: every keyboard to every ALCOTT slot, and POE to slot 1. */
     void midiDefaults();
 
     ClockNode& getClock() const

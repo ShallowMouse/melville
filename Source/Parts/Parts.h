@@ -42,6 +42,7 @@ namespace parts
     std::unique_ptr<PartUI> makeThoreau();
     std::unique_ptr<PartUI> makePequod (int instance = 1);    // IRVING; 2, 3, 4 for more of them
     std::unique_ptr<PartUI> makeAlcott();                     // the instrument rack (MELVILLE's own)
+    std::unique_ptr<PartUI> makePoe();                        // the step sequencer (MELVILLE's own)
 
     /** Hawthorne Link's window, for MELVILLE's NETWORK (onChanged: save the settings). */
     std::unique_ptr<juce::DocumentWindow> makeNetworkWindow (hawthorne::NetReceiver&, std::function<void()> onChanged);

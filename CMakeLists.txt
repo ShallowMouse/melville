@@ -75,6 +75,7 @@ endif()
 if(MELVILLE_BUILD_TESTS)
     juce_add_console_app(MelvilleTests PRODUCT_NAME "MelvilleTests")
     target_sources(MelvilleTests PRIVATE ${CORE_SOURCES} Tests/CoreTests.cpp
+        Poe/Source/PoeEngine.cpp
         "${HAWTHORNE_DIR}/Source/Network/NetReceiver.cpp"
         "${HAWTHORNE_DIR}/Source/Network/NetSender.cpp"
         "${HAWTHORNE_DIR}/Source/Engine/Varispeed.cpp")

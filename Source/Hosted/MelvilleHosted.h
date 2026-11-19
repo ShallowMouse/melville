@@ -203,6 +203,8 @@ namespace melville
         THOREAU STEPS jack: pad k on channel k, with the pad's MIDI note, `offset` samples into its
         block (audio thread; the patch bay lets the note go a step later). */
     void postNote (int channel, int note, float velocity, int offset) noexcept;
+    /** POE's turn (audio thread): a message from the sequencer into its POE jack, `offset` samples into its block. */
+    void postPoe (const juce::MidiMessage&, int offset) noexcept;
     /** A MIDI input jack on the patch bay by name ("ALCOTT slot 3"); -1 if there's none. Message thread. */
     int midiJack (const juce::String& name);
     /** Everything cabled into that jack this block (audio thread, in the part's turn). */
