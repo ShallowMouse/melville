@@ -35,6 +35,7 @@ namespace Colours
         if (id == "midi")      return juce::Colour (0xff3a3936);   // charcoal: a MIDI patch bay of the early eighties
         if (id == "interface") return juce::Colour (0xffbdbdbd);
         if (id == "network")   return juce::Colour (0xff8fa6bd);   // steel blue
+        if (id == "asio")      return juce::Colour (0xff8a8fb2);   // slate violet: MELVILLE ASIO, the other program
         return accent;                                             // the links
     }
 }

@@ -36,6 +36,10 @@ Name: "desktopicon"; Description: "Put a MELVILLE shortcut on the desktop"; Grou
 
 [Files]
 Source: "..\build\Melville_artefacts\Release\MELVILLE.exe"; DestDir: "{app}"; Flags: ignoreversion
+; MELVILLE ASIO, the virtual driver: MELVILLE registers it (INTERFACE > INSTALL), as a
+; versioned copy, so an update never overwrites one that REAPER still has loaded
+Source: "..\build\asio\Release\MelvilleAsio.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\Source\AsioDriver\LICENSE.txt"; DestDir: "{app}\Licences"; DestName: "MELVILLE-ASIO-GPLv3.txt"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\Resources\Licences\*.txt"; DestDir: "{app}\Licences"; Flags: ignoreversion
 ; the hardware's firmware (signed), for MELVILLE to put on paired boxes

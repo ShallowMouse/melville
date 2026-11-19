@@ -149,6 +149,16 @@ jobs:
           Select-String -Path tests.log -Pattern "FAIL" | ForEach-Object { Write-Output "::error title=test::$($_.Line)" }
           exit $code
 
+      - name: MELVILLE ASIO driver test (must pass to ship)
+        shell: pwsh
+        run: |
+          Push-Location build/asio/Release
+          & ./MelvilleAsioTest.exe *>&1 | Tee-Object -FilePath ../../../asio-test.log
+          $code = $LASTEXITCODE
+          Pop-Location
+          Select-String -Path asio-test.log -Pattern "FAIL" | ForEach-Object { Write-Output "::error title=asio::$($_.Line)" }
+          exit $code
+
       - name: Smoke test (every part starts inside MELVILLE)
         shell: pwsh
         run: |
@@ -168,9 +178,11 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist, portable, firmware | Out-Null
           Copy-Item "build/Melville_artefacts/Release/MELVILLE.exe" portable/
+          Copy-Item "build/asio/Release/MelvilleAsio.dll" portable/
           if (Get-ChildItem firmware -Filter *.bin) { New-Item -ItemType Directory -Force portable/firmware | Out-Null; Copy-Item firmware/*.bin portable/firmware/ }
           Copy-Item README.md portable/
           Copy-Item Resources/Licences/*.txt portable/
+          Copy-Item Source/AsioDriver/LICENSE.txt portable/MELVILLE-ASIO-GPLv3.txt
           Compress-Archive -Path portable/* -DestinationPath "dist/MELVILLE-$env:MELVILLE_VERSION-portable.zip"
 
       - name: Build installer

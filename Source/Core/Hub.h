@@ -29,6 +29,7 @@ namespace melville
 
 class PartDevice;
 class NetworkNode;
+class AsioNode;
 class RouteBridge;
 class LinkBridge;
 
@@ -64,6 +65,7 @@ public:
     PartNode* findPart (const juce::String& id) const;
     /** Hawthorne Link (the NETWORK panel). */
     NetworkNode& getNetwork() const noexcept { return *network; }
+    AsioNode& getAsio() const noexcept { return *asioBridge; }
     const std::vector<std::unique_ptr<Node>>& getNodes() const noexcept { return nodes; }
 
     double getSampleRate() const noexcept { return sampleRate; }
@@ -160,6 +162,7 @@ private:
     std::vector<Step> steps;
     Node* interfaceNode = nullptr;
     NetworkNode* network = nullptr;
+    AsioNode* asioBridge = nullptr;      // MELVILLE ASIO
 
     // one buffer per source channel: what each part / bridge put out this (or last) block
     juce::AudioBuffer<float> sourcePool;

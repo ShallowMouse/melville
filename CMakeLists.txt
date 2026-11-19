@@ -48,6 +48,7 @@ set(CORE_SOURCES
     Source/Core/Hub.cpp
     Source/Core/PartDevice.cpp
     Source/Core/Bridges.cpp
+    Source/Core/AsioNode.cpp
     Source/Core/NetworkNode.cpp
     Source/Hosted/MelvilleHosted.cpp)
 
@@ -87,4 +88,38 @@ if(MELVILLE_BUILD_TESTS)
         juce::juce_data_structures
         juce::juce_gui_basics
         juce::juce_recommended_config_flags)
+endif()
+
+# ---------------------------------------------------------------------------
+# MELVILLE ASIO: the virtual ASIO driver (Windows). Built against the ASIO SDK headers
+# bundled with JUCE, under the SDK's GPLv3 option (Source/AsioDriver/LICENSE.txt).
+# ---------------------------------------------------------------------------
+if(WIN32)
+    if(JUCE_DIR)
+        set(MELVILLE_ASIO_HEADERS "${JUCE_DIR}/modules/juce_audio_devices/native/asio")
+    else()
+        set(MELVILLE_ASIO_HEADERS "${juce_SOURCE_DIR}/modules/juce_audio_devices/native/asio")
+    endif()
+    add_library(MelvilleAsio SHARED Source/AsioDriver/MelvilleAsioDriver.cpp Source/AsioDriver/MelvilleAsio.def)
+    target_include_directories(MelvilleAsio PRIVATE "${MELVILLE_ASIO_HEADERS}")
+    target_compile_features(MelvilleAsio PRIVATE cxx_std_17)
+    target_compile_definitions(MelvilleAsio PRIVATE NOMINMAX UNICODE _UNICODE)
+    target_link_libraries(MelvilleAsio PRIVATE ole32 uuid advapi32 avrt user32)
+    set_target_properties(MelvilleAsio PROPERTIES
+        OUTPUT_NAME "MelvilleAsio"
+        MSVC_RUNTIME_LIBRARY "MultiThreaded"            # (no runtime DLLs to find inside REAPER's process)
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/asio"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/asio")
+
+    if(MELVILLE_BUILD_TESTS)
+        add_executable(MelvilleAsioTest Tests/MelvilleAsioDriverTest.cpp)
+        target_include_directories(MelvilleAsioTest PRIVATE "${MELVILLE_ASIO_HEADERS}")
+        target_compile_features(MelvilleAsioTest PRIVATE cxx_std_17)
+        target_compile_definitions(MelvilleAsioTest PRIVATE NOMINMAX)
+        target_link_libraries(MelvilleAsioTest PRIVATE ole32 uuid)
+        set_target_properties(MelvilleAsioTest PROPERTIES
+            MSVC_RUNTIME_LIBRARY "MultiThreaded"
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/asio")
+        add_dependencies(MelvilleAsioTest MelvilleAsio)
+    endif()
 endif()

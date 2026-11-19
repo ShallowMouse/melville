@@ -1,4 +1,5 @@
 #include "PatchbayView.h"
+#include "../Core/AsioNode.h"
 #include "MelvilleLookAndFeel.h"
 #include "../Core/NetworkNode.h"
 #include "../Core/Bridges.h"
@@ -268,6 +269,16 @@ void PatchCanvas::rebuild()
                                                 : "Into IRVING " + juce::String (n) + ": cable an interface input (or anything) here.",
                          { "In 1", "In 2" }, lr });
         }
+    }
+
+    {   // MELVILLE ASIO: a program on the virtual driver (REAPER, Guitar Rig...)
+        auto& p = panel ("asio", "MELVILLE ASIO");
+        juce::StringArray outs, ins;
+        for (int c = 1; c <= asio::channels; ++c) { outs.add ("Out " + juce::String (c)); ins.add ("In " + juce::String (c)); }
+        column (p, { "OUT", "asio", "What the program on MELVILLE ASIO plays (REAPER, Guitar Rig... with MELVILLE ASIO as its audio device): its outputs 1-24. "
+                                    "Cable them to tape tracks, the desk, TWAIN's CUE IN or the monitors.", outs, numbers (asio::channels) },
+                   { "IN", "asio", "What the program gets on its inputs 1-24: cable tape tracks, the mix, a guitar (an interface input) here to record or play "
+                                   "through them there.", ins, numbers (asio::channels) });
     }
 
     {   auto& p = panel ("thoreau", "THOREAU");

@@ -3,6 +3,7 @@
 #include "PartDevice.h"
 #include "Bridges.h"
 #include "NetworkNode.h"
+#include "AsioNode.h"
 
 namespace melville
 {
@@ -52,6 +53,11 @@ Hub::Hub()
     network = net.get();
     addNode (std::move (net));
 
+    // MELVILLE ASIO: another program (REAPER, Guitar Rig...) on the virtual ASIO driver
+    auto asioNode = std::make_unique<AsioNode>();
+    asioBridge = asioNode.get();
+    addNode (std::move (asioNode));
+
     // the links the apps already speak, played from MELVILLE's end
     auto route = std::make_unique<RouteBridge>();
     route->open();
@@ -84,6 +90,7 @@ Hub::Hub()
         { Step::pull,    node ("midi") },       // the keyboards' MIDI, ready for everyone
         { Step::pull,    node ("interface") },
         { Step::pull,    node ("network") },
+        { Step::pull,    node ("asio") },       // what the program on MELVILLE ASIO played
         { Step::process, node ("pequod") },
         { Step::process, node ("pequod2") },
         { Step::process, node ("pequod3") },
@@ -99,6 +106,7 @@ Hub::Hub()
         { Step::push,    node ("link") },       // the mix and sends back to EMERSON
         { Step::push,    node ("route") },      // EMERSON's tracks and mix back into Hawthorne
         { Step::process, node ("twain") },      // the control room: monitors and headphone feeds
+        { Step::push,    node ("asio") },       // its inputs, and the clock that runs it
         { Step::push,    node ("interface") },
         { Step::push,    node ("midi") },       // the MIDI outs (everything patched to them this block)
     };

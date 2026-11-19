@@ -11,6 +11,7 @@
 #include "../Source/Core/Bridges.h"
 #include "../Source/Hosted/MelvilleHosted.h"
 #include "../Source/Core/OscDevices.h"
+#include "../Source/Core/AsioNode.h"
 #include <cstdio>
 
 using namespace melville;
@@ -385,6 +386,45 @@ int main()
         CHECK (! r.fixedIp && r.nowIp == "192.168.1.42" && r.ip == "192.168.1.42" && r.gateway == "192.168.1.1");   // (a start for fixing it)
         CHECK (! r.fixedMelville && r.melvilleIp == "192.168.1.10" && r.backlight && r.firmware == "3.2.0");
         std::printf ("    OSC: a box's network settings check out before they go\n");
+    }
+
+    // --- MELVILLE ASIO: a program on the virtual driver gets 24 channels each way, on MELVILLE's clock
+    {
+        auto* panel = findNode<AsioNode> (hub);
+        CHECK (panel != nullptr && panel->port.sources.size() == 24 && panel->port.dests.size() == 24);
+        CHECK (panel != nullptr && panel->port.sources[0] == "Out 1" && panel->port.dests[23] == "In 24");
+
+        AsioNode a;
+        a.prepare (48000.0, n);
+        auto* sh = a.getShared();
+        CHECK (sh != nullptr && sh->sampleRate.load() == 48000 && sh->magic == asio::magic);
+        std::vector<std::vector<float>> src (24, std::vector<float> ((size_t) n, 9.0f)), dst (24, std::vector<float> ((size_t) n, 0.0f));
+        std::vector<float*> srcPtrs;  for (auto& v : src) srcPtrs.push_back (v.data());
+        std::vector<const float*> dstPtrs; for (auto& v : dst) dstPtrs.push_back (v.data());
+
+        a.pull (srcPtrs.data(), n);                                  // nobody on the driver: silence
+        CHECK (src[3][0] == 0.0f && ! a.isConnected());
+
+        // "REAPER" has played 1024 frames at a 128 buffer, a ramp on its output 4
+        sh->driverRunning = 1; sh->driverBlock = 128; sh->driverClientId = 1;
+        std::strcpy (sh->clientName, "reaper");
+        for (int k = 0; k < 1024; ++k) sh->toMelville[3][k] = (float) k;
+        sh->toWrite = 1024;
+        a.pull (srcPtrs.data(), n);
+        const int target = 128 + n + 32;
+        CHECK (src[3][0] == (float) (1024 - target) && src[3][n - 1] == (float) (1024 - target + n - 1));
+        CHECK (src[2][0] == 0.0f && a.getLatency() == target && a.isConnected() && a.clientName() == "reaper");
+        a.pull (srcPtrs.data(), n);                                  // the next block carries straight on
+        CHECK (src[3][0] == (float) (1024 - target + n));
+
+        // MELVILLE's In 6 goes to the program's input 6, and the clock moves on
+        std::fill (dst[5].begin(), dst[5].end(), 0.5f);
+        a.push (dstPtrs.data(), n);
+        CHECK (sh->fromMelville[5][0] == 0.5f && sh->fromMelville[5][n - 1] == 0.5f && sh->fromMelville[4][0] == 0.0f);
+        CHECK (sh->clock.load() == n && sh->fromWrite.load() == n);
+        a.release();
+        CHECK (sh->sampleRate.load() == 0);
+        std::printf ("    MELVILLE ASIO: 24 each way, the program's outputs %d samples behind, MELVILLE's clock drives it\n", target);
     }
 
     std::printf (failures == 0 ? "MELVILLE core: all tests passed\n" : "MELVILLE core: %d failure(s)\n", failures);

@@ -1,0 +1,14 @@
+MELVILLE ASIO (this folder) is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License, version 3, as published by the Free
+Software Foundation.
+
+It is built against Steinberg's ASIO SDK headers (asio.h, asiosys.h, iasiodrv.h: the copy
+bundled with JUCE, modules/juce_audio_devices/native/asio), which Steinberg licenses under
+its proprietary ASIO licence or, alternatively, under the GPL version 3 - used here under
+the GPL version 3.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See https://www.gnu.org/licenses/gpl-3.0.html for the full licence.
+
+ASIO is a trademark and software of Steinberg Media Technologies GmbH.

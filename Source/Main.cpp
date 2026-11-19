@@ -19,6 +19,7 @@
 #include "UI/PhonesServer.h"
 #include "UI/OscControl.h"
 #include "Core/NetworkNode.h"
+#include "Core/AsioNode.h"
 #include "Updater.h"
 #include "Hosted/MelvilleHosted.h"
 
@@ -725,6 +726,32 @@ public:
     explicit InterfacePanel (Hub& h) : hub (h), selector (h.deviceManager, 0, 64, 0, 64, true, false, false, false)
     {
         addAndMakeVisible (selector);
+
+        // MELVILLE ASIO: the virtual driver for REAPER, Guitar Rig... (under the device selector)
+        asioCaption.setText ("MELVILLE ASIO", juce::dontSendNotification);
+        asioCaption.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
+        asioCaption.setColour (juce::Label::textColourId, Colours::accent);
+        asioStatus.setJustificationType (juce::Justification::topLeft);
+        asioStatus.setColour (juce::Label::textColourId, Colours::textDim);
+        asioInstall.setTooltip ("Register the MELVILLE ASIO driver, so REAPER, Guitar Rig and other programs can pick it as their audio device "
+                                "(Windows asks for permission once)");
+        asioInstall.onClick = [this]
+        {
+            const auto err = AsioNode::installDriver();
+            if (err.isNotEmpty()) juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MELVILLE ASIO", err);
+            showAsio();
+        };
+        asioRemove.setTooltip ("Unregister the driver (programs won't list it any more)");
+        asioRemove.onClick = [this]
+        {
+            const auto err = AsioNode::uninstallDriver();
+            if (err.isNotEmpty()) juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "MELVILLE ASIO", err);
+            showAsio();
+        };
+        for (auto* c : std::initializer_list<juce::Component*> { &asioCaption, &asioStatus, &asioInstall, &asioRemove }) addAndMakeVisible (c);
+        asioTimer.fn = [this] { showAsio(); };
+        asioTimer.startTimer (1000);
+        showAsio();
         caption.setText ("LATENCY", juce::dontSendNotification);
         caption.setFont (juce::Font (juce::FontOptions (13.0f, juce::Font::bold)));
         caption.setColour (juce::Label::textColourId, Colours::accent);
@@ -927,6 +954,8 @@ public:
         page = juce::jlimit (0, 2, p);
         tabs[page].setToggleState (true, juce::dontSendNotification);
         selector.setVisible (page == 0);
+        for (auto* c : std::initializer_list<juce::Component*> { &asioCaption, &asioStatus, &asioInstall, &asioRemove })
+            c->setVisible (page == 0);
         for (auto* c : std::initializer_list<juce::Component*> { &caption, &help, &outBox, &inBox, &measure, &clear, &result })
             c->setVisible (page == 1);
         for (auto* c : std::initializer_list<juce::Component*> { &oscCaption, &oscHelp, &oscOn, &listenLabel, &listenPort, &replyLabel, &replyPort, &oscStatus,
@@ -945,7 +974,18 @@ public:
         const int tw = bar.getWidth() / 3;
         for (int i = 0; i < 3; ++i) tabs[i].setBounds (i < 2 ? bar.removeFromLeft (tw) : bar);
 
-        if (page == 0) { selector.setBounds (r); return; }
+        if (page == 0)
+        {
+            auto bottom = r.removeFromBottom (92).reduced (16, 6);
+            selector.setBounds (r);
+            asioCaption.setBounds (bottom.removeFromTop (20));
+            auto keys = bottom.removeFromRight (120);
+            asioInstall.setBounds (keys.removeFromTop (26)); keys.removeFromTop (6);
+            asioRemove.setBounds (keys.removeFromTop (26));
+            bottom.removeFromRight (10);
+            asioStatus.setBounds (bottom);
+            return;
+        }
         r.reduce (16, 10);
         if (page == 1)
         {
@@ -1198,6 +1238,39 @@ private:
                             juce::dontSendNotification);
         t.state = Hub::LatencyTest::idle;
     }
+
+    /** The driver's state, in words: installed? which program is on it, how far behind? */
+    void showAsio()
+    {
+        juce::String text;
+        const bool installed = AsioNode::isDriverInstalled();
+        if (! installed)
+            text = "Not installed. INSTALL registers it: then pick \"MELVILLE ASIO\" as the audio device in REAPER or Guitar Rig, "
+                   "and its 24 outputs and inputs appear on the patchbay's MELVILLE ASIO panel.";
+        else
+        {
+            auto& a = hub.getAsio();
+            if (a.isConnected())
+            {
+                const double rate = juce::jmax (1.0, hub.deviceManager.getCurrentAudioDevice() != nullptr
+                                                     ? hub.deviceManager.getCurrentAudioDevice()->getCurrentSampleRate() : 48000.0);
+                text = juce::String (a.clientName().isNotEmpty() ? a.clientName() : juce::String ("A program")) + " is on it: its outputs arrive "
+                       + juce::String (a.getLatency()) + " samples (" + juce::String (1000.0 * a.getLatency() / rate, 1) + " ms) behind.";
+            }
+            else
+                text = "Installed. Pick \"MELVILLE ASIO\" as the audio device in REAPER or Guitar Rig: its 24 outputs and inputs "
+                       "appear on the patchbay's MELVILLE ASIO panel. (MELVILLE keeps the interface.)";
+            if (! AsioNode::isDriverCurrent())
+                text << "  An older version is registered: INSTALL again to update it.";
+        }
+        asioStatus.setText (text, juce::dontSendNotification);
+        asioInstall.setButtonText (installed ? "REINSTALL" : "INSTALL");
+        asioRemove.setEnabled (installed);
+    }
+
+    struct AsioEvery : juce::Timer { std::function<void()> fn; void timerCallback() override { if (fn) fn(); } } asioTimer;
+    juce::Label asioCaption, asioStatus;
+    juce::TextButton asioInstall { "INSTALL" }, asioRemove { "REMOVE" };
 
     Hub& hub;
     juce::AudioDeviceSelectorComponent selector;
