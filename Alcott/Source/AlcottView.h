@@ -79,7 +79,7 @@ public:
     }
 };
 
-class View : public juce::Component, private juce::Timer
+class View : public juce::Component, private juce::Timer, private juce::MidiKeyboardState::Listener
 {
 public:
     View();
@@ -120,6 +120,14 @@ private:
     juce::ComboBox channel;
     juce::Slider level;
     juce::TextButton mute { "MUTE" }, clear { "CLEAR" };
+
+    // the keyboard: plays the slot that's showing (KEYS shows and hides it; the computer keys play it too)
+    juce::MidiKeyboardState keyState;
+    std::unique_ptr<juce::MidiKeyboardComponent> keyboard;
+    juce::TextButton keysButton { "KEYS" };
+    void showKeyboard (bool);
+    void handleNoteOn (juce::MidiKeyboardState*, int, int note, float velocity) override  { engine.playNote (current, note, juce::jmax (0.01f, velocity)); }
+    void handleNoteOff (juce::MidiKeyboardState*, int, int note, float) override          { engine.playNote (current, note, 0.0f); }
 
     juce::Viewport rackView;
     struct Cabinet : juce::Component { void paint (juce::Graphics&) override; } rack;      // (the rails, behind the units)

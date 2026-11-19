@@ -353,6 +353,27 @@ View::View()
     addAndMakeVisible (midiKey);
     midiKey.onClick = [this] { showMidiInputs(); };
 
+    // the keyboard (hidden until KEYS)
+    keyboard = std::make_unique<juce::MidiKeyboardComponent> (keyState, juce::MidiKeyboardComponent::horizontalKeyboard);
+    keyboard->setAvailableRange (21, 108);
+    keyboard->setLowestVisibleKey (36);
+    keyboard->setOctaveForMiddleC (4);
+    keyboard->setColour (juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour (0xfff1ead6));
+    keyboard->setColour (juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour (0xff1b1a1e));
+    keyboard->setColour (juce::MidiKeyboardComponent::keySeparatorLineColourId, juce::Colour (0xff6b6560));
+    keyboard->setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, LookAndFeel::plum().withAlpha (0.75f));
+    keyboard->setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, LookAndFeel::plum().withAlpha (0.25f));
+    keyboard->setColour (juce::MidiKeyboardComponent::shadowColourId, juce::Colours::black.withAlpha (0.4f));
+    keyboard->setColour (juce::MidiKeyboardComponent::upDownButtonBackgroundColourId, juce::Colour (0xff26252a));
+    keyboard->setColour (juce::MidiKeyboardComponent::upDownButtonArrowColourId, Pequod::Colours::text);
+    keyboard->setWantsKeyboardFocus (true);
+    addChildComponent (*keyboard);
+    keyState.addListener (this);
+    keysButton.setClickingTogglesState (true);
+    keysButton.setTooltip ("Show or hide the keyboard: it plays the slot showing (click the keys, or type: A W S E D F T G ... once it's clicked)");
+    keysButton.onClick = [this] { showKeyboard (keysButton.getToggleState()); };
+    addAndMakeVisible (keysButton);
+
     channel.addItem ("Any channel / pad", 1);
     for (int c = 1; c <= 16; ++c) channel.addItem ("Channel " + juce::String (c) + (c <= 12 ? "  /  pad " + juce::String (c) : juce::String()), c + 1);
     channel.setTooltip ("Only notes on this MIDI channel play the slot. THOREAU sends pad 1 on channel 1, pad 2 on channel 2 ...");
@@ -392,6 +413,7 @@ View::View()
         [this] (const melville::NewStudio&) { units.clear(); engine.fromXml (juce::XmlElement ("ALCOTT")); rebuildRack(); list->repaint(); } });   // (empty slots)
 
     // (development: instruments straight away, for screenshots and checks)
+    if (juce::SystemStats::getEnvironmentVariable ("ALCOTT_KEYS", {}).isNotEmpty()) showKeyboard (true);     // (for pictures)
     //   ALCOTT_PREVIEW="1=Juno Six|Tape Echo;2=Prophet Five"
     if (auto pv = juce::SystemStats::getEnvironmentVariable ("ALCOTT_PREVIEW", {}); pv.isNotEmpty())
         for (auto& item : juce::StringArray::fromTokens (pv, ";", ""))
@@ -445,6 +467,8 @@ View::View()
 View::~View()
 {
     stopTimer();
+    keyState.removeListener (this);
+    keyState.allNotesOff (0);
     units.clear();                       // (the panels go before their plugins)
     deviceManager.removeAudioCallback (&engine);
     melville::detach (deviceManager);
@@ -456,9 +480,19 @@ void View::changed()
     repaint (statusArea);
 }
 
+void View::showKeyboard (bool on)
+{
+    if (! on) keyState.allNotesOff (0);
+    keysButton.setToggleState (on, juce::dontSendNotification);
+    keyboard->setVisible (on);
+    resized();
+    if (on) keyboard->grabKeyboardFocus();
+}
+
 void View::select (int s)
 {
     if (s == current && ! units.isEmpty()) return;
+    keyState.allNotesOff (0);                 // (notes held on the keyboard end on the slot they started on)
     current = juce::jlimit (0, Engine::numSlots - 1, s);
     units.clear();
     rebuildRack();
@@ -683,7 +717,16 @@ void View::resized()
     level.setBounds (c.removeFromRight (230));
     c.removeFromRight (10);
     channel.setBounds (c.removeFromRight (190));
+    c.removeFromRight (10);
+    keysButton.setBounds (c.removeFromRight (70));
     r.removeFromTop (10);
+    if (keyboard != nullptr && keyboard->isVisible())
+    {
+        auto k = r.removeFromBottom (110).reduced (6, 4);
+        keyboard->setBounds (k);
+        keyboard->setKeyWidth (juce::jlimit (14.0f, 30.0f, (float) k.getWidth() / 36.0f));     // (three octaves or so in view)
+        r.removeFromBottom (6);
+    }
     rackView.setBounds (r.reduced (6, 4));
     layoutRack();
 }
