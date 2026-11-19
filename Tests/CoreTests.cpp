@@ -418,10 +418,14 @@ int main()
         CHECK (src[3][0] == (float) (1024 - target + n));
 
         // MELVILLE's In 6 goes to the program's input 6, and the clock moves on
+        // (on Windows this is the same named memory as the hub's own panel, which has run blocks already: go by where it stands)
         std::fill (dst[5].begin(), dst[5].end(), 0.5f);
+        const auto clock0 = sh->clock.load(), w0 = sh->fromWrite.load();
         a.push (dstPtrs.data(), n);
-        CHECK (sh->fromMelville[5][0] == 0.5f && sh->fromMelville[5][n - 1] == 0.5f && sh->fromMelville[4][0] == 0.0f);
-        CHECK (sh->clock.load() == n && sh->fromWrite.load() == n);
+        CHECK (sh->fromMelville[5][w0 & asio::ringMask] == 0.5f && sh->fromMelville[5][(w0 + n - 1) & asio::ringMask] == 0.5f
+               && sh->fromMelville[4][w0 & asio::ringMask] == 0.0f);
+        CHECK (sh->clock.load() == clock0 + n && sh->fromWrite.load() == w0 + n);
+        sh->driverRunning = 0;                                      // ("REAPER" goes)
         a.release();
         CHECK (sh->sampleRate.load() == 0);
         std::printf ("    MELVILLE ASIO: 24 each way, the program's outputs %d samples behind, MELVILLE's clock drives it\n", target);
