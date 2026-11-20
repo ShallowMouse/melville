@@ -90,29 +90,52 @@ static juce::Image loadIcon (const juce::String& id, int px = 128)
     }
     if (id == "poe")
     {
-        // POE's mark, drawn: a row of step lamps over sixteen knobs' worth of a stepped line
+        // POE's mark, drawn like the H and the I: a P whose stem is a column of step lamps
+        // (one lit) and whose bowl is the sequencer's row of knobs
         juce::Image img (juce::Image::ARGB, px, px, true);
         juce::Graphics g (img);
         const float s = (float) px;
+        const auto dark = juce::Colour (0xff1c1d1f);
         const auto cyan = Colours::forPart ("poe");
-        g.setColour (juce::Colour (0xff1c1d1f));
+        const float line = s * 0.03f;
+        g.setColour (dark);
         g.fillRoundedRectangle (0.0f, 0.0f, s, s, s * 0.16f);
-        const float heights[] = { 0.30f, 0.30f, 0.55f, 0.20f, 0.45f, 0.62f, 0.38f, 0.50f };
-        const float x0 = s * 0.14f, w = s * 0.72f / 8.0f, base = s * 0.80f;
-        juce::Path steps;
-        steps.startNewSubPath (x0, base - s * 0.5f * heights[0]);
-        for (int k = 0; k < 8; ++k)
-        {
-            const float y = base - s * 0.5f * heights[k];
-            steps.lineTo (x0 + w * (float) k, y);
-            steps.lineTo (x0 + w * (float) (k + 1), y);
-        }
+
+        juce::Path bowl;                                                                         // the bowl
+        const float bx0 = s * 0.36f, bx1 = s * 0.62f, by0 = s * 0.14f, by1 = s * 0.58f, r = (by1 - by0) * 0.5f;
+        bowl.startNewSubPath (bx0, by0);
+        bowl.lineTo (bx1, by0);
+        bowl.addCentredArc (bx1, by0 + r, r, r, 0.0f, 0.0f, juce::MathConstants<float>::pi, false);
+        bowl.lineTo (bx0, by1);
+        bowl.closeSubPath();
+        g.setColour (dark);
+        g.fillPath (bowl);
         g.setColour (cyan);
-        g.strokePath (steps, juce::PathStrokeType (s * 0.05f, juce::PathStrokeType::mitered, juce::PathStrokeType::square));
-        for (int k = 0; k < 8; ++k)
+        g.strokePath (bowl, juce::PathStrokeType (line, juce::PathStrokeType::curved));
+
+        const juce::Rectangle<float> stem (s * 0.20f, s * 0.14f, s * 0.20f, s * 0.72f);          // the stem
+        g.setColour (dark);
+        g.fillRoundedRectangle (stem, s * 0.035f);
+        g.setColour (cyan);
+        g.drawRoundedRectangle (stem.reduced (line * 0.5f), s * 0.035f, line);
+
+        const float lampY[] = { 0.24f, 0.36f, 0.48f, 0.60f, 0.72f };                              // the step lamps
+        for (int k = 0; k < 5; ++k)
         {
-            g.setColour (k == 2 ? juce::Colour (0xffff4a2e) : cyan.withAlpha (0.35f));
-            g.fillEllipse (juce::Rectangle<float> (s * 0.06f, s * 0.06f).withCentre ({ x0 + w * ((float) k + 0.5f), s * 0.20f }));
+            g.setColour (k == 2 ? juce::Colour (0xffff4a2e) : cyan.withAlpha (0.3f));
+            g.fillEllipse (juce::Rectangle<float> (s * 0.07f, s * 0.07f).withCentre ({ s * 0.30f, s * lampY[k] }));
+        }
+
+        const float knobX[] = { 0.50f, 0.63f, 0.76f }, knobTurn[] = { -2.27f, -0.70f, 0.70f };   // the knobs
+        for (int k = 0; k < 3; ++k)
+        {
+            const juce::Point<float> c (s * knobX[k], s * 0.36f);
+            const float kr = s * 0.05f;
+            g.setColour (cyan.darker (1.2f));
+            g.fillEllipse (juce::Rectangle<float> (kr * 2.0f, kr * 2.0f).withCentre (c));
+            g.setColour (cyan);
+            g.drawEllipse (juce::Rectangle<float> (kr * 2.0f, kr * 2.0f).withCentre (c), s * 0.012f);
+            g.drawLine ({ c, c.getPointOnCircumference (kr * 0.8f, knobTurn[k]) }, s * 0.014f);
         }
         return img;
     }
