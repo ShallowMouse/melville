@@ -118,7 +118,12 @@ public:
         for (int i = 0; i < outputs.size(); ++i)
         {
             auto& o = keptOuts[(size_t) i];
-            if (outUsed[(size_t) i] && o == nullptr) { o = juce::MidiOutput::openDevice (outputs[i].identifier); changed = true; }
+            if (outUsed[(size_t) i] && o == nullptr)
+            {
+                o = juce::MidiOutput::openDevice (outputs[i].identifier);
+                if (o != nullptr) o->startBackgroundThread();      // (it sends each block's messages on time)
+                changed = true;
+            }
             if (! outUsed[(size_t) i] && o != nullptr) { retiredOuts.push_back (std::move (o)); changed = true; }
             want[(size_t) i] = o.get();
         }
@@ -149,6 +154,7 @@ public:
         for (auto& b : buffers) b.clear();
         const int passed = frameN;          // (the block just gone: THOREAU's held steps count it down)
         frameN = n;
+        blockStartMs = juce::Time::getMillisecondCounterHiRes();
         for (int i = 0; i < inputs.size(); ++i)
         {
             auto& b = buffers[(size_t) input (i)];
@@ -209,12 +215,18 @@ public:
     {
         const juce::SpinLock::ScopedTryLockType sl (outLock);
         if (! sl.isLocked()) return;
+        // Each message goes out when its sample is heard, not all at once now: this block's
+        // first sample reaches the speakers the interface's output latency after the block
+        // began (a block later, if the driver reports none). So the hardware plays with the
+        // drums, ALCOTT and the tape, not a buffer early and bunched up a block at a time.
+        const int ahead = outLatency.load (std::memory_order_relaxed) > 0 ? outLatency.load (std::memory_order_relaxed) : frameN;
+        const double startMs = blockStartMs + 1000.0 * (double) ahead / juce::jmax (1000.0, sr);
         for (int i = 0; i < (int) liveOuts.size(); ++i)
         {
             if (liveOuts[(size_t) i] == nullptr) continue;
             outBlock.clear();
             take (output (i), outBlock);
-            if (! outBlock.isEmpty()) liveOuts[(size_t) i]->sendBlockOfMessagesNow (outBlock);
+            if (! outBlock.isEmpty()) liveOuts[(size_t) i]->sendBlockOfMessages (outBlock, startMs, juce::jmax (1000.0, sr));
         }
     }
 
@@ -237,6 +249,11 @@ private:
     std::vector<std::unique_ptr<juce::MidiMessageCollector>> collectors;
     std::vector<juce::MidiBuffer> buffers;
     juce::MidiBuffer outBlock;
+    double blockStartMs = 0.0;
+public:
+    /** The interface's output latency in samples (the hub sets it when the device starts). */
+    std::atomic<int> outLatency { 0 };
+private:
     std::array<std::array<int, 128>, 16> thoreauOff {};
     double sr = 48000.0;
     int frameN = 0;

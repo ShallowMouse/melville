@@ -277,6 +277,7 @@ void Hub::audioDeviceAboutToStart (juce::AudioIODevice* device)
                  device->getActiveInputChannels().countNumberOfSetBits(), device->getActiveOutputChannels().countNumberOfSetBits());
         running = true;
     }
+    if (auto* m = getMidi()) m->outLatency = device->getOutputLatencyInSamples();     // (MIDI to hardware, on time)
     // every part restarts at the interface's rate and block
     for (auto& n : nodes)
         if (auto* p = dynamic_cast<PartNode*> (n.get()))
