@@ -90,29 +90,44 @@ static juce::Image loadIcon (const juce::String& id, int px = 128)
     }
     if (id == "poe")
     {
-        // POE's mark, drawn: a row of step lamps over sixteen knobs' worth of a stepped line
+        // POE's mark, drawn like the others' letters out of their gear: a P, its stem a column
+        // of step knobs, its bowl a sequencer panel with a row of step lamps (one lit)
         juce::Image img (juce::Image::ARGB, px, px, true);
         juce::Graphics g (img);
         const float s = (float) px;
         const auto cyan = Colours::forPart ("poe");
         g.setColour (juce::Colour (0xff1c1d1f));
         g.fillRoundedRectangle (0.0f, 0.0f, s, s, s * 0.16f);
-        const float heights[] = { 0.30f, 0.30f, 0.55f, 0.20f, 0.45f, 0.62f, 0.38f, 0.50f };
-        const float x0 = s * 0.14f, w = s * 0.72f / 8.0f, base = s * 0.80f;
-        juce::Path steps;
-        steps.startNewSubPath (x0, base - s * 0.5f * heights[0]);
-        for (int k = 0; k < 8; ++k)
-        {
-            const float y = base - s * 0.5f * heights[k];
-            steps.lineTo (x0 + w * (float) k, y);
-            steps.lineTo (x0 + w * (float) (k + 1), y);
-        }
+        const float line = s * 0.035f;
+
+        juce::Path bowl;                                         // the bowl: a panel with a rounded end
+        const float bx = s * 0.40f, by = s * 0.16f, bh = s * 0.40f, bw = s * 0.36f, r = bh * 0.5f;
+        bowl.startNewSubPath (bx, by);
+        bowl.lineTo (bx + bw - r, by);
+        bowl.addCentredArc (bx + bw - r, by + r, r, r, 0.0f, 0.0f, juce::MathConstants<float>::pi, false);
+        bowl.lineTo (bx, by + bh);
         g.setColour (cyan);
-        g.strokePath (steps, juce::PathStrokeType (s * 0.05f, juce::PathStrokeType::mitered, juce::PathStrokeType::square));
-        for (int k = 0; k < 8; ++k)
+        g.strokePath (bowl, juce::PathStrokeType (line));
+        for (int k = 0; k < 4; ++k)                              // its step lamps
         {
-            g.setColour (k == 2 ? juce::Colour (0xffff4a2e) : cyan.withAlpha (0.35f));
-            g.fillEllipse (juce::Rectangle<float> (s * 0.06f, s * 0.06f).withCentre ({ x0 + w * ((float) k + 0.5f), s * 0.20f }));
+            const auto c = juce::Point<float> (s * (0.47f + 0.075f * (float) k), by + bh * 0.5f);
+            g.setColour (k == 1 ? juce::Colour (0xffff4a2e) : cyan.withAlpha (0.4f));
+            g.fillEllipse (juce::Rectangle<float> (s * 0.05f, s * 0.05f).withCentre (c));
+        }
+
+        const auto stem = juce::Rectangle<float> (s * 0.22f, s * 0.16f, s * 0.18f, s * 0.70f);     // the stem: a column of knobs
+        g.setColour (cyan);
+        g.drawRoundedRectangle (stem, s * 0.03f, line);
+        for (int k = 0; k < 4; ++k)
+        {
+            const auto c = juce::Point<float> (stem.getCentreX(), stem.getY() + stem.getHeight() * (0.14f + 0.24f * (float) k));
+            const float kr = s * 0.045f;
+            g.setColour (cyan.withMultipliedBrightness (0.45f));
+            g.fillEllipse (juce::Rectangle<float> (kr * 2.0f, kr * 2.0f).withCentre (c));
+            g.setColour (cyan);
+            g.drawEllipse (juce::Rectangle<float> (kr * 2.0f, kr * 2.0f).withCentre (c), s * 0.012f);
+            const float a = -2.2f + 1.3f * (float) k;
+            g.drawLine (c.x, c.y, c.x + std::sin (a) * kr, c.y - std::cos (a) * kr, s * 0.015f);
         }
         return img;
     }
