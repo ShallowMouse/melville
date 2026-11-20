@@ -1908,9 +1908,9 @@ public:
             windows.push_back (std::make_unique<PartWindow> (*p));
             taskbar::setWindowIdentity (*windows.back(), p->id, p->title, loadIcon (p->id, 256));
         }
-        // the extra IRVINGs open last time
+        // one IRVING to start with: a reel brings back the others it had (tests can ask for more)
         const auto testIrvings = juce::SystemStats::getEnvironmentVariable ("MELVILLE_TEST_IRVINGS", "0").getIntValue();   // (tests)
-        for (int n = 2; n <= juce::jlimit (1, Hub::maxIrvings, testIrvings > 0 ? testIrvings : props.getUserSettings()->getIntValue ("irvings", 1)); ++n)
+        for (int n = 2; n <= juce::jlimit (1, Hub::maxIrvings, testIrvings); ++n)
             addIrving (n, false);
 
         auto* barContent = new Bar (*hub, parts, windows);
@@ -1937,6 +1937,9 @@ public:
             windows[i]->show();
             windows[i]->setMinimised (true);
         }
+        // every part starts on its defaults, not as the last reel left it; a reel brings its own
+        // studio back when it's opened (and one already on the deck brings it back now)
+        startClean();
         showPart ("hawthorne");    // Hawthorne, as you'd start the day
         applyClockSettings();      // (MTC out, and Hawthorne's chase)
         {
@@ -2201,17 +2204,32 @@ public:
             juce::ModalCallbackFunction::create ([this, id] (int ok)
             {
                 if (! ok) return;
-                for (size_t k = 0; k < parts.size(); ++k)
-                    if (parts[k]->id == id)
-                    {
-                        windows.erase (windows.begin() + (long) k);       // the window first (it shows the part)
-                        parts.erase (parts.begin() + (long) k);           // the part closes its device
-                        break;
-                    }
-                hub->releasePart (id);
-                props.getUserSettings()->setValue ("irvings", countIrvings());
+                dropIrving (id);
                 refreshBar();
             }));
+    }
+
+    /** Closes an extra IRVING without asking (a reel that didn't have it, or a fresh start). */
+    void dropIrving (const juce::String& id)
+    {
+        for (size_t k = 0; k < parts.size(); ++k)
+            if (parts[k]->id == id)
+            {
+                windows.erase (windows.begin() + (long) k);       // the window first (it shows the part)
+                parts.erase (parts.begin() + (long) k);           // the part closes its device
+                break;
+            }
+        hub->releasePart (id);
+        props.getUserSettings()->setValue ("irvings", countIrvings());
+    }
+
+    /** The extra IRVINGs (2 and up) that are open. */
+    juce::StringArray extraIrvings() const
+    {
+        juce::StringArray ids;
+        for (auto& p : parts)
+            if (p->id.startsWith ("pequod") && p->id.getTrailingIntValue() >= 2) ids.add (p->id);
+        return ids;
     }
 
     //==========================================================================
@@ -2387,13 +2405,42 @@ public:
         const auto made = lib.newStudioPending ? lib.newStudio : melville::NewStudio {};
         lib.newStudioPending = false;
         auto x = juce::XmlDocument::parse (reelFile.getParentDirectory().getChildFile (studioFileName));
-        if (x != nullptr && x->hasTagName ("MELVILLE_SESSION"))
+        const bool saved = x != nullptr && x->hasTagName ("MELVILLE_SESSION");
+        // nothing carries over from the reel before: the IRVINGs it didn't have close, and every
+        // part starts clean before the reel's own studio (if it has one) goes on top
+        juce::StringArray keep;
+        if (saved)
+            for (auto* part : x->getChildWithTagNameIterator ("PART")) keep.add (part->getStringAttribute ("id"));
+        bool dropped = false;
+        for (auto& id : extraIrvings())
+            if (! keep.contains (id)) { dropIrving (id); dropped = true; }
+        if (dropped) refreshBar();
+        if (saved)
+        {
+            melville::NewStudio blank;
+            blank.bpm = 120.0;
+            freshStudio (blank);
             applyStudio (*x, false);
+        }
         else
             freshStudio (made);
         if (bar != nullptr)
             if (auto* b = barContent()) b->setSessionName (reelFile.getParentDirectory().getParentDirectory().getFileName()
                                                             + juce::String (juce::CharPointer_UTF8 (" \xc2\xb7 ")) + reelFile.getFileNameWithoutExtension());
+    }
+
+    void startClean()
+    {
+        // (development hooks that set a part up for pictures keep what they set)
+        for (auto* dev : { "ALCOTT_PREVIEW", "POE_DEMO", "ALCOTT_KEYS" })
+            if (juce::SystemStats::getEnvironmentVariable (dev, {}).isNotEmpty()) return;
+        auto& l = melville::library();
+        if (l.currentReel && l.currentReel().existsAsFile()) { studioArrived (l.currentReel()); return; }
+        melville::NewStudio clean;
+        clean.bpm = 120.0;
+        clean.beatsPerBar = 4;
+        clean.usualCables = true;
+        freshStudio (clean);
     }
 
     /** A clean studio for a new reel: every part back to nothing (WHITMAN on the desk chosen),
