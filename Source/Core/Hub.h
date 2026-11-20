@@ -1,14 +1,14 @@
 #pragma once
 
 // MELVILLE's hub: the one program that owns the audio interface. Every part (Hawthorne,
-// EMERSON, WHITMAN, THOREAU, PEQUOD Host) runs inside MELVILLE and opens a "MELVILLE"
+// EMERSON, WHITMAN, FULLER, PEQUOD Host) runs inside MELVILLE and opens a "MELVILLE"
 // audio device (PartDevice) instead of the interface, Hawthorne Route or the EMERSON Link.
 // The hub's interface callback runs every part's callback in turn, in one block, with
 // the patchbay moving audio between them. Everything runs off the interface's clock.
 //
 // Order in a block (Hub::buildSteps):
 //
-//   interface in, network in -> PEQUOD Host -> POE -> THOREAU -> ALCOTT -> Hawthorne
+//   interface in, network in -> PEQUOD Host -> POE -> FULLER -> ALCOTT -> Hawthorne
 //     -> Route bridge (Hawthorne's tracks out)  -> EMERSON -> Route bridge (back into Hawthorne)
 //     -> Link bridge (EMERSON to the desk)      -> WHITMAN -> Link bridge (the mix and sends back)
 //     -> interface out

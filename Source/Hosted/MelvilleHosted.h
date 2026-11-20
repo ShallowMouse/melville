@@ -1,6 +1,6 @@
 #pragma once
 
-// What a part (Hawthorne, EMERSON, WHITMAN, THOREAU, PEQUOD Host) calls when it's built
+// What a part (Hawthorne, EMERSON, WHITMAN, FULLER, PEQUOD Host) calls when it's built
 // into MELVILLE. Each app has its own Source/Melville.h that includes this when
 // MELVILLE_HOSTED is set, and does nothing when the app is built on its own:
 //
@@ -46,7 +46,7 @@ namespace melville
     //==========================================================================
     /** MELVILLE's transport and tempo. MELVILLE owns the tempo, meter and bar 1. With a reel on
         Hawthorne's deck the tape is the clock (Hawthorne publishes where it is every block, and
-        the tempo lives on the reel too); with no reel MELVILLE runs a clock of its own, so THOREAU
+        the tempo lives on the reel too); with no reel MELVILLE runs a clock of its own, so FULLER
         and IRVING still play. Everything follows it directly (no network). Use the functions
         below (play(), setTempo() ...) rather than the hooks. */
     struct Transport
@@ -199,8 +199,8 @@ namespace melville
     extern std::function<int()> currentDesk;
 
     //==========================================================================
-    /** MIDI on the patchbay (MELVILLE's MIDI patch bay). THOREAU sends each step played into its
-        THOREAU STEPS jack: pad k on channel k, with the pad's MIDI note, `offset` samples into its
+    /** MIDI on the patchbay (MELVILLE's MIDI patch bay). FULLER sends each step played into its
+        FULLER STEPS jack: pad k on channel k, with the pad's MIDI note, `offset` samples into its
         block (audio thread; the patch bay lets the note go a step later). */
     void postNote (int channel, int note, float velocity, int offset) noexcept;
     /** POE's turn (audio thread): a message from sequencer `which` (0-3) into its jack (POE 1 - 4), `offset` samples into its block. */
@@ -209,9 +209,9 @@ namespace melville
     int midiJack (const juce::String& name);
     /** Everything cabled into that jack this block (audio thread, in the part's turn). */
     void takeMidi (int jack, juce::MidiBuffer& into) noexcept;
-    /** What's cabled into that jack, by name ("Keyboards, THOREAU steps"); empty if nothing. Message thread. */
+    /** What's cabled into that jack, by name ("Keyboards, FULLER steps"); empty if nothing. Message thread. */
     juce::String midiCabledInto (int jack);
-    /** How long THOREAU's steps hold (a 1/n note: 4, 8, 16, 32). */
+    /** How long FULLER's steps hold (a 1/n note: 4, 8, 16, 32). */
     void setStepLength (int n);
     int getStepLength();
 }

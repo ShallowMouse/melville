@@ -34,7 +34,7 @@ namespace
         if (id == "hawthorne") { data = BinaryData::HAWTHORNE_png; size = BinaryData::HAWTHORNE_pngSize; }
         if (id == "emerson")   { data = BinaryData::EMERSON_png;   size = BinaryData::EMERSON_pngSize; }
         if (id == "whitman")   { data = BinaryData::WHITMAN_png;   size = BinaryData::WHITMAN_pngSize; }
-        if (id == "thoreau")   { data = BinaryData::THOREAU_png;   size = BinaryData::THOREAU_pngSize; }
+        if (id == "thoreau")   { data = BinaryData::FULLER_png;   size = BinaryData::FULLER_pngSize; }
         if (id.startsWith ("pequod") || id == "irving") { data = BinaryData::IRVING_png; size = BinaryData::IRVING_pngSize; }
         auto img = juce::ImageCache::getFromMemory (data, size);
         return img.isValid() ? img.rescaled (64, 64, juce::Graphics::highResamplingQuality) : img;

@@ -71,7 +71,7 @@ int main()
     // --- parts' devices show the right channels
     {
         PartDeviceType all (hub);
-        CHECK (all.getDeviceNames().size() == 6 + Hub::maxIrvings);   // (Hawthorne, EMERSON, WHITMAN, THOREAU, ALCOTT, POE and the IRVINGs)
+        CHECK (all.getDeviceNames().size() == 6 + Hub::maxIrvings);   // (Hawthorne, EMERSON, WHITMAN, FULLER, ALCOTT, POE and the IRVINGs)
         PartDeviceType one (hub, "emerson");
         CHECK (one.getDeviceNames() == juce::StringArray ("Hawthorne Route (MELVILLE)"));
     }
@@ -252,13 +252,13 @@ int main()
 
     whDev->close(); emDev->close(); hawDev->close();
 
-    // --- the MIDI patch bay: MIDI goes only to MIDI; THOREAU's steps reach only what they're cabled to,
+    // --- the MIDI patch bay: MIDI goes only to MIDI; FULLER's steps reach only what they're cabled to,
     //     and let go a step later; MIDI clock is 24 a beat, with start
     {
         auto& mpb = hub.getPatchbay();
         auto* midi = hub.getMidi();
         CHECK (midi != nullptr);
-        const int steps = mpb.findSource ("midi", "THOREAU steps"), clk = mpb.findSource ("midi", "Clock");
+        const int steps = mpb.findSource ("midi", "FULLER steps"), clk = mpb.findSource ("midi", "Clock");
         const int slot3 = mpb.findDest ("midi", "ALCOTT slot 3"), slot4 = mpb.findDest ("midi", "ALCOTT slot 4");
         CHECK (steps >= 0 && clk >= 0 && slot3 >= 0 && slot4 >= 0);
         CHECK (mpb.isConnected (mpb.findSource ("midi", "Keyboards"), slot3));      // (the usual cable)
@@ -292,7 +292,7 @@ int main()
             for (const auto meta : m) if (meta.getMessage().isNoteOff()) offAt = b * block + meta.samplePosition;
         }
         CHECK (offAt > 4000 && offAt < 6000);
-        std::printf ("    MIDI: THOREAU step on channel 3 at 10, its note-off %d samples on\n", offAt);
+        std::printf ("    MIDI: FULLER step on channel 3 at 10, its note-off %d samples on\n", offAt);
 
         // MIDI clock: one second rolling at 120 = 2 beats = 48 clocks, after a start
         auto& clock = hub.getClock();

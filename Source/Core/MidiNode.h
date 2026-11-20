@@ -4,15 +4,15 @@
 // cable carrying all sixteen channels from one OUT to one IN (and a mult for THRU).
 //
 //   sources:       Keyboards (every MIDI input merged), In: <each MIDI input>,
-//                  THOREAU steps (each pad on its own channel), Clock (24 a beat, start / stop),
+//                  FULLER steps (each pad on its own channel), Clock (24 a beat, start / stop),
 //                  POE 1 - 4 (the step sequencers' notes and CCs)
 //   destinations:  ALCOTT slot 1 - 8, POE transpose, Out: <each MIDI output>
 //
 // It's a node like the others, so its jacks are patchbay channels, saved with the patch and
 // cabled the same way; the patchbay only lets MIDI go to MIDI. Its audio is silence. The
 // hub runs it first in the block (the keyboards, ready for everyone) and last (the outs).
-// THOREAU writes its steps during its turn, MELVILLE's clock during its; ALCOTT reads its
-// slots after THOREAU. MIDI from a part that runs after the one it's cabled to arrives a
+// FULLER writes its steps during its turn, MELVILLE's clock during its; ALCOTT reads its
+// slots after FULLER. MIDI from a part that runs after the one it's cabled to arrives a
 // block later.
 
 #include "Node.h"
@@ -35,7 +35,7 @@ public:
         outputs = juce::MidiOutput::getAvailableDevices();
         port.sources.add ("Keyboards");
         for (auto& d : inputs) port.sources.add ("In: " + d.name);
-        port.sources.add ("THOREAU steps");
+        port.sources.add ("FULLER steps");
         port.sources.add ("Clock");
         for (int k = 1; k <= numPoes; ++k) port.sources.add ("POE " + juce::String (k));
         for (int k = 1; k <= numAlcottSlots; ++k) port.dests.add ("ALCOTT slot " + juce::String (k));
@@ -65,7 +65,7 @@ public:
     /** Set by the hub: where the cords are. */
     Patchbay* patchbay = nullptr;
 
-    /** How long THOREAU's steps hold (it sends no note-offs): a 1/n note. */
+    /** How long FULLER's steps hold (it sends no note-offs): a 1/n note. */
     std::atomic<int> stepLength { 16 };
     std::function<double()> getBpm;          // set by the hub: MELVILLE's tempo (audio thread)
 
@@ -76,7 +76,7 @@ public:
     }
 
     /** Message thread (often): open the MIDI devices something is cabled to, and let go of the
-        rest. (On Windows a MIDI device opens in one place at a time: one IRVING or THOREAU use
+        rest. (On Windows a MIDI device opens in one place at a time: one IRVING or FULLER use
         stays theirs until it's cabled here.) */
     void openWhatsCabled()
     {
@@ -148,12 +148,12 @@ public:
         inputIndex.clear();
     }
 
-    /** Start of the block: the keyboards' notes in, THOREAU's held steps let go. */
+    /** Start of the block: the keyboards' notes in, FULLER's held steps let go. */
     void pull (float* const* sources, int n) noexcept override
     {
         for (int c = 0; c < port.sources.size(); ++c) juce::FloatVectorOperations::clear (sources[c], n);
         for (auto& b : buffers) b.clear();
-        const int passed = frameN;          // (the block just gone: THOREAU's held steps count it down)
+        const int passed = frameN;          // (the block just gone: FULLER's held steps count it down)
         frameN = n;
         blockStartMs = juce::Time::getMillisecondCounterHiRes();
         for (int i = 0; i < inputs.size(); ++i)
@@ -173,7 +173,7 @@ public:
             }
     }
 
-    /** THOREAU's turn (audio thread): a step played, `offset` samples into the block. */
+    /** FULLER's turn (audio thread): a step played, `offset` samples into the block. */
     void postStep (int channel, int note, float velocity, int offset) noexcept
     {
         const int ch = juce::jlimit (1, 16, channel), nt = juce::jlimit (0, 127, note);

@@ -27,7 +27,17 @@ namespace
     {
         auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("MELVILLE").getChildFile ("Icons");
         dir.createDirectory();
-        auto file = dir.getChildFile (partId + ".ico");
+        // (named for its picture: Windows caches a pinned icon by its file, so a new design
+        //  needs a new file to show; the old ones for this part are tidied away)
+        juce::MemoryOutputStream key;
+        juce::PNGImageFormat().writeImageToStream (icon.rescaled (64, 64), key);
+        juce::uint64 h = 1469598103934665603ull;                           // (FNV-1a over the picture)
+        for (size_t i = 0; i < key.getDataSize(); ++i) { h ^= static_cast<const juce::uint8*> (key.getData())[i]; h *= 1099511628211ull; }
+        const auto hash = juce::String::toHexString ((juce::int64) h);
+        auto file = dir.getChildFile (partId + "-" + hash + ".ico");
+        for (auto& old : dir.findChildFiles (juce::File::findFiles, false, partId + "*.ico"))
+            if (old != file && (old.getFileNameWithoutExtension() == partId || old.getFileNameWithoutExtension().startsWith (partId + "-")))
+                old.deleteFile();
 
         juce::MemoryOutputStream png;
         juce::PNGImageFormat().writeImageToStream (icon.rescaled (256, 256, juce::Graphics::highResamplingQuality), png);

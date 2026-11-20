@@ -42,7 +42,7 @@ Hub::Hub()
     addNode (std::make_unique<PartNode> ("hawthorne", "HAWTHORNE", hawthorneIns, juce::StringArray ("Click")));
     addNode (std::make_unique<PartNode> ("emerson", "EMERSON", names::routeFromHawthorne(), names::routeToHawthorne()));
     addNode (std::make_unique<PartNode> ("whitman", "WHITMAN", names::linkToWhitman(), names::linkFromWhitman()));
-    addNode (std::make_unique<PartNode> ("thoreau", "THOREAU", juce::StringArray(), names::thoreauOuts()));
+    addNode (std::make_unique<PartNode> ("thoreau", "FULLER", juce::StringArray(), names::thoreauOuts()));
     addNode (std::make_unique<PartNode> ("alcott", "ALCOTT", juce::StringArray(), names::alcottOuts()));
     addNode (std::make_unique<PartNode> ("poe", "POE", juce::StringArray(), names::poeOuts()));
     // IRVING (PEQUOD Host): up to four at once, "pequod", "pequod2" ... (each its own patch panel)
@@ -69,7 +69,7 @@ Hub::Hub()
     addNode (std::make_unique<ClockNode>());       // the click and LTC (MELVILLE's)
     addNode (std::make_unique<TwainNode>());       // the control room
     {
-        // the MIDI patch bay: keyboards, THOREAU's steps and the clock out; ALCOTT's slots and the MIDI outs in
+        // the MIDI patch bay: keyboards, FULLER's steps and the clock out; ALCOTT's slots and the MIDI outs in
         auto m = std::make_unique<MidiNode>();
         midi = m.get();
         midi->patchbay = &patchbay;
@@ -98,7 +98,7 @@ Hub::Hub()
         { Step::process, node ("pequod4") },
         { Step::process, node ("poe") },         // (first of the players: its notes play ALCOTT in the same block)
         { Step::process, node ("thoreau") },
-        { Step::process, node ("alcott") },     // (after THOREAU: its steps play ALCOTT in the same block)
+        { Step::process, node ("alcott") },     // (after FULLER: its steps play ALCOTT in the same block)
         { Step::process, node ("hawthorne") },
         { Step::pull,    node ("clock") },      // click and LTC from the clock (the tape published this block)
         { Step::pull,    node ("route") },      // Hawthorne's tracks, this block
@@ -232,7 +232,7 @@ void Hub::wireDefaultCables()
                     pb.findDest ("route", juce::String ("To Hawthorne master ") + side));
     pb.connectByName ("link", "whitman");
     pb.connectByName ("whitman", "link");
-    // (THOREAU and IRVING: cable them onto whichever tracks should record them)
+    // (FULLER and IRVING: cable them onto whichever tracks should record them)
     // the guitar: interface input 1 into IRVING
     pb.connectInOrder ("interface", 0, "pequod", 0, 1);
     midiDefaults();

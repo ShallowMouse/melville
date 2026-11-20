@@ -112,7 +112,7 @@ namespace names
     juce::StringArray linkToWhitman();        // "Hawthorne track 1".."96", "EMERSON return A L/R", "EMERSON return B L/R"
     juce::StringArray linkFromWhitman();      // "To Hawthorne master L/R", "To EMERSON send A L/R", "To EMERSON send B L/R"
     juce::StringArray numbered (const juce::String& prefix, int n, int first = 1);
-    /** THOREAU's outputs, in its device-channel order: mix L/R, the 12 drums, overheads L/R, room L/R. */
+    /** FULLER's outputs, in its device-channel order: mix L/R, the 12 drums, overheads L/R, room L/R. */
     inline juce::StringArray thoreauOuts()
     {
         // the pads by number: each kit names its pads its own way (pad 1 is the kick in every kit)

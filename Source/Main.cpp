@@ -1,4 +1,4 @@
-// MELVILLE: Hawthorne, EMERSON, WHITMAN, THOREAU and PEQUOD Host as one program.
+// MELVILLE: Hawthorne, EMERSON, WHITMAN, FULLER and PEQUOD Host as one program.
 //
 // MELVILLE owns the audio interface and runs every part from its own audio callback,
 // with a patchbay between them (Core/Hub.h). Each part keeps its own window and look;
@@ -34,7 +34,7 @@ static juce::Image loadIcon (const juce::String& id, int px = 128)
     if (id == "hawthorne") { data = BinaryData::HAWTHORNE_png;     size = BinaryData::HAWTHORNE_pngSize; }
     if (id == "emerson")   { data = BinaryData::EMERSON_png;       size = BinaryData::EMERSON_pngSize; }
     if (id == "whitman")   { data = BinaryData::WHITMAN_png;       size = BinaryData::WHITMAN_pngSize; }
-    if (id == "thoreau")   { data = BinaryData::THOREAU_png;       size = BinaryData::THOREAU_pngSize; }
+    if (id == "thoreau")   { data = BinaryData::FULLER_png;       size = BinaryData::FULLER_pngSize; }
     if (id.startsWith ("pequod")) { data = BinaryData::IRVING_png;        size = BinaryData::IRVING_pngSize; }      // IRVING
     if (id == "melville")  { data = BinaryData::MELVILLE_png;      size = BinaryData::MELVILLE_pngSize; }
     if (id == "twain")
@@ -301,7 +301,7 @@ public:
         tempo.setColour (juce::Label::backgroundWhenEditingColourId, Colours::panelHi);
         tempo.setColour (juce::Label::textWhenEditingColourId, Colours::text);
         tempo.setTooltip ("MELVILLE's tempo (also kept on the reel when one is loaded): double-click to type one, right-click for beats per bar and bar 1. "
-                          "THOREAU and IRVING follow it.");
+                          "FULLER and IRVING follow it.");
         tempo.addMouseListener (this, false);
         tempo.onTextChange = [this]
         {

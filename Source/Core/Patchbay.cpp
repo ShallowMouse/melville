@@ -219,6 +219,13 @@ void Patchbay::fromXml (const juce::XmlElement& xml)
             if (e->getStringAttribute ("fromPort") == "route" && e->getStringAttribute ("from") == "Hawthorne LTC")
                 { e->setAttribute ("fromPort", "clock"); e->setAttribute ("from", "LTC"); }
         }
+    // (jacks since renamed: THOREAU is FULLER now, and POE has four sequencers)
+    for (auto* e : x.getChildWithTagNameIterator ("CORD"))
+        if (e->getStringAttribute ("fromPort") == "midi")
+        {
+            if (e->getStringAttribute ("from") == "THOREAU steps") e->setAttribute ("from", "FULLER steps");
+            if (e->getStringAttribute ("from") == "POE")           e->setAttribute ("from", "POE 1");
+        }
     fromXmlCurrent (x);
     // (before version 5 there was no MIDI on the patchbay: its usual cords, so nothing goes quiet)
     if (x.getIntAttribute ("version") < 5 && onOlderPatch) onOlderPatch();

@@ -1,6 +1,6 @@
 #pragma once
 
-// Hawthorne Link in MELVILLE: up to four senders on the network (THOREAU, PEQUOD Host or
+// Hawthorne Link in MELVILLE: up to four senders on the network (FULLER, PEQUOD Host or
 // another PC), each a block of channels on the NETWORK patch panel, cabled wherever you
 // like. The receiver keeps each stream locked (or drift-corrected) to MELVILLE's clock,
 // as it did inside Hawthorne.

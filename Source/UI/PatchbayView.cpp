@@ -167,7 +167,7 @@ void PatchCanvas::rebuild()
         column (p, { "PHONES", "twain", "The players' headphone feeds, each its own mix (TWAIN): to the interface outputs the headphone amps are on.", ph, phShort },
                    { "CLICK / TALK", "twain", "The click (into the headphone feeds) and the talkback mic (into them while TALK is held).",
                      { "Click", "Talkback" }, { "CLK", "TB" } });
-        column (p, none, { "CUE IN", "twain", "What the players can have in their headphones: cable tracks, stems, THOREAU or IRVING here and set their levels per feed in TWAIN.",
+        column (p, none, { "CUE IN", "twain", "What the players can have in their headphones: cable tracks, stems, FULLER or IRVING here and set their levels per feed in TWAIN.",
                            numbered ("Cue ", TwainNode::numCues), numbers (TwainNode::numCues) });
     }
 
@@ -290,19 +290,19 @@ void PatchCanvas::rebuild()
                                    "through them there.", ins, numbers (asio::channels) });
     }
 
-    {   auto& p = panel ("thoreau", "THOREAU");
-        column (p, { "MIX OUT", "thoreau", "THOREAU's stereo mix: the whole kit after its mixer.", { "Mix L", "Mix R" }, lr }, none);
+    {   auto& p = panel ("thoreau", "FULLER");
+        column (p, { "MIX OUT", "thoreau", "FULLER's stereo mix: the whole kit after its mixer.", { "Mix L", "Mix R" }, lr }, none);
         juce::StringArray kit, kitShort;
         const auto all = names::thoreauOuts();
         for (int i = 2; i < all.size(); ++i) kit.add (all[i]);
         for (int i = 1; i <= 12; ++i) kitShort.add (juce::String (i));
         kitShort.addArray ({ "OVL", "OVR", "RML", "RMR" });
-        column (p, { "KIT OUTS", "thoreau", "THOREAU's pads 1-12 each on their own, in the order of its pattern rows (pad 1 is the kick), after "
+        column (p, { "KIT OUTS", "thoreau", "FULLER's pads 1-12 each on their own, in the order of its pattern rows (pad 1 is the kick), after "
                                             "their levels: cable them to tape tracks or desk channels to record or mix the kit in parts. Then the overheads and room.",
                      kit, kitShort }, none);
-        column (p, { "MIDI OUT", "midi", "THOREAU's steps as MIDI, as it plays them: pad 1 on channel 1, pad 2 on channel 2 ..., each with its pad's MIDI note. "
+        column (p, { "MIDI OUT", "midi", "FULLER's steps as MIDI, as it plays them: pad 1 on channel 1, pad 2 on channel 2 ..., each with its pad's MIDI note. "
                                         "Cable them to ALCOTT's slots, or a MIDI OUT for a drum module.",
-                     { "THOREAU steps" }, { "STEPS" } }, none); }
+                     { "FULLER steps" }, { "STEPS" } }, none); }
 
     {   auto& p = panel ("alcott", "ALCOTT");
         column (p, { "MIX OUT", "alcott", "ALCOTT's mix: every slot together, after its level.", { "Mix L", "Mix R" }, lr }, none);
@@ -317,7 +317,7 @@ void PatchCanvas::rebuild()
                      slotOuts, slotShort }, none);
         juce::StringArray slotIns, slotInShort;
         for (int k = 1; k <= MidiNode::numAlcottSlots; ++k) { slotIns.add ("ALCOTT slot " + juce::String (k)); slotInShort.add (juce::String (k)); }
-        column (p, none, { "MIDI IN", "midi", "Each slot's MIDI in: what plays its instrument. A keyboard, POE, THOREAU's steps (pick its pad by the slot's channel), "
+        column (p, none, { "MIDI IN", "midi", "Each slot's MIDI in: what plays its instrument. A keyboard, POE, FULLER's steps (pick its pad by the slot's channel), "
                                               "the clock for arpeggiators. Several into one slot merge.",
                            slotIns, slotInShort }); }
 
@@ -335,7 +335,7 @@ void PatchCanvas::rebuild()
     {   auto& p = panel ("hawthorne", "HAWTHORNE");
         column (p, { "TRACK OUT", "route", "Each tape track playing back (or its input, while the track monitors input). To EMERSON by default.",
                      numbered ("Hawthorne track ", tracks), numbers (tracks) },
-                   { "TRACK IN", "hawthorne", "What each tape track records: cable a mic, IRVING, THOREAU or a MELVILLE Link sender here.",
+                   { "TRACK IN", "hawthorne", "What each tape track records: cable a mic, IRVING, FULLER or a MELVILLE Link sender here.",
                      numbered ("Track ", tracks), numbers (tracks) });
         column (p, { "MASTER OUT", "route", "Hawthorne's master: the 2-track playing back, or what's coming into it. Your monitors (interface outputs 1-2) by default.", { "Hawthorne master L", "Hawthorne master R" }, lr },
                    { "MASTER IN", "route", "What the 2-track master records: the mix (EMERSON's MIX OUT by default).",

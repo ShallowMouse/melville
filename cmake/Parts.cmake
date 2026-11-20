@@ -56,7 +56,7 @@ juce_add_binary_data(MelvilleBinaryData HEADER_NAME BinaryData.h NAMESPACE Binar
     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Icon/HAWTHORNE.png"
     "${EMERSON_DIR}/Resources/Icon/EMERSON.png"
     "${WHITMAN_DIR}/Resources/Icon/WHITMAN.png"
-    "${THOREAU_DIR}/Resources/Icon/THOREAU.png"
+    "${THOREAU_DIR}/Resources/Icon/FULLER.png"
     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Icon/IRVING.png"       # (PEQUOD Host is IRVING in MELVILLE)
     "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Icon/MELVILLE.png")    # (its own windows' bars)
 

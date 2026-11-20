@@ -1,4 +1,4 @@
-// THOREAU inside MELVILLE (compiled with THOREAU's settings).
+// FULLER inside MELVILLE (compiled with FULLER's settings).
 #include "Parts.h"
 #include "MainComponent.h"
 
@@ -9,7 +9,7 @@ std::unique_ptr<PartUI> makeThoreau()
 {
     auto ui = std::make_unique<PartUI>();
     ui->id = "thoreau";
-    ui->title = "THOREAU";
+    ui->title = "FULLER";
     ui->background = Pequod::Colours::bg;       // (this part's own PEQUOD colours)
     ui->minWidth = 1300;
     ui->minHeight = 780;
