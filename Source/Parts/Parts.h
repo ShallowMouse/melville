@@ -6,7 +6,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-namespace hawthorne { class NetReceiver; }
+namespace hawthorne { class NetReceiver; class NetSender; }
 
 namespace melville
 {
@@ -44,8 +44,18 @@ namespace parts
     std::unique_ptr<PartUI> makeAlcott();                     // the instrument rack (MELVILLE's own)
     std::unique_ptr<PartUI> makePoe();                        // the step sequencer (MELVILLE's own)
 
-    /** Hawthorne Link's window, for MELVILLE's NETWORK (onChanged: save the settings). */
-    std::unique_ptr<juce::DocumentWindow> makeNetworkWindow (hawthorne::NetReceiver&, std::function<void()> onChanged);
+    /** MELVILLE Link's sending side, for its window. */
+    struct LinkSend
+    {
+        hawthorne::NetSender* sender = nullptr;
+        std::function<bool()> isOn;
+        std::function<bool (bool, juce::String&)> setOn;
+        std::function<int()> channels;
+        std::function<void (int)> setChannels;
+    };
+
+    /** MELVILLE Link's window: what it sends, and what it receives (onChanged: save the settings). */
+    std::unique_ptr<juce::DocumentWindow> makeNetworkWindow (hawthorne::NetReceiver&, LinkSend, std::function<void()> onChanged);
 }
 
 } // namespace melville

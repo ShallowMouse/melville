@@ -108,6 +108,7 @@ Hub::Hub()
         { Step::push,    node ("link") },       // the mix and sends back to EMERSON
         { Step::push,    node ("route") },      // EMERSON's tracks and mix back into Hawthorne
         { Step::process, node ("twain") },      // the control room: monitors and headphone feeds
+        { Step::push,    node ("network") },    // MELVILLE Link out: what's cabled to LINK SEND, to the other PC
         { Step::push,    node ("asio") },       // its inputs, and the clock that runs it
         { Step::push,    node ("interface") },
         { Step::push,    node ("midi") },       // the MIDI outs (everything patched to them this block)

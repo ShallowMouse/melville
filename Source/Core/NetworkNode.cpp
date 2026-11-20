@@ -10,11 +10,27 @@ NetworkNode::NetworkNode()
     for (int s = 0; s < slots; ++s)
         for (int c = 0; c < channelsPerSlot; ++c)
             port.sources.add (channelName (s, c));
+    for (int c = 0; c < maxSend; ++c)
+        port.dests.add (sendName (c));
+    receiver.ignoreSender (sender.getSenderId());       // (MELVILLE doesn't list itself)
 }
 
 NetworkNode::~NetworkNode()
 {
+    sender.stop();
     receiver.stop();
+}
+
+bool NetworkNode::setSending (bool on, juce::String& error)
+{
+    if (on && ! sending.load())
+    {
+        if (! sender.start (sender.getName(), error)) return false;
+    }
+    else if (! on && sending.load())
+        sender.stop();
+    sending = on;
+    return true;
 }
 
 void NetworkNode::start (juce::PropertiesFile& settings, juce::PropertiesFile* hawthorneSettings)
@@ -30,6 +46,12 @@ void NetworkNode::start (juce::PropertiesFile& settings, juce::PropertiesFile* h
 
     juce::String error;
     receiver.start (error);
+
+    // the sender: as it was left
+    sender.setName (settings.getValue ("sendName", "MELVILLE - " + juce::SystemStats::getComputerName()));
+    sender.setRedundancy (settings.getBoolValue ("sendRedundancy", true));
+    setSendChannels (settings.getIntValue ("sendChannels", 8));
+    if (settings.getBoolValue ("sendOn", false)) setSending (true, error);
 }
 
 void NetworkNode::saveSettings (juce::PropertiesFile& s) const
@@ -41,11 +63,30 @@ void NetworkNode::saveSettings (juce::PropertiesFile& s) const
     for (int slot = 0; slot < slots; ++slot)
         names.add (rx.getSlotName (slot));
     s.setValue ("netSlots", names.joinIntoString ("\n"));
+    s.setValue ("sendOn", sending.load());
+    s.setValue ("sendName", sender.getName());
+    s.setValue ("sendRedundancy", const_cast<hawthorne::NetSender&> (sender).getRedundancy());
+    s.setValue ("sendChannels", sendChannels.load());
 }
 
 void NetworkNode::prepare (double sampleRate, int)
 {
     receiver.prepare (sampleRate);
+    rate = sampleRate;
+    preparedChannels = sendChannels.load();
+    sender.prepare (sampleRate, preparedChannels);
+}
+
+void NetworkNode::push (const float* const* dests, int n) noexcept
+{
+    if (! sending.load (std::memory_order_relaxed)) return;
+    // a new number of channels starts a new session (rare: when it's changed in the LINK window)
+    if (const int want = sendChannels.load (std::memory_order_relaxed); want != preparedChannels)
+    {
+        preparedChannels = want;
+        sender.prepare (rate, want);
+    }
+    sender.push (dests, preparedChannels, n);
 }
 
 void NetworkNode::pull (float* const* sources, int n) noexcept

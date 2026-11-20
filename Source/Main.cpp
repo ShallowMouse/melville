@@ -1482,7 +1482,7 @@ public:
         clockTile.onClick = [this] { if (onShowClock) onShowClock(); };
         clockTile.setTooltip ("CLOCK: MELVILLE's tempo, click and timecode (LTC / MTC out, chase)");
         addAndMakeVisible (clockTile);
-        netTile.setTooltip ("MELVILLE LINK: audio from other PCs (THOREAU, IRVING), onto the patchbay");
+        netTile.setTooltip ("MELVILLE LINK: audio to and from MELVILLE (or MELVILLE Link) on other PCs, over the network");
         addAndMakeVisible (netTile);
         updateTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
         {
@@ -2516,11 +2516,20 @@ public:
     void showNetwork()
     {
         if (networkWindow == nullptr)
-            networkWindow = melville::parts::makeNetworkWindow (hub->getNetwork().getReceiver(), [this]
+        {
+            auto& net = hub->getNetwork();
+            melville::parts::LinkSend send;
+            send.sender = &net.getSender();
+            send.isOn = [&net] { return net.isSending(); };
+            send.setOn = [&net] (bool on, juce::String& err) { return net.setSending (on, err); };
+            send.channels = [&net] { return net.getSendChannels(); };
+            send.setChannels = [&net] (int c) { net.setSendChannels (c); };
+            networkWindow = melville::parts::makeNetworkWindow (net.getReceiver(), send, [this]
             {
                 hub->getNetwork().saveSettings (*props.getUserSettings());
                 props.saveIfNeeded();
             });
+        }
         networkWindow->setVisible (true);
         networkWindow->toFront (true);
     }

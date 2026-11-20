@@ -184,6 +184,11 @@ jobs:
           Copy-Item Resources/Licences/*.txt portable/
           Copy-Item Source/AsioDriver/LICENSE.txt portable/MELVILLE-ASIO-GPLv3.txt
           Compress-Archive -Path portable/* -DestinationPath "dist/MELVILLE-$env:MELVILLE_VERSION-portable.zip"
+          # MELVILLE Link, for the other PCs (on its own: it doesn't need MELVILLE installed)
+          New-Item -ItemType Directory -Force link | Out-Null
+          Copy-Item "build/MelvilleLink_artefacts/Release/MELVILLE Link.exe" link/
+          Copy-Item Resources/Licences/*.txt link/
+          Compress-Archive -Path link/* -DestinationPath "dist/MELVILLE-Link-$env:MELVILLE_VERSION.zip"
 
       - name: Build installer
         shell: pwsh
@@ -217,5 +222,5 @@ jobs:
           $notes | Out-File -Encoding utf8 notes.md
           gh release create "v$env:MELVILLE_VERSION" --repo ShallowMouse/Melville-Releases `
             --title "MELVILLE $env:MELVILLE_VERSION" --notes-file notes.md `
-            "dist/MELVILLE-Setup-$env:MELVILLE_VERSION.exe" "dist/MELVILLE-$env:MELVILLE_VERSION-portable.zip"
+            "dist/MELVILLE-Setup-$env:MELVILLE_VERSION.exe" "dist/MELVILLE-$env:MELVILLE_VERSION-portable.zip" "dist/MELVILLE-Link-$env:MELVILLE_VERSION.zip"
           if ($LASTEXITCODE -ne 0) { Write-Output "::error title=release::Publishing the release failed"; exit 1 }

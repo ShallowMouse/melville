@@ -240,7 +240,16 @@ void PatchCanvas::rebuild()
                                           "rolls and locates: to a MIDI OUT for a drum machine or sequencer to follow, or to ALCOTT for its arpeggiators.",
                      { "Clock" }, { "CLK" } }, none);
 
-        // MELVILLE Link, to the right: a set of jacks per connected sender (THOREAU, IRVING ... on other PCs)
+        // MELVILLE Link out: what goes to the other PCs
+        {
+            juce::StringArray sends;
+            for (int c = 0; c < hub.getNetwork().getSendChannels(); ++c) sends.add (NetworkNode::sendName (c));
+            column (p, none, { "LINK SEND", "network", "MELVILLE Link out: cabled here, it goes to MELVILLE (or MELVILLE Link) on other PCs. "
+                                                       "Turn SEND on, and set how many channels, in the LINK window.",
+                               sends, numbers (sends.size()) });
+        }
+
+        // MELVILLE Link in, to the right: a set of jacks per connected sender (MELVILLE or MELVILLE Link on other PCs)
         auto& rx = hub.getNetwork().getReceiver();
         for (int slot = 0; slot < NetworkNode::slots; ++slot)
         {
@@ -389,6 +398,7 @@ juce::String PatchCanvas::networkKey() const
         const auto st = rx.getStatus (slot);
         if (st.state != hawthorne::NetReceiver::State::off) key << slot << st.name << st.channels << "|";
     }
+    key << "S" << hub.getNetwork().getSendChannels();
     for (int n = 2; n <= Hub::maxIrvings; ++n)                 // (IRVINGs opened or removed)
         key << (hub.isPartConnected (Hub::irvingId (n)) ? "I" : "-");
     return key;

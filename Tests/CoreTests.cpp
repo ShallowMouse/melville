@@ -13,6 +13,8 @@
 #include "../Source/Core/OscDevices.h"
 #include "../Source/Core/AsioNode.h"
 #include "../Poe/Source/PoeEngine.h"
+#include "../Source/Core/NetworkNode.h"
+#include <thread>
 #include <cstdio>
 
 using namespace melville;
@@ -311,6 +313,49 @@ int main()
         CHECK (ticks == 47 || ticks == 48);
         std::printf ("    MIDI: clock %d ticks in a second at 120, %d start\n", ticks, starts);
         clock.getState = oldState;
+    }
+
+    // --- MELVILLE Link out: what's cabled to LINK SEND arrives at a receiver on "another PC" (here, over loopback)
+    {
+        auto tmp = juce::File::createTempFile (".settings");
+        juce::PropertiesFile::Options o;
+        juce::PropertiesFile ps (tmp, o);
+        ps.setValue ("sendOn", true);
+        ps.setValue ("sendName", "MELVILLE test sender");
+        ps.setValue ("sendChannels", 2);
+        NetworkNode tx;
+        tx.start (ps, nullptr);
+        tx.prepare (48000.0, 256);
+        CHECK (tx.isSending() && tx.port.dests.size() == NetworkNode::maxSend && tx.port.dests[0] == "Send 1");
+
+        hawthorne::NetReceiver rx;
+        rx.setManualAddresses ({ "127.0.0.1" });
+        juce::String err;
+        CHECK (rx.start (err));
+        rx.prepare (48000.0);
+        rx.connect (0, "MELVILLE test sender");
+
+        // a block every 5.3 ms, as an interface would: a 440 Hz tone on Send 1, silence on Send 2
+        std::vector<float> a (256), b (256, 0.0f);
+        const float* dests[NetworkNode::maxSend] {};
+        dests[0] = a.data(); dests[1] = b.data();
+        double ph = 0.0;
+        float got = 0.0f, other = 0.0f;
+        for (int blk = 0; blk < 600; ++blk)
+        {
+            for (auto& v : a) { v = 0.5f * (float) std::sin (ph); ph += juce::MathConstants<double>::twoPi * 440.0 / 48000.0; }
+            tx.push (dests, 256);
+            rx.process (256);
+            if (const float* c = rx.getChannel (0, 0)) for (int i = 0; i < 256; ++i) got = juce::jmax (got, std::abs (c[i]));
+            if (const float* c = rx.getChannel (0, 1)) for (int i = 0; i < 256; ++i) other = juce::jmax (other, std::abs (c[i]));
+            std::this_thread::sleep_for (std::chrono::microseconds (5333));
+        }
+        const auto st = rx.getStatus (0);
+        std::printf ("    LINK: sent 2 ch over loopback, received peak %.3f on ch 1 (%.4f on ch 2), %d ch, %s\n",
+                     got, other, st.channels, hawthorne::NetReceiver::describe (st.state).toRawUTF8());
+        CHECK (got > 0.4f && got < 0.6f && other < 0.001f && st.channels == 2);
+        rx.stop();
+        tmp.deleteFile();
     }
 
     // --- POE: its jacks, its MIDI reaching what it's cabled to (ALCOTT slot 1 by default), and the sequencer itself

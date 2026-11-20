@@ -224,3 +224,32 @@ target_link_libraries(Melville
 if(MSVC)
     target_compile_options(Melville PRIVATE /bigobj)
 endif()
+
+# ---------------------------------------------------------------------------
+# MELVILLE Link: the small program for a PC without MELVILLE. It sends that PC's inputs to
+# MELVILLE and plays a MELVILLE's LINK SEND on its outputs, over the network.
+# ---------------------------------------------------------------------------
+juce_add_gui_app(MelvilleLink
+    PRODUCT_NAME "MELVILLE Link"
+    COMPANY_NAME "PEQUOD"
+    BUNDLE_ID    "com.pequod.melvillelink"
+    ${_icon_args}
+    VERSION      ${PROJECT_VERSION})
+target_sources(MelvilleLink PRIVATE
+    Link/Source/LinkApp.cpp
+    "${HAWTHORNE_DIR}/Source/Network/NetSender.cpp"
+    "${HAWTHORNE_DIR}/Source/Network/NetReceiver.cpp"
+    "${HAWTHORNE_DIR}/Source/Engine/Varispeed.cpp")
+target_include_directories(MelvilleLink PRIVATE "${HAWTHORNE_DIR}/Source/Network" "${HAWTHORNE_DIR}/Source/Engine")
+target_compile_definitions(MelvilleLink PRIVATE
+    JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_ASIO=1 JUCE_WASAPI=1 JUCE_DIRECTSOUND=1
+    MELVILLE_LINK_VERSION="${PROJECT_VERSION}")
+target_link_libraries(MelvilleLink
+    PRIVATE
+        MelvilleBinaryData
+        juce::juce_audio_utils
+        juce::juce_audio_devices
+    PUBLIC
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
