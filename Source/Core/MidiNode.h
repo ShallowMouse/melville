@@ -5,7 +5,7 @@
 //
 //   sources:       Keyboards (every MIDI input merged), In: <each MIDI input>,
 //                  THOREAU steps (each pad on its own channel), Clock (24 a beat, start / stop),
-//                  POE (the step sequencer's notes and CCs)
+//                  POE 1 - 4 (the step sequencers' notes and CCs)
 //   destinations:  ALCOTT slot 1 - 8, POE transpose, Out: <each MIDI output>
 //
 // It's a node like the others, so its jacks are patchbay channels, saved with the patch and
@@ -25,6 +25,7 @@ class MidiNode : public Node, private juce::MidiInputCallback
 {
 public:
     static constexpr int numAlcottSlots = 8;
+    static constexpr int numPoes = 4;              // POE's sequencers
 
     MidiNode()
     {
@@ -36,7 +37,7 @@ public:
         for (auto& d : inputs) port.sources.add ("In: " + d.name);
         port.sources.add ("THOREAU steps");
         port.sources.add ("Clock");
-        port.sources.add ("POE");
+        for (int k = 1; k <= numPoes; ++k) port.sources.add ("POE " + juce::String (k));
         for (int k = 1; k <= numAlcottSlots; ++k) port.dests.add ("ALCOTT slot " + juce::String (k));
         port.dests.add ("POE transpose");
         for (auto& d : outputs) port.dests.add ("Out: " + d.name);
@@ -54,7 +55,7 @@ public:
     int input (int i) const noexcept    { return 1 + i; }
     int thoreauSteps() const noexcept   { return 1 + inputs.size(); }
     int clock() const noexcept          { return 2 + inputs.size(); }
-    int poe() const noexcept            { return 3 + inputs.size(); }
+    int poe (int k) const noexcept      { return 3 + inputs.size() + juce::jlimit (0, numPoes - 1, k); }
     int alcottSlot (int k) const noexcept { return k; }                    // (destination)
     int poeTranspose() const noexcept   { return numAlcottSlots; }         // (destination)
     int output (int i) const noexcept   { return numAlcottSlots + 1 + i; } // (destination)
@@ -186,11 +187,11 @@ public:
         o = at + juce::jmax (64, (int) len);
     }
 
-    /** POE's turn (audio thread): a message from the sequencer, `offset` samples into the block
+    /** POE's turn (audio thread): a message from sequencer `which` (0-3), `offset` samples into the block
         (POE lets its own notes go). */
-    void postPoe (const juce::MidiMessage& m, int offset) noexcept
+    void postPoe (int which, const juce::MidiMessage& m, int offset) noexcept
     {
-        buffers[(size_t) poe()].addEvent (m, juce::jlimit (0, juce::jmax (0, frameN - 1), offset));
+        buffers[(size_t) poe (which)].addEvent (m, juce::jlimit (0, juce::jmax (0, frameN - 1), offset));
     }
 
     /** A destination's MIDI: everything cabled into it this block (audio thread). */

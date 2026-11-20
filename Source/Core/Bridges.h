@@ -130,8 +130,19 @@ namespace names
         return s;
     }
 
-    /** POE's control voltages, in its device-channel order (poe::Engine::Outs). */
-    inline juce::StringArray poeOuts() { return { "Pitch CV", "Gate", "Trigger", "CV B", "CV C" }; }
+    /** POE's control voltages, in its device-channel order: each sequencer's five (poe::Engine::Outs) in turn. */
+    inline juce::StringArray poeOuts (int seq)
+    {
+        juce::StringArray s;
+        for (auto* o : { "Pitch CV", "Gate", "Trigger", "CV B", "CV C" }) s.add (juce::String (seq) + " " + o);
+        return s;
+    }
+    inline juce::StringArray poeOuts()
+    {
+        juce::StringArray s;
+        for (int k = 1; k <= 4; ++k) s.addArray (poeOuts (k));
+        return s;
+    }
 }
 
 } // namespace melville

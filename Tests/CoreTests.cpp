@@ -317,22 +317,25 @@ int main()
     {
         auto& mpb = hub.getPatchbay();
         auto* midi = hub.getMidi();
-        const int poeOut = mpb.findSource ("midi", "POE"), poeIn = mpb.findDest ("midi", "POE transpose");
+        const int poeOut = mpb.findSource ("midi", "POE 1"), poe4 = mpb.findSource ("midi", "POE 4"), poeIn = mpb.findDest ("midi", "POE transpose");
         const int slot1 = mpb.findDest ("midi", "ALCOTT slot 1"), slot2 = mpb.findDest ("midi", "ALCOTT slot 2");
-        CHECK (poeOut >= 0 && poeIn >= 0 && slot1 >= 0);
+        CHECK (poeOut >= 0 && poe4 >= 0 && poeIn >= 0 && slot1 >= 0);
         CHECK (mpb.isConnected (poeOut, slot1) && ! mpb.isConnected (poeOut, slot2));
-        CHECK (mpb.findSource ("poe", "Pitch CV") >= 0 && mpb.findSource ("poe", "Gate") >= 0 && mpb.findSource ("poe", "CV C") >= 0);
+        CHECK (mpb.findSource ("poe", "1 Pitch CV") >= 0 && mpb.findSource ("poe", "1 Gate") >= 0 && mpb.findSource ("poe", "4 CV C") >= 0);
         juce::AudioBuffer<float> silence (juce::jmax (1, midi->port.sources.size()), 512);
         midi->pull (silence.getArrayOfWritePointers(), 512);
-        midi->postPoe (juce::MidiMessage::noteOn (1, 57, 0.8f), 100);
+        midi->postPoe (0, juce::MidiMessage::noteOn (1, 57, 0.8f), 100);
+        midi->postPoe (3, juce::MidiMessage::noteOn (1, 60, 0.8f), 50);      // (sequencer 4: not cabled to slot 1)
         juce::MidiBuffer s1, s2;
         midi->take (slot1 - mpb.findPort ("midi")->firstDest, s1);
         midi->take (slot2 - mpb.findPort ("midi")->firstDest, s2);
         int at = -1;
-        for (const auto meta : s1) if (meta.getMessage().isNoteOn() && meta.getMessage().getNoteNumber() == 57) at = meta.samplePosition;
+        int strays = 0;
+        for (const auto meta : s1) { if (meta.getMessage().isNoteOn() && meta.getMessage().getNoteNumber() == 57) at = meta.samplePosition;
+                                     if (meta.getMessage().getNoteNumber() == 60) ++strays; }
         int any2 = 0;
         for (const auto meta : s2) if (meta.getMessage().getNoteNumber() == 57) ++any2;
-        CHECK (at == 100 && any2 == 0);
+        CHECK (at == 100 && any2 == 0 && strays == 0);
 
         // the sequencer, offline: 120 BPM, 1/16 = 6000 samples a step at 48 kHz
         poe::Engine e;
@@ -428,6 +431,16 @@ int main()
         poe::Engine f;
         f.fromXml (*e.toXml());
         CHECK (f.pattern (3).steps[5].a.load() == 0.25f && f.pattern (3).length.load() == 7 && f.rate.load() == 4 && f.run.load());
+        {
+            poe::Rack r, r2;
+            auto old = e.toXml();
+            old->setTagName ("POE");                                           // (a session from POE with one sequencer)
+            r.fromXml (*old);
+            CHECK (r.seq (0).pattern (3).length.load() == 7 && r.seq (1).pattern (3).length.load() == poe::Engine::numSteps);
+            r.seq (2).rate = 1; r.seq (2).follows = false;
+            r2.fromXml (*r.toXml());
+            CHECK (r2.seq (2).rate.load() == 1 && ! r2.seq (2).follows.load() && r2.seq (0).pattern (3).length.load() == 7);
+        }
         std::printf ("    POE: steps every 6000 samples at 120, gates, ties, skips, swing, the tape's place and the session\n");
     }
 

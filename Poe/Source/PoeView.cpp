@@ -151,10 +151,10 @@ bool Knob::refresh()
 class View::ModeSwitch : public juce::Component
 {
 public:
-    ModeSwitch (Engine& e, int s) : engine (e), step (s) {}
+    ModeSwitch (Engine*& e, int s) : engine (e), step (s) {}
 
-    int mode() const { return engine.now().steps[(size_t) step].mode.load(); }
-    void setMode (int m) { engine.now().steps[(size_t) step].mode = juce::jlimit (0, 3, m); shown = -1; refresh(); }
+    int mode() const { return engine->now().steps[(size_t) step].mode.load(); }
+    void setMode (int m) { engine->now().steps[(size_t) step].mode = juce::jlimit (0, 3, m); shown = -1; refresh(); }
     bool refresh() { const int m = mode(); if (m == shown) return false; shown = m; repaint(); return true; }
 
     void paint (juce::Graphics& g) override
@@ -204,7 +204,7 @@ private:
         const auto r = getLocalBounds().toFloat().reduced (2.0f, 3.0f);
         setMode ((int) ((e.position.y - r.getY()) / (r.getHeight() / 4.0f)));
     }
-    Engine& engine;
+    Engine*& engine;
     int step, shown = -1;
 };
 
@@ -220,16 +220,26 @@ View::View()
 {
     setOpaque (true);
     runKey.setClickingTogglesState (true);
-    runKey.onClick = [this] { engine.run = runKey.getToggleState(); changed(); };
+    runKey.onClick = [this] { cur->run = runKey.getToggleState(); changed(); };
     randomKey.setButtonText ("RND");
-    randomKey.onClick = [this] { engine.randomise (engine.current, false); changed(); };
+    randomKey.onClick = [this] { cur->randomise (cur->current, false); changed(); };
     patternKey.onClick = [this] { showPatternMenu(); };
     for (auto* k : { &runKey, &randomKey, &patternKey }) addAndMakeVisible (k);
+
+    for (int i = 0; i < Rack::numSequencers; ++i)
+    {
+        auto* k = seqKeys.add (new partui::Key ("Sequencer " + juce::String (i + 1) + ": show it here (its lamp is lit while it plays)",
+                                                partui::Icon::none, accent()));
+        k->setButtonText (juce::String (i + 1));
+        k->onClick = [this, i] { select (i); };
+        addAndMakeVisible (k);
+    }
+    runningShown.fill (-2);
 
     for (int i = 0; i < Engine::numPatterns; ++i)
     {
         auto* k = patternKeys.add (new PatternKey (i));
-        k->onClick = [this, i] { engine.current = i; refreshAll(); changed(); };
+        k->onClick = [this, i] { cur->current = i; refreshAll(); changed(); };
         addAndMakeVisible (k);
     }
 
@@ -248,45 +258,48 @@ View::View()
     auto pick = [] (float v, int n) { return juce::roundToInt (v * (float) (n - 1)); };
     auto at = [] (int i, int n) { return n > 1 ? (float) i / (float) (n - 1) : 0.0f; };
 
-    add ("LENGTH", 16, 1.0f, [this, at] { return at (engine.now().length.load() - 1, 16); },
-         [this, pick] (float v) { engine.now().length = pick (v, 16) + 1; },
+    add ("LENGTH", 16, 1.0f, [this, at] { return at (cur->now().length.load() - 1, 16); },
+         [this, pick] (float v) { cur->now().length = pick (v, 16) + 1; },
          [pick] (float v) { return juce::String (pick (v, 16) + 1) + " STEPS"; },
          "How many steps the pattern runs (click a step's lamp to end it there)");
-    add ("RATE", 6, 0.6f, [this, at] { return at (engine.rate.load(), 6); }, [this, pick] (float v) { engine.rate = pick (v, 6); },
+    add ("RATE", 6, 0.6f, [this, at] { return at (cur->rate.load(), 6); }, [this, pick] (float v) { cur->rate = pick (v, 6); },
          [pick] (float v) { return Engine::rateNames()[pick (v, 6)]; }, "How long each step is, at MELVILLE's tempo");
-    add ("DIRECTION", 4, 0.0f, [this, at] { return at (engine.direction.load(), 4); }, [this, pick] (float v) { engine.direction = pick (v, 4); },
+    add ("DIRECTION", 4, 0.0f, [this, at] { return at (cur->direction.load(), 4); }, [this, pick] (float v) { cur->direction = pick (v, 4); },
          [pick] (float v) { return Engine::directionNames()[pick (v, 4)].toUpperCase(); },
          "Forward, backward, back and forth, or a random step each time (the same at the same place on tape)");
-    add ("SWING", 0, 0.0f, [this] { return engine.swing.load() * 2.0f; }, [this] (float v) { engine.swing = v * 0.5f; },
+    add ("SWING", 0, 0.0f, [this] { return cur->swing.load() * 2.0f; }, [this] (float v) { cur->swing = v * 0.5f; },
          [] (float v) { return juce::String (50 + juce::roundToInt (v * 25.0f)) + "%"; },
          "Swing: every other step comes late (50% straight, 66% a triplet shuffle, 75% dotted)");
-    add ("GLIDE", 0, 0.0f, [this] { return std::sqrt (engine.glideMs.load() / 1000.0f); }, [this] (float v) { engine.glideMs = v * v * 1000.0f; },
+    add ("GLIDE", 0, 0.0f, [this] { return std::sqrt (cur->glideMs.load() / 1000.0f); }, [this] (float v) { cur->glideMs = v * v * 1000.0f; },
          [] (float v) { return v <= 0.0f ? juce::String ("OFF") : juce::String (juce::roundToInt (v * v * 1000.0f)) + " ms"; },
          "Portamento on the pitch CV (as the 960's glide): how long it takes to slide to each new note");
-    add ("CHANNEL", 16, 0.0f, [this, at] { return at (engine.channel.load() - 1, 16); }, [this, pick] (float v) { engine.channel = pick (v, 16) + 1; },
+    add ("CHANNEL", 16, 0.0f, [this, at] { return at (cur->channel.load() - 1, 16); }, [this, pick] (float v) { cur->channel = pick (v, 16) + 1; },
          [pick] (float v) { return "MIDI " + juce::String (pick (v, 16) + 1); }, "The MIDI channel POE plays on");
     add ("SCALE", (int) Engine::scaleNames().size(), at (1, Engine::scaleNames().size()),
-         [this, at] { return at (engine.scale.load(), Engine::scaleNames().size()); },
-         [this, pick] (float v) { engine.scale = pick (v, Engine::scaleNames().size()); },
+         [this, at] { return at (cur->scale.load(), Engine::scaleNames().size()); },
+         [this, pick] (float v) { cur->scale = pick (v, Engine::scaleNames().size()); },
          [pick] (float v) { return Engine::scaleNames()[pick (v, Engine::scaleNames().size())].toUpperCase(); },
          "The scale row A's knobs are quantised to");
-    add ("ROOT", 12, 0.0f, [this, at] { return at (engine.root.load(), 12); }, [this, pick] (float v) { engine.root = pick (v, 12); },
+    add ("ROOT", 12, 0.0f, [this, at] { return at (cur->root.load(), 12); }, [this, pick] (float v) { cur->root = pick (v, 12); },
          [pick] (float v) { return Engine::noteName (pick (v, 12) + 12).dropLastCharacters (1); }, "The scale's key note");
-    add ("OCTAVE", 8, at (3, 8), [this, at] { return at (engine.octave.load(), 8); }, [this, pick] (float v) { engine.octave = pick (v, 8); },
+    add ("OCTAVE", 8, at (3, 8), [this, at] { return at (cur->octave.load(), 8); }, [this, pick] (float v) { cur->octave = pick (v, 8); },
          [pick] (float v) { return "FROM C" + juce::String (pick (v, 8)); }, "Where row A's knobs start (turned fully down)");
-    add ("RANGE", 4, at (1, 4), [this, at] { return at (engine.range.load() - 1, 4); }, [this, pick] (float v) { engine.range = pick (v, 4) + 1; },
+    add ("RANGE", 4, at (1, 4), [this, at] { return at (cur->range.load() - 1, 4); }, [this, pick] (float v) { cur->range = pick (v, 4) + 1; },
          [pick] (float v) { const int n = pick (v, 4) + 1; return juce::String (n) + (n == 1 ? " OCTAVE" : " OCTAVES"); },
          "How many octaves row A's knobs cover");
-    add ("ROW B", 129, 0.0f, [this, at] { return at (engine.bCc.load() + 1, 129); }, [this, pick] (float v) { engine.bCc = pick (v, 129) - 1; },
+    add ("ROW B", 129, 0.0f, [this, at] { return at (cur->bCc.load() + 1, 129); }, [this, pick] (float v) { cur->bCc = pick (v, 129) - 1; },
          [pick] (float v) { const int n = pick (v, 129) - 1; return n < 0 ? juce::String ("VELOCITY") : "CC " + juce::String (n); },
          "What row B sends: each note's velocity, or a MIDI CC (CV B always carries it, 0-5 V)");
-    add ("ROW C", 129, 0.0f, [this, at] { return at (engine.cCc.load() + 1, 129); }, [this, pick] (float v) { engine.cCc = pick (v, 129) - 1; },
+    add ("ROW C", 129, 0.0f, [this, at] { return at (cur->cCc.load() + 1, 129); }, [this, pick] (float v) { cur->cCc = pick (v, 129) - 1; },
          [pick] (float v) { const int n = pick (v, 129) - 1; return n < 0 ? juce::String ("GATE TIME") : "CC " + juce::String (n); },
          "What row C sends: how long each note holds, or a MIDI CC (CV C always carries it, 0-5 V)");
+    add ("TRANSPOSE", 2, 1.0f, [this] { return cur->follows.load() ? 1.0f : 0.0f; }, [this] (float v) { cur->follows = v > 0.5f; },
+         [] (float v) { return v > 0.5f ? juce::String ("FOLLOWS KEY") : juce::String ("FIXED"); },
+         "Whether this sequencer follows the TRANSPOSE jack's keyboard (a bass line that does, a drone that doesn't)");
     static const float scales[] = { 5.0f, 8.0f, 10.0f, 12.0f, 15.0f, 20.0f };
     add ("CV SCALE", 6, at (2, 6),
-         [this, at] { int i = 0; for (int k = 0; k < 6; ++k) if (std::abs (engine.fullScale.load() - scales[k]) < 0.01f) i = k; return at (i, 6); },
-         [this, pick] (float v) { engine.fullScale = scales[pick (v, 6)]; },
+         [this, at] { int i = 0; for (int k = 0; k < 6; ++k) if (std::abs (cur->fullScale.load() - scales[k]) < 0.01f) i = k; return at (i, 6); },
+         [this, pick] (float v) { cur->fullScale = scales[pick (v, 6)]; },
          [pick] (float v) { return juce::String (juce::roundToInt (scales[pick (v, 6)])) + " V FULL"; },
          "Your interface's output at full scale, in volts (DC-coupled outputs; see its manual): so 1 V an octave comes out as 1 V");
 
@@ -300,41 +313,41 @@ View::View()
             k->normal = row == 0 ? 0.0f : row == 1 ? 0.75f : 0.5f;
             k->get = [this, i, row]
             {
-                auto& s = engine.now().steps[(size_t) i];
+                auto& s = cur->now().steps[(size_t) i];
                 return (row == 0 ? s.a : row == 1 ? s.b : s.c).load();
             };
             k->set = [this, i, row] (float v)
             {
-                auto& s = engine.now().steps[(size_t) i];
+                auto& s = cur->now().steps[(size_t) i];
                 (row == 0 ? s.a : row == 1 ? s.b : s.c) = v;
                 changed();
             };
             if (row == 1) k->text = [] (float v) { return juce::String (juce::roundToInt (v * 127.0f)); };
-            if (row == 2) k->text = [this] (float v) { return engine.cCc.load() < 0 ? percent (juce::jmap (v, 0.05f, 1.0f)) : juce::String (juce::roundToInt (v * 127.0f)); };
+            if (row == 2) k->text = [this] (float v) { return cur->cCc.load() < 0 ? percent (juce::jmap (v, 0.05f, 1.0f)) : juce::String (juce::roundToInt (v * 127.0f)); };
             k->setTooltip (row == 0 ? "Row A: this step's note (shown above it)" : row == 1 ? "Row B: velocity (or the CC it's set to)"
                                                                                      : "Row C: how long the note holds (or the CC it's set to)");
             addAndMakeVisible (*k);
             stepKnobs[(size_t) i][(size_t) row] = std::move (k);
         }
-        addAndMakeVisible (modes.add (new ModeSwitch (engine, i)));
+        addAndMakeVisible (modes.add (new ModeSwitch (cur, i)));
     }
     notesShown.fill (-1);
 
     // the CV and MIDI: MELVILLE's POE device (its CV outs on the patchbay); its MIDI on the MIDI tab
-    engine.transposeJack = melville::midiJack ("POE transpose");
+    rack.transposeJack = melville::midiJack ("POE transpose");
     melville::attach (deviceManager, "poe");
-    deviceManager.addAudioCallback (&engine);
+    deviceManager.addAudioCallback (&rack);
     melville::addToSession (deviceManager, {
-        [this] { return engine.toXml(); },
-        [this] (const juce::XmlElement& x) { engine.fromXml (x); refreshAll(); },
-        [this] (const melville::NewStudio&) { engine.fromXml (juce::XmlElement ("POE")); refreshAll(); } });
+        [this] { return rack.toXml(); },
+        [this] (const juce::XmlElement& x) { rack.fromXml (x); refreshAll(); },
+        [this] (const melville::NewStudio&) { rack.fromXml (juce::XmlElement ("POE")); refreshAll(); } });
 
     // (development: POE_DEMO=1 sets a pattern up and RUN on, for pictures)
     if (juce::SystemStats::getEnvironmentVariable ("POE_DEMO", {}).isNotEmpty())
     {
         const float a[] = { 0.0f, 0.0f, 0.43f, 0.0f, 0.29f, 0.0f, 0.5f, 0.36f, 0.0f, 0.0f, 0.43f, 0.0f, 0.64f, 0.57f, 0.5f, 0.36f };
         const int m[] = { 0, 1, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 3, 0 };
-        auto& p = engine.pattern (0);
+        auto& p = cur->pattern (0);
         for (int i = 0; i < Engine::numSteps; ++i)
         {
             p.steps[(size_t) i].a = a[i];
@@ -342,10 +355,10 @@ View::View()
             p.steps[(size_t) i].c = (i % 4 == 0) ? 0.85f : 0.35f;
             p.steps[(size_t) i].mode = m[i];
         }
-        engine.scale = 2;
-        engine.root = 9;
-        engine.octave = 2;
-        engine.run = true;
+        cur->scale = 2;
+        cur->root = 9;
+        cur->octave = 2;
+        cur->run = true;
     }
 
     refreshAll();
@@ -355,16 +368,27 @@ View::View()
 View::~View()
 {
     stopTimer();
-    deviceManager.removeAudioCallback (&engine);
+    deviceManager.removeAudioCallback (&rack);
     melville::detach (deviceManager);
 }
 
 void View::changed() { refreshAll(); }
 
+void View::select (int i)
+{
+    selected = juce::jlimit (0, Rack::numSequencers - 1, i);
+    cur = &rack.seq (selected);
+    notesShown.fill (-1);
+    litShown = -2;
+    for (auto* m : modes) m->refresh();
+    refreshAll();
+}
+
 void View::refreshAll()
 {
-    runKey.setToggleState (engine.run.load(), juce::dontSendNotification);
-    for (int i = 0; i < patternKeys.size(); ++i) patternKeys[i]->setToggleState (i == engine.current.load(), juce::dontSendNotification);
+    runKey.setToggleState (cur->run.load(), juce::dontSendNotification);
+    for (int i = 0; i < seqKeys.size(); ++i) seqKeys[i]->setToggleState (i == selected, juce::dontSendNotification);
+    for (int i = 0; i < patternKeys.size(); ++i) patternKeys[i]->setToggleState (i == cur->current.load(), juce::dontSendNotification);
     for (auto* k : settings) k->refresh();
     bool any = false;
     for (auto& col : stepKnobs) for (auto& k : col) { k->repaint(); k->refresh(); }
@@ -379,16 +403,21 @@ void View::timerCallback()
     for (auto& col : stepKnobs) for (auto& k : col) k->refresh();
     bool redraw = false;
     for (auto* m : modes) m->refresh();
-    if (runKey.getToggleState() != engine.run.load()) runKey.setToggleState (engine.run.load(), juce::dontSendNotification);
-    const int lit = engine.lit.load(), tr = engine.transpose.load(), sn = engine.soundingNote.load();
+    if (runKey.getToggleState() != cur->run.load()) runKey.setToggleState (cur->run.load(), juce::dontSendNotification);
+    const int lit = cur->lit.load(), tr = cur->follows.load() ? cur->transpose.load() : 0, sn = cur->soundingNote.load();
     if (lit != litShown || tr != transposeShown || sn != noteShown) { litShown = lit; transposeShown = tr; noteShown = sn; redraw = true; }
     for (int i = 0; i < Engine::numSteps; ++i)
     {
-        const auto& s = engine.now().steps[(size_t) i];
-        const int code = engine.noteFor (s.a.load()) + tr + 1000 * s.mode.load() + 5000 * (i < engine.now().length.load() ? 1 : 0);
+        const auto& s = cur->now().steps[(size_t) i];
+        const int code = cur->noteFor (s.a.load()) + tr + 1000 * s.mode.load() + 5000 * (i < cur->now().length.load() ? 1 : 0);
         if (code != notesShown[(size_t) i]) { notesShown[(size_t) i] = code; redraw = true; }
     }
     if (redraw) repaint (stepsArea);
+    for (int i = 0; i < Rack::numSequencers; ++i)
+    {
+        const int on = rack.seq (i).lit.load() >= 0 ? 1 : rack.seq (i).run.load() ? 0 : -1;
+        if (on != runningShown[(size_t) i]) { runningShown[(size_t) i] = on; repaint (headerArea); }
+    }
     repaint (statusArea);
 }
 
@@ -396,30 +425,47 @@ juce::String View::statusLine() const
 {
     const auto& t = melville::transport();
     const bool rolling = t.rolling.load();
-    juce::String s = engine.run.load() ? (rolling ? "RUNNING" : "RUN - WAITING FOR THE TRANSPORT") : "STOPPED";
-    s << "   PATTERN " << (engine.current.load() + 1) << "   " << Engine::rateNames()[engine.rate.load()]
+    juce::String s = "SEQUENCER " + juce::String (selected + 1) + "   ";
+    s << (cur->run.load() ? (rolling ? "RUNNING" : "RUN - WAITING FOR THE TRANSPORT") : "STOPPED");
+    s << "   PATTERN " << (cur->current.load() + 1) << "   " << Engine::rateNames()[cur->rate.load()]
       << "   " << juce::String (t.bpm.load(), 1) << " BPM";
-    if (const int tr = engine.transpose.load(); tr != 0) s << "   TRANSPOSE " << (tr > 0 ? "+" : "") << tr;
+    if (const int tr = cur->transpose.load(); tr != 0 && cur->follows.load()) s << "   TRANSPOSE " << (tr > 0 ? "+" : "") << tr;
     return s;
 }
 
 void View::showPatternMenu()
 {
-    juce::PopupMenu copy, menu;
-    const int cur = engine.current.load();
+    juce::PopupMenu copy, toSeq, menu;
+    const int pat = cur->current.load();
     for (int k = 0; k < Engine::numPatterns; ++k)
-        if (k != cur) copy.addItem (100 + k, "Pattern " + juce::String (k + 1));
-    menu.addSubMenu ("Copy pattern " + juce::String (cur + 1) + " to", copy);
+        if (k != pat) copy.addItem (100 + k, "Pattern " + juce::String (k + 1));
+    for (int j = 0; j < Rack::numSequencers; ++j)
+        if (j != selected) toSeq.addItem (200 + j, "Sequencer " + juce::String (j + 1) + ", pattern " + juce::String (pat + 1));
+    menu.addSubMenu ("Copy pattern " + juce::String (pat + 1) + " to", copy);
+    menu.addSubMenu ("Copy pattern " + juce::String (pat + 1) + " to another sequencer", toSeq);
     menu.addItem (1, "Random pitches (keep gates and switches)");
     menu.addItem (2, "Random everything");
     menu.addSeparator();
-    menu.addItem (3, "Clear pattern " + juce::String (cur + 1));
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&patternKey), [this, cur] (int r)
+    menu.addItem (3, "Clear pattern " + juce::String (pat + 1));
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&patternKey), [this, pat] (int r)
     {
-        if (r >= 100) { engine.copyPattern (cur, r - 100); return; }
-        if (r == 1) engine.randomise (cur, true);
-        if (r == 2) engine.randomise (cur, false);
-        if (r == 3) engine.clearPattern (cur);
+        if (r >= 200)
+        {
+            auto& from = cur->pattern (pat);
+            auto& to = rack.seq (r - 200).pattern (pat);
+            to.length = from.length.load();
+            for (int i = 0; i < Engine::numSteps; ++i)
+            {
+                auto& a = from.steps[(size_t) i];
+                auto& b = to.steps[(size_t) i];
+                b.a = a.a.load(); b.b = a.b.load(); b.c = a.c.load(); b.mode = a.mode.load();
+            }
+            return;
+        }
+        if (r >= 100) { cur->copyPattern (pat, r - 100); return; }
+        if (r == 1) cur->randomise (pat, true);
+        if (r == 2) cur->randomise (pat, false);
+        if (r == 3) cur->clearPattern (pat);
         if (r > 0) changed();
     });
 }
@@ -430,7 +476,7 @@ void View::mouseDown (const juce::MouseEvent& e)
     for (int i = 0; i < Engine::numSteps; ++i)
         if (lampArea[(size_t) i].contains (e.getPosition()))
         {
-            auto& len = engine.now().length;
+            auto& len = cur->now().length;
             len = (len.load() == i + 1) ? Engine::numSteps : i + 1;
             changed();
             return;
@@ -451,6 +497,14 @@ void View::paint (juce::Graphics& g)
     g.drawText ("Plays while RUN is lit and MELVILLE's transport rolls. Cable its MIDI OUT to an ALCOTT slot or a MIDI OUT on the PATCHBAY's MIDI tab; its CV outs are on the audio tab",
                 statusArea.withTrimmedTop (statusArea.getHeight() / 2).translated (0, -2), juce::Justification::centredLeft, true);
 
+    // each sequencer key's lamp: lit while it plays, dim while it's set to run
+    for (int i = 0; i < seqKeys.size(); ++i)
+    {
+        const auto kb = seqKeys[i]->getBounds().toFloat();
+        const int st = runningShown[(size_t) i];
+        if (st >= 0) Pequod::hw::lamp (g, { kb.getCentreX(), kb.getBottom() + 5.0f }, 2.5f, st > 0 ? juce::Colour (0xffff4a2e) : accent().withAlpha (0.5f), st > 0);
+    }
+
     // the cabinet: walnut cheeks either side
     const auto body = programmerArea.getUnion (stepsArea).toFloat();
     cheek (g, juce::Rectangle<float> (body.getX() - 16.0f, body.getY() - 2.0f, 14.0f, body.getHeight() + 4.0f));
@@ -468,10 +522,10 @@ void View::paint (juce::Graphics& g)
 
     // the steps
     facePanel (g, stepsArea.toFloat());
-    auto& p = engine.now();
+    auto& p = cur->now();
     const int len = p.length.load();
-    const int lit = engine.lit.load();
-    const int tr = engine.transpose.load();
+    const int lit = cur->lit.load();
+    const int tr = cur->follows.load() ? cur->transpose.load() : 0;
     for (int i = 0; i < Engine::numSteps; ++i)
     {
         const auto col = columnArea[(size_t) i];
@@ -498,7 +552,7 @@ void View::paint (juce::Graphics& g)
         const auto rd = readoutArea[(size_t) i].toFloat();
         Pequod::hw::window (g, rd);
         const int mode = p.steps[(size_t) i].mode.load();
-        const auto note = Engine::noteName (juce::jlimit (0, 127, engine.noteFor (p.steps[(size_t) i].a.load()) + tr));
+        const auto note = Engine::noteName (juce::jlimit (0, 127, cur->noteFor (p.steps[(size_t) i].a.load()) + tr));
         const auto shown = mode == Engine::rest ? juce::String ("--") : mode == Engine::skip ? juce::String ("  ") : note;
         g.setFont (Pequod::heading (13.0f));
         Pequod::hw::lit (g, shown, rd.reduced (2.0f, 1.0f), (in ? accent() : accent().withMultipliedBrightness (0.5f)).withAlpha (mode == Engine::tie ? 0.75f : 1.0f),
@@ -515,7 +569,7 @@ void View::paint (juce::Graphics& g)
         g.setFont (Pequod::heading (10.0f));
         Pequod::hw::engraved (g, what, r, ink, juce::Justification::topLeft);
     };
-    const int bc = engine.bCc.load(), cc = engine.cCc.load();
+    const int bc = cur->bCc.load(), cc = cur->cCc.load();
     g.setFont (Pequod::heading (10.0f));
     Pequod::hw::engraved (g, "STEP", rowArea[0].withWidth (columnArea[0].getX() - stepsArea.getX()).reduced (12, 0).toFloat(), ink, juce::Justification::centredLeft);
     Pequod::hw::engraved (g, "NOTE", rowArea[1].withWidth (columnArea[0].getX() - stepsArea.getX()).reduced (12, 0).toFloat(), ink, juce::Justification::centredLeft);
@@ -531,7 +585,7 @@ void View::resized()
     headerArea = r.removeFromTop (partui::headerHeight);
     auto bar = headerArea.withTrimmedBottom (2).reduced (14, 0);
     bar.removeFromLeft (200);
-    bar = partui::placeKeys (bar, { &patternKey, &randomKey, &runKey });
+    bar = partui::placeKeys (bar, { &patternKey, &randomKey, &runKey, seqKeys[3], seqKeys[2], seqKeys[1], seqKeys[0] });
     statusArea = bar.withTrimmedRight (10).withSizeKeepingCentre (bar.getWidth() - 10, 40);
 
     r.reduce (26, 10);       // (room for the cheeks)

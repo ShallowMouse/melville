@@ -135,7 +135,7 @@ void Engine::startStep (juce::int64 count, double startU, double lenU, int offse
 
     if (mode == rest) { release (midi, offset); return; }
 
-    const int note = juce::jlimit (0, 127, noteFor (a) + transpose.load (std::memory_order_relaxed));
+    const int note = juce::jlimit (0, 127, noteFor (a) + (follows.load (std::memory_order_relaxed) ? transpose.load (std::memory_order_relaxed) : 0));
     const float vel = ccB >= 0 ? 0.8f : juce::jlimit (0.05f, 1.0f, b);
     const float gate = ccC >= 0 ? 0.5f : juce::jmap (c, 0.05f, 1.0f);
     cvTarget = (double) (note - pitchCvZero) / 12.0;
@@ -228,19 +228,20 @@ void Engine::process (float* const* out, int numOut, int n, const Clock& clk, co
 }
 
 //==============================================================================
-void Engine::audioDeviceAboutToStart (juce::AudioIODevice* d)
+void Rack::audioDeviceAboutToStart (juce::AudioIODevice* d)
 {
-    if (d != nullptr) prepare (d->getCurrentSampleRate());
+    if (d != nullptr)
+        for (auto& e : seqs) e.prepare (d->getCurrentSampleRate());
     transposeBlock.ensureSize (1024);
     midiBlock.ensureSize (1024);
 }
 
-void Engine::audioDeviceIOCallbackWithContext (const float* const*, int, float* const* out, int numOut, int n,
-                                               const juce::AudioIODeviceCallbackContext&)
+void Rack::audioDeviceIOCallbackWithContext (const float* const*, int, float* const* out, int numOut, int n,
+                                             const juce::AudioIODeviceCallbackContext&)
 {
     for (int c = 0; c < numOut; ++c) if (out[c] != nullptr) juce::FloatVectorOperations::clear (out[c], n);
 
-    Clock clk;
+    Engine::Clock clk;
     double pos = 0.0, perSample = 0.0;
     int flags = 0;
     const auto frame = melville::currentFrame();
@@ -257,16 +258,44 @@ void Engine::audioDeviceIOCallbackWithContext (const float* const*, int, float* 
 
     transposeBlock.clear();
     melville::takeMidi (transposeJack, transposeBlock);
-    midiBlock.clear();
-    process (out, numOut, n, clk, transposeBlock, midiBlock);
-    for (const auto meta : midiBlock)
-        melville::postPoe (meta.getMessage(), meta.samplePosition);
+    for (int i = 0; i < numSequencers; ++i)
+    {
+        // each sequencer's five CV outs, in turn
+        const int first = i * Engine::numOutputs;
+        float* const* mine = first < numOut ? out + first : nullptr;
+        midiBlock.clear();
+        seqs[(size_t) i].process (mine, mine != nullptr ? juce::jmin ((int) Engine::numOutputs, numOut - first) : 0, n, clk,
+                                  seqs[(size_t) i].follows.load (std::memory_order_relaxed) ? transposeBlock : none, midiBlock);
+        for (const auto meta : midiBlock)
+            melville::postPoe (i, meta.getMessage(), meta.samplePosition);
+    }
+}
+
+std::unique_ptr<juce::XmlElement> Rack::toXml() const
+{
+    auto x = std::make_unique<juce::XmlElement> ("POE");
+    for (int i = 0; i < numSequencers; ++i)
+    {
+        auto s = seqs[(size_t) i].toXml();
+        s->setAttribute ("index", i);
+        x->addChildElement (s.release());
+    }
+    return x;
+}
+
+void Rack::fromXml (const juce::XmlElement& x)
+{
+    const juce::XmlElement blank ("SEQUENCER");
+    for (auto& e : seqs) e.fromXml (blank);
+    if (x.getChildByName ("PATTERN") != nullptr) { seqs[0].fromXml (x); return; }     // (POE with one sequencer)
+    for (auto* s : x.getChildWithTagNameIterator ("SEQUENCER"))
+        seq (s->getIntAttribute ("index", 0)).fromXml (*s);
 }
 
 //==============================================================================
 std::unique_ptr<juce::XmlElement> Engine::toXml() const
 {
-    auto x = std::make_unique<juce::XmlElement> ("POE");
+    auto x = std::make_unique<juce::XmlElement> ("SEQUENCER");
     x->setAttribute ("run", run.load());
     x->setAttribute ("pattern", current.load());
     x->setAttribute ("rate", rate.load());
@@ -281,6 +310,7 @@ std::unique_ptr<juce::XmlElement> Engine::toXml() const
     x->setAttribute ("ccB", bCc.load());
     x->setAttribute ("ccC", cCc.load());
     x->setAttribute ("fullScale", (double) fullScale.load());
+    x->setAttribute ("follows", follows.load());
     for (int k = 0; k < numPatterns; ++k)
     {
         const auto& p = pattern (k);
@@ -314,6 +344,7 @@ void Engine::fromXml (const juce::XmlElement& x)
     bCc = juce::jlimit (-1, 127, x.getIntAttribute ("ccB", -1));
     cCc = juce::jlimit (-1, 127, x.getIntAttribute ("ccC", -1));
     fullScale = (float) juce::jlimit (1.0, 24.0, x.getDoubleAttribute ("fullScale", 10.0));
+    follows = x.getBoolAttribute ("follows", true);
     int k = 0;
     for (int i = 0; i < numPatterns; ++i) clearPattern (i);
     for (auto* px : x.getChildWithTagNameIterator ("PATTERN"))

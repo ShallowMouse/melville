@@ -242,7 +242,7 @@ void Hub::midiDefaults()
     if (midi == nullptr) return;
     for (int k = 1; k <= MidiNode::numAlcottSlots; ++k)
         patchbay.connect (patchbay.findSource ("midi", "Keyboards"), patchbay.findDest ("midi", "ALCOTT slot " + juce::String (k)));
-    patchbay.connect (patchbay.findSource ("midi", "POE"), patchbay.findDest ("midi", "ALCOTT slot 1"));     // (POE plays slot 1 until it's re-cabled)
+    patchbay.connect (patchbay.findSource ("midi", "POE 1"), patchbay.findDest ("midi", "ALCOTT slot 1"));   // (POE's first sequencer plays slot 1 until it's re-cabled)
 }
 
 //==============================================================================

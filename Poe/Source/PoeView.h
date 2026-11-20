@@ -74,7 +74,7 @@ public:
     void resized() override;
     void mouseDown (const juce::MouseEvent&) override;
 
-    Engine& getEngine() noexcept { return engine; }
+    Rack& getRack() noexcept { return rack; }
     static juce::Colour accent() { return partui::accent ("poe"); }
 
 private:
@@ -88,7 +88,10 @@ private:
     void showPatternMenu();
 
     juce::AudioDeviceManager deviceManager;
-    Engine engine;
+    Rack rack;
+    Engine* cur = &rack.seq (0);                       // the sequencer on the panel
+    int selected = 0;
+    void select (int i);
 
     juce::Rectangle<int> headerArea, statusArea, programmerArea, stepsArea, patternArea;
     std::array<juce::Rectangle<int>, 6> rowArea;          // lamps, readouts, A, B, C, switches (across the steps)
@@ -99,6 +102,8 @@ private:
     partui::Key patternKey { "Pattern: copy, clear, random pitches", partui::Icon::list, accent() };
 
     juce::OwnedArray<PatternKey> patternKeys;
+    juce::OwnedArray<partui::Key> seqKeys;                     // the sequencer keys, 1-4
+    std::array<int, Rack::numSequencers> runningShown {};
     juce::OwnedArray<Knob> settings;                         // the programmer's knobs
     std::array<std::array<std::unique_ptr<Knob>, 3>, Engine::numSteps> stepKnobs;
     juce::OwnedArray<ModeSwitch> modes;

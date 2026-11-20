@@ -313,12 +313,14 @@ void PatchCanvas::rebuild()
                            slotIns, slotInShort }); }
 
     {   auto& p = panel ("poe", "POE");
-        column (p, { "CV OUT", "poe", "POE's control voltages, for analogue synths through a DC-coupled interface output: pitch at 1 V an octave "
-                                      "(0 V is C2), gate and a 1 ms trigger at 5 V, and rows B and C as 0-5 V. Set your interface's full scale in POE.",
-                     names::poeOuts(), { "CV", "GATE", "TRIG", "B", "C" } }, none);
-        column (p, { "MIDI OUT", "midi", "POE's notes as MIDI (and rows B and C as CCs if POE sends them): cable to ALCOTT's slots or a MIDI OUT for hardware.",
-                     { "POE" }, { "POE" } },
-                   { "TRANSPOSE", "midi", "A keyboard here transposes the sequence: middle C plays it as written.",
+        for (int k = 1; k <= 4; ++k)
+            column (p, { "SEQ " + juce::String (k) + " CV", "poe",
+                         "Sequencer " + juce::String (k) + "'s control voltages, for analogue synths through a DC-coupled interface output: pitch at 1 V "
+                         "an octave (0 V is C2), gate and a 1 ms trigger at 5 V, and rows B and C as 0-5 V. Set your interface's full scale in POE.",
+                         names::poeOuts (k), { "CV", "GATE", "TRIG", "B", "C" } }, none);
+        column (p, { "MIDI OUT", "midi", "Each sequencer's notes as MIDI (and rows B and C as CCs if it sends them): cable to ALCOTT's slots or a MIDI OUT for hardware.",
+                     { "POE 1", "POE 2", "POE 3", "POE 4" }, { "1", "2", "3", "4" } },
+                   { "TRANSPOSE", "midi", "A keyboard here transposes the sequencers that follow it: middle C plays them as written.",
                      { "POE transpose" }, { "KEY" } }); }
 
     {   auto& p = panel ("hawthorne", "HAWTHORNE");

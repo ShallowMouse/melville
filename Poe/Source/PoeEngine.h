@@ -23,7 +23,8 @@
 namespace poe
 {
 
-class Engine : public juce::AudioIODeviceCallback
+/** One sequencer (POE has several: see Rack). */
+class Engine
 {
 public:
     static constexpr int numSteps = 16, numPatterns = 8;
@@ -66,6 +67,7 @@ public:
     std::atomic<int> channel { 1 };            // MIDI channel 1-16
     std::atomic<int> bCc { -1 }, cCc { -1 };   // -1: B is velocity / C is gate length; else that CC
     std::atomic<float> fullScale { 10.0f };    // the interface's full-scale output, volts
+    std::atomic<bool> follows { true };        // the TRANSPOSE jack moves it
 
     // --- for the panel (audio thread writes)
     std::atomic<int> lit { -1 };               // the step playing (-1: stopped)
@@ -73,7 +75,6 @@ public:
     std::atomic<int> soundingNote { -1 };
 
     Engine() = default;
-    ~Engine() override = default;
 
     Pattern& pattern (int i) noexcept { return patterns[(size_t) juce::jlimit (0, numPatterns - 1, i)]; }
     const Pattern& pattern (int i) const noexcept { return patterns[(size_t) juce::jlimit (0, numPatterns - 1, i)]; }
@@ -103,14 +104,6 @@ public:
                   juce::MidiBuffer& midiOut) noexcept;
     void prepare (double sr) noexcept { sampleRate = sr; }
 
-    // juce::AudioIODeviceCallback (MELVILLE's POE device)
-    void audioDeviceIOCallbackWithContext (const float* const*, int, float* const*, int, int,
-                                           const juce::AudioIODeviceCallbackContext&) override;
-    void audioDeviceAboutToStart (juce::AudioIODevice*) override;
-    void audioDeviceStopped() override {}
-
-    /** Set by the view (message thread, before the device starts): the TRANSPOSE jack. */
-    int transposeJack = -1;
 
 private:
     std::array<Pattern, numPatterns> patterns;
@@ -126,10 +119,34 @@ private:
     int trigLeft = 0, gapLeft = 0;   // samples of trigger pulse left; of the gate's retrigger gap
     double cvPitch = 0.0, cvTarget = 0.0;
     float cvRowB = 0.0f, cvRowC = 0.0f;
-    juce::MidiBuffer transposeBlock, midiBlock;
 
     void release (juce::MidiBuffer& midi, int offset) noexcept;
     void startStep (juce::int64 count, double startU, double lenU, int offset, juce::MidiBuffer& midi) noexcept;
+};
+
+/** POE: a rack of sequencers, each with its own patterns, MIDI jack (POE 1, POE 2 ...) and
+    CV outs, all running from MELVILLE's transport; the TRANSPOSE jack moves the ones that follow it. */
+class Rack : public juce::AudioIODeviceCallback
+{
+public:
+    static constexpr int numSequencers = 4;
+    static constexpr int numOutputs = numSequencers * Engine::numOutputs;
+
+    Engine& seq (int i) noexcept { return seqs[(size_t) juce::jlimit (0, numSequencers - 1, i)]; }
+
+    std::unique_ptr<juce::XmlElement> toXml() const;
+    void fromXml (const juce::XmlElement&);       // (also a session saved when POE had one sequencer)
+
+    void audioDeviceIOCallbackWithContext (const float* const*, int, float* const*, int, int,
+                                           const juce::AudioIODeviceCallbackContext&) override;
+    void audioDeviceAboutToStart (juce::AudioIODevice*) override;
+    void audioDeviceStopped() override {}
+
+    int transposeJack = -1;                       // set by the view before the device starts
+
+private:
+    std::array<Engine, numSequencers> seqs;
+    juce::MidiBuffer transposeBlock, none, midiBlock;
 };
 
 } // namespace poe
