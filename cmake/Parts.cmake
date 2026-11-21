@@ -139,7 +139,7 @@ pequod_look_renames(_emerson_renames Emerson)
 melville_part(NAME "EMERSON" DIR "${EMERSON_DIR}" MAKER MakeEmerson.cpp
     SOURCES
         Source/Engine/Rack.cpp Source/Engine/RackState.cpp Source/Link/LinkHost.cpp
-        Source/MainComponent.cpp Source/RackPanel.cpp Source/TrackList.cpp
+        Source/MainComponent.cpp Source/RackPanel.cpp Source/EffectsBrowser.cpp Source/TrackList.cpp
         Source/Plugins.cpp Source/RouteStatus.cpp Source/Updater.cpp
     DEFS "${_emerson_renames}"
     INCLUDES "${PEQUOD_HOST_DIR}/Source")
