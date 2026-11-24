@@ -119,6 +119,15 @@ Hub::Hub()
 
     updateVisibleTracks (hawthorne::route::defaultTracks);
     defaultPatch();
+    // the normals behind the bay: the studio's, the same for every session (saved as they change)
+    if (auto xml = juce::XmlDocument::parse (normalsFile()); xml != nullptr && xml->hasTagName ("BEHIND"))
+        patchbay.normalsFromXml (*xml);
+    patchbay.onNormalsChanged = [this]
+    {
+        auto f = normalsFile();
+        f.getParentDirectory().createDirectory();
+        patchbay.normalsToXml()->writeTo (f);
+    };
     prepare (sampleRate, blockSize, 0, 0);
     startTimerHz (10);
 }
@@ -178,12 +187,30 @@ bool Hub::hasUsualWiring()
     return usualWiringFile().existsAsFile() || oldNormalsFile().existsAsFile();
 }
 
-void Hub::saveUsualWiring()
+void Hub::saveUsualWiring (Patchbay::Scope sc)
 {
     auto f = usualWiringFile();
     f.getParentDirectory().createDirectory();
-    patchbay.wiringToXml()->writeTo (f);
+    auto xml = patchbay.wiringToXml();
+    if (sc != Patchbay::Scope::all)
+    {
+        // keep the other side of what was saved before (audio and MIDI are saved apart)
+        xml = patchbay.toXml (sc);
+        xml->setTagName ("WIRING");
+        const auto before = f.existsAsFile() ? juce::XmlDocument::parse (f) : nullptr;
+        if (before != nullptr && before->hasTagName ("WIRING"))
+            for (auto* e : before->getChildWithTagNameIterator ("CORD"))
+                if (Patchbay::isMidiCord (*e) != (sc == Patchbay::Scope::midi))
+                    xml->addChildElement (new juce::XmlElement (*e));
+        xml->removeAttribute ("scope");
+    }
+    xml->writeTo (f);
     oldNormalsFile().deleteFile();
+}
+
+juce::File Hub::normalsFile()
+{
+    return usualWiringFile().getSiblingFile ("patchbay-behind.xml");
 }
 
 void Hub::forgetUsualWiring()
@@ -192,8 +219,17 @@ void Hub::forgetUsualWiring()
     oldNormalsFile().deleteFile();
 }
 
-void Hub::defaultPatch (bool factory)
+void Hub::defaultPatch (bool factory, Patchbay::Scope sc)
 {
+    if (sc != Patchbay::Scope::all)
+    {
+        // one side only: the usual wiring, then the other side's cables put back as they were
+        const auto other = sc == Patchbay::Scope::midi ? Patchbay::Scope::audio : Patchbay::Scope::midi;
+        const auto keep = patchbay.toXml (other);
+        defaultPatch (factory, Patchbay::Scope::all);
+        patchbay.fromXml (*keep, other);
+        return;
+    }
     if (! factory)
         for (auto f : { usualWiringFile(), oldNormalsFile() })
             if (auto xml = juce::XmlDocument::parse (f); xml != nullptr && (xml->hasTagName ("WIRING") || xml->hasTagName ("NORMALS")))

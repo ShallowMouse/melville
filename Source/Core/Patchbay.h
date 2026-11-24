@@ -9,9 +9,13 @@
 // names; the default patch connects channels whose names match ("Hawthorne track 7"
 // out of the Route bridge -> "Hawthorne track 7" into EMERSON).
 //
-// No normals: nothing is wired behind the bay. Every connection is a cable you can see and
-// pull; the usual wiring (DEFAULT) is a set of cables too. (Sessions saved with normals load
-// them as cables, so they sound as they did.)
+// Cables on the front, normals behind. A cable is the session's (saved with the reel). A
+// normal is wired behind the bay, from an output to an input, and carries until a cable is
+// plugged into that input (a half-normal: a cable out of the output takes a mult and leaves the
+// normal alone). Normals belong to the studio, not the session: they're saved once for every
+// session. The audio jacks and the MIDI ones are kept apart: saving, opening, DEFAULT, PULL ALL
+// and SAVE AS USUAL each work on one side (Scope). (Sessions from before, saved with their
+// normals, load those as cables, so they sound as they did.)
 //
 // The audio thread reads a Matrix through an atomic pointer; the message thread
 // builds a new one and swaps it in. Old ones are freed later on the message thread
@@ -48,6 +52,9 @@ struct Matrix
 class Patchbay
 {
 public:
+    /** Which jacks something works on: all of them, the audio ones or the MIDI ones. */
+    enum class Scope { all, audio, midi };
+
     Patchbay() = default;
     ~Patchbay();
 
@@ -73,7 +80,9 @@ public:
     void connect (int source, int dest, float gain = 1.0f);
     void disconnect (int source, int dest);
     void clearDest (int dest);
-    void clearAll();
+    void clearAll (Scope = Scope::all);
+    /** Whether a destination is one of a scope's jacks. */
+    bool inScope (int dest, Scope sc) const { return sc == Scope::all || isMidiDest (dest) == (sc == Scope::midi); }
     /** Connect each channel of port A's sources to the channel of B's dests with the same name. */
     int connectByName (const juce::String& fromPort, const juce::String& toPort);
     /** Connect A's sources 1..n to B's dests 1..n in order (from the given offsets). */
@@ -81,6 +90,21 @@ public:
 
     /** Every cable. */
     std::vector<std::pair<int, Cord>> getAllCords() const;   // (dest, cord)
+    /** What's connected now: the cables, and the normals no cable has broken. */
+    std::vector<std::pair<int, Cord>> getLiveCords() const;
+
+    //--------------------------------------------------------------------------
+    // Normals, behind the bay (one into each input at most)
+    void setNormal (int source, int dest);       // (replaces the one into that input)
+    void removeNormal (int dest);
+    void clearNormals (Scope = Scope::all);
+    int normalInto (int dest) const;              // its source, or -1
+    bool isNormalCarrying (int dest) const { return normalInto (dest) >= 0 && ! isDestPlugged (dest); }
+    const std::vector<std::pair<int, int>>& getNormals() const noexcept { return normals; }   // (source, dest)
+    std::unique_ptr<juce::XmlElement> normalsToXml() const;
+    void normalsFromXml (const juce::XmlElement&);
+    /** The normals changed (the hub saves them). */
+    std::function<void()> onNormalsChanged;
     bool isSourcePlugged (int source) const;     // a cable's in this output
     bool isDestPlugged (int dest) const;         // a cable's in this input
 
@@ -89,11 +113,14 @@ public:
     std::unique_ptr<juce::XmlElement> wiringToXml() const;
     void wiringFromXml (const juce::XmlElement&);
 
-    // Saving: cords by port id + channel name, so a patch survives ports growing.
-    std::unique_ptr<juce::XmlElement> toXml() const;
-    void fromXml (const juce::XmlElement&);
+    // Saving: cords by port id + channel name, so a patch survives ports growing. With a scope,
+    // only that side's cables are saved, or replaced (the other side's are left as they are).
+    std::unique_ptr<juce::XmlElement> toXml (Scope = Scope::all) const;
+    void fromXml (const juce::XmlElement&, Scope = Scope::all);
+    /** A saved cord's side (by its ports: MIDI's are on the "midi" port). */
+    static bool isMidiCord (const juce::XmlElement& cord) { return cord.getStringAttribute ("toPort") == "midi"; }
 private:
-    void fromXmlCurrent (const juce::XmlElement&);
+    void fromXmlCurrent (const juce::XmlElement&, Scope);
 public:
 
     //--------------------------------------------------------------------------
@@ -116,7 +143,10 @@ private:
     void plug (int source, int dest, float gain);
     /** Cables and (from older files) normals, all as cables: a normal becomes a cable where
         nothing was plugged into its input (and, for a full normal, its output). */
-    void loadCordsAndNormals (const juce::XmlElement&);
+    void loadCordsAndNormals (const juce::XmlElement&, Scope = Scope::all);
+    std::pair<juce::String, juce::String> where (int flat, bool isSource) const;
+    std::vector<std::pair<int, int>> normals;      // (source, dest) behind the bay
+    void normalsChanged() { publish(); if (onNormalsChanged) onNormalsChanged(); }
 
     std::vector<Port> ports;
     int numSources = 0, numDests = 0;

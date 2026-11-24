@@ -2015,6 +2015,16 @@ public:
                             if (auto* vp = dynamic_cast<juce::Viewport*> (c))
                             {
                                 save (vp->getViewedComponent(), "patchbay-full.png");
+                                // behind the bay (FLIP), then back round
+                                for (auto* t : pv->getChildren())
+                                    if (auto* tb = dynamic_cast<juce::TextButton*> (t); tb != nullptr && tb->getButtonText() == "FLIP")
+                                    {
+                                        tb->setToggleState (true, juce::dontSendNotification);
+                                        if (tb->onClick) tb->onClick();
+                                        save (pv, "patchbay-rear.png");
+                                        tb->setToggleState (false, juce::dontSendNotification);
+                                        if (tb->onClick) tb->onClick();
+                                    }
                                 // and the MIDI tab
                                 for (auto* t : pv->getChildren())
                                     if (auto* tb = dynamic_cast<juce::TextButton*> (t); tb != nullptr && tb->getButtonText() == "MIDI")

@@ -198,6 +198,51 @@ int main()
     CHECK (pb.isConnected (src, dst) && pb.isConnected (src2, dst) && passes());
     pb.disconnect (src, dst);
     CHECK (silent());
+
+    // --- normals behind the bay: carry until a cable goes into the input (and aren't cables)
+    {
+        auto keepSaving = pb.onNormalsChanged;
+        pb.onNormalsChanged = nullptr;                           // (not the studio's file)
+        pb.disconnect (src2, dst);                              // (In 2's cable from above out: the input empty)
+        pb.setNormal (src, dst);
+        CHECK (pb.normalInto (dst) == src && pb.isNormalCarrying (dst));
+        CHECK (pb.getAllCords().size() == 1);                   // (just the click's cable: a normal isn't one)
+        CHECK (passes());                                       // In 1 reaches track 1 behind the bay
+        pb.connect (src2, dst);                                 // a cable in the input breaks it
+        CHECK (! pb.isNormalCarrying (dst) && silent());
+        pb.disconnect (src2, dst);
+        CHECK (pb.isNormalCarrying (dst) && passes());          // pulled out: the normal carries again
+        // the session's patch doesn't hold it; the normals' own file does
+        CHECK (pb.toXml()->getChildByAttribute ("to", "Track 1") == nullptr);
+        auto behind = pb.normalsToXml();
+        pb.clearNormals();
+        CHECK (pb.normalInto (dst) < 0 && silent());
+        pb.normalsFromXml (*behind);
+        CHECK (pb.normalInto (dst) == src && passes());
+        pb.clearNormals (Patchbay::Scope::midi);                // (MIDI's only: the audio normal stays)
+        CHECK (pb.normalInto (dst) == src);
+        pb.clearNormals();
+        pb.onNormalsChanged = keepSaving;
+    }
+    // --- audio and MIDI apart: PULL ALL, saving and opening work on one side
+    {
+        const int kb = pb.findSource ("midi", pb.findPort ("midi")->sources[0]);
+        const int mdst = pb.getPorts().empty() ? -1 : pb.findPort ("midi")->firstDest;
+        pb.connect (kb, mdst);
+        pb.connect (src, dst);
+        CHECK (pb.isConnected (kb, mdst) && pb.isConnected (src, dst));
+        pb.clearAll (Patchbay::Scope::audio);
+        CHECK (pb.isConnected (kb, mdst) && ! pb.isConnected (src, dst));
+        pb.connect (src, dst);
+        auto audioOnly = pb.toXml (Patchbay::Scope::audio);
+        CHECK (audioOnly->getChildByAttribute ("toPort", "midi") == nullptr);
+        pb.clearAll();
+        pb.connect (kb, mdst);
+        pb.fromXml (*audioOnly, Patchbay::Scope::audio);       // opening audio leaves the MIDI cable in
+        CHECK (pb.isConnected (kb, mdst) && pb.isConnected (src, dst));
+        pb.disconnect (kb, mdst);
+        pb.disconnect (src, dst);
+    }
     pb.fromXml (*saved);                            // saving and loading brings the cables back
     CHECK (pb.isConnected (src, dst) && pb.getAllCords().size() == saved->getNumChildElements() && passes());
 

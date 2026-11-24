@@ -383,6 +383,22 @@ void PatchCanvas::setMidiView (bool b)
     rebuild();
 }
 
+void PatchCanvas::setRearView (bool b)
+{
+    if (rearView == b) return;
+    rearView = b;
+    hover = {};
+    drag = {};
+    repaint();
+}
+
+void PatchCanvas::link (int source, int dest)
+{
+    auto& pb = hub.getPatchbay();
+    if (rearView) pb.setNormal (source, dest);
+    else          pb.connect (source, dest);
+}
+
 void PatchCanvas::setShowEveryCable (bool b)
 {
     showEveryCable = b;
@@ -532,17 +548,88 @@ juce::Colour PatchCanvas::colourOfSource (int flat) const
 //==============================================================================
 void PatchCanvas::paint (juce::Graphics& g)
 {
-    g.fillAll (Colours::bg);
+    g.fillAll (rearView ? juce::Colour (0xff0f1011) : Colours::bg);
     for (auto& p : panels) drawPanel (g, p);
-    drawCables (g);
+    if (rearView) drawNormals (g); else drawCables (g);
 
     if (drag.active)
-        drawCable (g, drag.start, drag.end, drag.sources.empty() ? Colours::accent : colourOfSource (drag.sources.front()),
-                   drag.fromTitle ? 7.0f : 3.5f);
+    {
+        const auto c = drag.sources.empty() ? Colours::accent : colourOfSource (drag.sources.front());
+        if (rearView) drawWire (g, drag.start, drag.end, c, drag.fromTitle ? 5.0f : 2.2f);
+        else          drawCable (g, drag.start, drag.end, c, drag.fromTitle ? 7.0f : 3.5f);
+    }
 }
 
 void PatchCanvas::drawPanel (juce::Graphics& g, const Panel& p) const
 {
+    if (rearView)
+    {
+        // behind the bay: the bare steel back of the panel, its name on a strip of tape
+        const auto steel = juce::Colour (0xff36383b);
+        g.setGradientFill (juce::ColourGradient (steel.brighter (0.06f), p.area.getX(), p.area.getY(), steel.darker (0.25f), p.area.getX(), p.area.getBottom(), false));
+        g.fillRoundedRectangle (p.area, 4.0f);
+        g.setColour (p.colour.withAlpha (0.85f));
+        g.fillRect (p.area.withWidth (5.0f).translated (0.0f, 0.0f).reduced (0.0f, 4.0f));
+        g.setColour (juce::Colours::black.withAlpha (0.6f));
+        g.drawRoundedRectangle (p.area.reduced (0.5f), 4.0f, 1.0f);
+        auto tape = juce::Rectangle<float> (p.area.getX() + 14.0f, p.area.getCentreY() - 13.0f, nameColumn - 30.0f, 26.0f);
+        g.setColour (juce::Colour (0xffe6dcc0));
+        g.fillRect (tape);
+        g.setColour (p.colour.darker (0.3f));
+        g.fillRect (tape.removeFromLeft (4.0f));
+        g.setColour (juce::Colour (0xff23201b));
+        g.setFont (font (13.0f, true));
+        g.drawFittedText (p.title, tape.reduced (5.0f, 0.0f).toNearestInt(), juce::Justification::centredLeft, 1, 0.7f);
+        if (p.note.isNotEmpty())
+        {
+            g.setColour (Colours::textDim);
+            g.setFont (font (12.0f));
+            g.drawText (p.note, p.area.withTrimmedLeft (nameColumn + 4.0f).reduced (0, 4), juce::Justification::centredLeft);
+        }
+        auto& pb = hub.getPatchbay();
+        for (int si = 0; si < (int) p.sections.size(); ++si)
+        {
+            const auto& s = p.sections[(size_t) si];
+            const bool hoverTitle = hover.titleOnly && &panels[(size_t) hover.panel] == &p && hover.section == si;
+            const int lines = ((int) s.jacks.size() + 23) / 24;
+            for (int line = 0; line < juce::jmax (1, lines); ++line)
+            {
+                const int first = line * 24, last = juce::jmin ((int) s.jacks.size(), first + 24) - 1;
+                const float dy = s.jacks.empty() ? 0.0f : s.jacks[(size_t) first].centre.y - s.jacks.front().centre.y;
+                auto title = s.title;
+                if (lines > 1) title << "  " << s.jacks[(size_t) first].label << "-" << s.jacks[(size_t) last].label;
+                g.setColour (hoverTitle ? Colours::text : Colours::textDim);
+                g.setFont (font (11.0f, true));
+                g.drawText (title, s.titleArea.translated (0.0f, dy), juce::Justification::centredLeft);
+            }
+            for (int ji = 0; ji < (int) s.jacks.size(); ++ji)
+            {
+                const auto& j = s.jacks[(size_t) ji];
+                const bool lit = ! hover.titleOnly && hover.jack == ji && hover.section == si && &panels[(size_t) hover.panel] == &p;
+                // the back of the jack: its body, and the lugs the wires are soldered to
+                auto body = juce::Rectangle<float> (j.midi ? 16.0f : 12.0f, j.midi ? 16.0f : 15.0f).withCentre (j.centre);
+                g.setColour (j.midi ? juce::Colour (0xff151515) : juce::Colour (0xff4a3426));      // (phenolic, on a jack)
+                if (j.midi) g.fillEllipse (body); else g.fillRoundedRectangle (body, 1.5f);
+                g.setColour (juce::Colour (0xffc9c4b8));
+                const int lugs = j.midi ? 5 : 3;
+                for (int k = 0; k < lugs; ++k)
+                {
+                    const float x = body.getX() + body.getWidth() * ((float) k + 0.5f) / (float) lugs;
+                    g.fillRect (juce::Rectangle<float> (1.8f, 4.0f).withCentre ({ x, body.getBottom() - 2.5f }));
+                }
+                const bool wired = s.output ? false : pb.normalInto (j.flat) >= 0;
+                g.setColour (lit ? Colours::accent : wired ? p.colour : juce::Colours::black.withAlpha (0.5f));
+                if (j.midi) g.drawEllipse (body.expanded (1.5f), lit ? 2.0f : 1.0f);
+                else        g.drawRoundedRectangle (body.expanded (1.5f), 2.0f, lit ? 2.0f : 1.0f);
+                g.setColour (Colours::textDim);
+                g.setFont (font (9.5f));
+                g.drawText (j.label, juce::Rectangle<float> (jackPitch + 6.0f, labelH).withCentre ({ j.centre.x, j.centre.y + jackPitch * 0.5f + labelH * 0.5f }),
+                            juce::Justification::centred, false);
+            }
+        }
+        return;
+    }
+
     const auto face = p.colour;
     const auto ink = face.getPerceivedBrightness() > 0.55f ? juce::Colour (0xff1d1b18) : juce::Colour (0xfff2ede2);
     const auto inkDim = ink.withAlpha (0.65f);
@@ -646,6 +733,19 @@ void PatchCanvas::drawPanel (juce::Graphics& g, const Panel& p) const
             g.drawEllipse (r.expanded (2.5f), lit ? 2.0f : 1.0f);
             }
 
+            // an input normalled behind the bay: an arc over the jack (bright while it carries,
+            // faint when a cable has broken it)
+            if (! s.output)
+                if (hub.getPatchbay().normalInto (j.flat) >= 0)
+                {
+                    const bool carrying = hub.getPatchbay().isNormalCarrying (j.flat);
+                    juce::Path arc;
+                    const float rr = jackRadius + 5.0f;
+                    arc.addCentredArc (j.centre.x, j.centre.y, rr, rr, 0.0f, -1.0f, 1.0f, true);
+                    g.setColour (ink.withAlpha (carrying ? 0.95f : 0.3f));
+                    g.strokePath (arc, juce::PathStrokeType (carrying ? 1.8f : 1.2f));
+                }
+
             g.setColour (inkDim);
             g.setFont (font (9.5f));
             const auto labelArea = juce::Rectangle<float> (jackPitch + 6.0f, labelH).withCentre ({ j.centre.x, j.centre.y + jackPitch * 0.5f + labelH * 0.5f });
@@ -681,6 +781,70 @@ void PatchCanvas::drawCable (juce::Graphics& g, juce::Point<float> a, juce::Poin
         g.fillEllipse (juce::Rectangle<float> (thickness + 7.0f, thickness + 7.0f).withCentre (p));
         g.setColour (c.brighter (0.15f));
         g.fillEllipse (juce::Rectangle<float> (thickness + 4.0f, thickness + 4.0f).withCentre (p));
+    }
+}
+
+void PatchCanvas::drawWire (juce::Graphics& g, juce::Point<float> a, juce::Point<float> b, juce::Colour c, float thickness)
+{
+    // hook-up wire behind the bay: pulled tighter than a patch cable, soldered at each end
+    const float sag = 12.0f + 0.08f * a.getDistanceFrom (b);
+    const float bow = std::abs (a.x - b.x) < 60.0f ? 20.0f + 0.06f * std::abs (a.y - b.y) : 0.0f;
+    juce::Path path;
+    path.startNewSubPath (a);
+    path.cubicTo (a.translated (bow, sag), b.translated (bow, sag), b);
+    g.setColour (juce::Colours::black.withAlpha (0.5f));
+    g.strokePath (path, juce::PathStrokeType (thickness + 1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour (c.withMultipliedSaturation (0.85f));
+    g.strokePath (path, juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    for (auto p : { a, b })
+    {
+        g.setColour (juce::Colour (0xffbfc2c4));          // the solder
+        g.fillEllipse (juce::Rectangle<float> (thickness + 3.0f, thickness + 3.0f).withCentre (p));
+    }
+}
+
+void PatchCanvas::drawNormals (juce::Graphics& g) const
+{
+    multicores.clear();
+    struct Group { std::vector<std::pair<juce::Point<float>, juce::Point<float>>> ends; juce::Colour colour; };
+    std::map<std::tuple<int, int, int, int>, Group> groups;
+    for (auto& [src, d] : hub.getPatchbay().getNormals())
+    {
+        int sp = -1, dp = -1;
+        const auto* ss = sectionFor (src, true, &sp);
+        const auto* ds = sectionFor (d, false, &dp);
+        const auto* sj = jackFor (src, true);
+        const auto* dj = jackFor (d, false);
+        if (ss == nullptr || ds == nullptr || sj == nullptr || dj == nullptr) continue;
+        const int ssi = (int) (ss - panels[(size_t) sp].sections.data());
+        const int dsi = (int) (ds - panels[(size_t) dp].sections.data());
+        auto& grp = groups[{ sp, ssi, dp, dsi }];
+        grp.colour = sj->midi ? juce::Colour (0xff9a9a96) : panels[(size_t) sp].colour;
+        grp.ends.push_back ({ sj->centre, dj->centre });
+    }
+    for (auto& [key, grp] : groups)
+    {
+        if (showEveryCable || grp.ends.size() < 3)
+        {
+            for (auto& [a, b] : grp.ends) drawWire (g, a, b, grp.colour, 2.2f);
+            continue;
+        }
+        // a loom: the run laced together, with its count
+        juce::Point<float> a, b;
+        for (auto& [x, y] : grp.ends) { a += x; b += y; }
+        a /= (float) grp.ends.size();
+        b /= (float) grp.ends.size();
+        drawWire (g, a, b, grp.colour, 6.0f);
+        const float sag = 12.0f + 0.08f * a.getDistanceFrom (b);
+        const float bow = std::abs (a.x - b.x) < 60.0f ? 20.0f + 0.06f * std::abs (a.y - b.y) : 0.0f;
+        const auto mid = (a + b) * 0.5f + juce::Point<float> (bow * 0.75f, sag * 0.75f);
+        auto tag = juce::Rectangle<float> (34.0f, 18.0f).withCentre (mid);
+        g.setColour (juce::Colour (0xffe6dcc0));
+        g.fillRect (tag);
+        g.setColour (juce::Colour (0xff23201b));
+        g.setFont (font (11.0f, true));
+        g.drawText (juce::String ((int) grp.ends.size()), tag, juce::Justification::centred);
+        multicores.push_back ({ std::get<0> (key), std::get<1> (key), std::get<2> (key), std::get<3> (key), mid });
     }
 }
 
@@ -767,6 +931,21 @@ void PatchCanvas::mouseMove (const juce::MouseEvent& e)
                 }
                 tip << "\n" << (to.isEmpty() ? juce::String ("Nothing cabled.")
                                                : (s.output ? "Cabled to: " : "Cabled from: ") + to.joinIntoString (", "));
+                // the normals behind it
+                juce::StringArray behind;
+                for (auto& [ns, nd] : pb.getNormals())
+                {
+                    if (s.output && ns == j.flat) behind.add (pb.destName (nd));
+                    if (! s.output && nd == j.flat) behind.add (pb.sourceName (ns));
+                }
+                if (behind.isEmpty())
+                    tip << "\n" << (rearView ? (s.output ? "Drag to an input to wire a normal behind the bay." : "No normal: drag to an output to wire one.")
+                                             : "Nothing normalled behind the bay.");
+                else if (s.output)
+                    tip << "\nNormalled (behind the bay) to: " << behind.joinIntoString (", ");
+                else
+                    tip << "\nNormalled from " << behind[0]
+                        << (pb.isNormalCarrying (j.flat) ? " (carrying: no cable in it)" : " (broken by the cable in it)");
             }
         }
         setTooltip (tip);
@@ -813,6 +992,19 @@ void PatchCanvas::mouseDown (const juce::MouseEvent& e)
         drag.sources.push_back (s.jacks[(size_t) h.jack].flat);
         drag.start = s.jacks[(size_t) h.jack].centre;
     }
+    else if (rearView)
+    {
+        // behind the bay: unsolder the normal from the input, and it comes away on its wire
+        const int dest = s.jacks[(size_t) h.jack].flat;
+        if (const int src = pb.normalInto (dest); src >= 0)
+        {
+            drag.sources.push_back (src);
+            pb.removeNormal (dest);
+            if (auto* j = jackFor (src, true)) drag.start = j->centre;
+        }
+        else
+            drag.start = s.jacks[(size_t) h.jack].centre;     // an input with none: drag to an output
+    }
     else
     {
         // pulling the plug out of an input: it comes away on its cable(s)
@@ -847,7 +1039,6 @@ void PatchCanvas::mouseUp (const juce::MouseEvent& e)
 {
     if (! drag.active) return;
     const auto to = hitTest (e.position);
-    auto& pb = hub.getPatchbay();
     const auto& fromSection = panels[(size_t) drag.from.panel].sections[(size_t) drag.from.section];
 
     if (to.panel >= 0)
@@ -856,7 +1047,7 @@ void PatchCanvas::mouseUp (const juce::MouseEvent& e)
         if (! fromSection.output && drag.sources.empty() && s.output && ! to.titleOnly)
         {
             // dragged from an empty input to an output
-            pb.connect (s.jacks[(size_t) to.jack].flat, fromSection.jacks[(size_t) drag.from.jack].flat);
+            link (s.jacks[(size_t) to.jack].flat, fromSection.jacks[(size_t) drag.from.jack].flat);
         }
         else if (! s.output && ! drag.sources.empty())
         {
@@ -865,11 +1056,11 @@ void PatchCanvas::mouseUp (const juce::MouseEvent& e)
                 // a whole section, in order, from the jack it was dropped on
                 const int first = to.titleOnly ? 0 : to.jack;
                 for (size_t k = 0; k < drag.sources.size() && first + (int) k < (int) s.jacks.size(); ++k)
-                    pb.connect (drag.sources[k], s.jacks[(size_t) first + k].flat);
+                    link (drag.sources[k], s.jacks[(size_t) first + k].flat);
             }
             else if (! to.titleOnly)
             {
-                for (int src : drag.sources) pb.connect (src, s.jacks[(size_t) to.jack].flat);
+                for (int src : drag.sources) link (src, s.jacks[(size_t) to.jack].flat);
             }
         }
     }
@@ -884,6 +1075,27 @@ void PatchCanvas::showJackMenu (const Hit& h)
     const auto& s = panels[(size_t) h.panel].sections[(size_t) h.section];
     const int flat = s.jacks[(size_t) h.jack].flat;
     auto& pb = hub.getPatchbay();
+
+    if (rearView)
+    {
+        // behind the bay: the normals on this jack
+        std::vector<int> dests;
+        for (auto& [ns, nd] : pb.getNormals())
+            if (s.output ? ns == flat : nd == flat) dests.push_back (nd);
+        juce::PopupMenu m;
+        m.addSectionHeader ((s.output ? pb.sourceName (flat) : pb.destName (flat)) + "  (behind the bay)");
+        if (dests.empty()) m.addItem (-1, "No normals", false);
+        for (size_t i = 0; i < dests.size(); ++i)
+            m.addItem (10 + (int) i, "Cut the normal " + (s.output ? "to " + pb.destName (dests[i]) : "from " + pb.sourceName (pb.normalInto (flat))));
+        if (dests.size() > 1) { m.addSeparator(); m.addItem (1, "Cut them all"); }
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(), [this, dests] (int r)
+        {
+            auto& p = hub.getPatchbay();
+            if (r == 1) for (int d : dests) p.removeNormal (d);
+            else if (r >= 10) p.removeNormal (dests[(size_t) (r - 10)]);
+        });
+        return;
+    }
 
     std::vector<std::pair<int, Cord>> cords;    // (dest, cord)
     for (auto& dc : pb.getAllCords())
@@ -929,8 +1141,8 @@ void PatchCanvas::showMulticoreMenu (int sp, int ss, int dp, int ds)
     const auto& to = panels[(size_t) dp].sections[(size_t) ds];
     juce::PopupMenu m;
     m.addSectionHeader (panels[(size_t) sp].title + " " + from.title + "  ->  " + panels[(size_t) dp].title + " " + to.title);
-    m.addItem (1, "Pull the whole multicore");
-    m.addItem (2, "Show every cable");
+    m.addItem (rearView ? 3 : 1, rearView ? "Cut the whole loom" : "Pull the whole multicore");
+    m.addItem (2, rearView ? "Show every wire" : "Show every cable");
     std::vector<int> srcs, dsts;
     for (auto& j : from.jacks) srcs.push_back (j.flat);
     for (auto& j : to.jacks) dsts.push_back (j.flat);
@@ -941,6 +1153,11 @@ void PatchCanvas::showMulticoreMenu (int sp, int ss, int dp, int ds)
                          {
                              auto& p = hub.getPatchbay();
                              for (int d : dsts) for (int s : srcs) if (p.isConnected (s, d)) p.disconnect (s, d);
+                         }
+                         else if (r == 3)
+                         {
+                             auto& p = hub.getPatchbay();
+                             for (int d : dsts) if (std::find (srcs.begin(), srcs.end(), p.normalInto (d)) != srcs.end()) p.removeNormal (d);
                          }
                          else if (r == 2)
                          {
@@ -953,35 +1170,79 @@ void PatchCanvas::showMulticoreMenu (int sp, int ss, int dp, int ds)
 //==============================================================================
 PatchbayView::PatchbayView (Hub& h) : hub (h), canvas (h)
 {
-    defaultButton.setTooltip ("Pull every cable and put back the usual wiring, as cables (interface > Hawthorne > EMERSON > WHITMAN > back to Hawthorne, TWAIN, the click)");
+    // DEFAULT, PULL ALL, SAVE AS USUAL, SAVE and OPEN: each on the tab you're on (audio or MIDI)
+    defaultButton.setTooltip ("Pull this tab's cables and put back its usual wiring, as cables (the other tab's are left as they are)");
     defaultButton.onClick = [this]
     {
+        const auto sc = canvas.scope();
         if (Hub::hasUsualWiring())
             juce::AlertWindow::showYesNoCancelBox (juce::MessageBoxIconType::QuestionIcon, "Default patch",
-                "Pull every cable and put back the usual wiring: your own (saved with SAVE AS USUAL), or MELVILLE's factory wiring?",
+                "Pull every " + side() + " cable and put back the usual " + side() + " wiring: your own (saved with SAVE AS USUAL), or MELVILLE's factory wiring?",
                 "Your wiring", "Factory", "Cancel", this,
-                juce::ModalCallbackFunction::create ([this] (int r) { if (r == 1) hub.defaultPatch(); else if (r == 2) hub.defaultPatch (true); }));
+                juce::ModalCallbackFunction::create ([this, sc] (int r) { if (r == 1) hub.defaultPatch (false, sc); else if (r == 2) hub.defaultPatch (true, sc); }));
         else
             juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Default patch",
-                "Pull every cable and cable the studio the way MELVILLE starts?", "Rewire", "Cancel", this,
-                juce::ModalCallbackFunction::create ([this] (int ok) { if (ok) hub.defaultPatch (true); }));
+                "Pull every " + side() + " cable and cable it the way MELVILLE starts?", "Rewire", "Cancel", this,
+                juce::ModalCallbackFunction::create ([this, sc] (int ok) { if (ok) hub.defaultPatch (true, sc); }));
     };
-    usualButton.setTooltip ("Keep the cables patched now as your usual wiring: DEFAULT, and a new session that asks for the usual cables, start from them");
+    usualButton.setTooltip ("Keep this tab's cables as your usual wiring for it (the other tab's usual wiring is kept as it was)");
     usualButton.onClick = [this]
     {
+        const auto sc = canvas.scope();
         juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Save as usual",
-            "Keep the cables patched now as your usual wiring? DEFAULT puts them back, and a new session can start with them.",
+            "Keep the " + side() + " cables patched now as your usual " + side() + " wiring? DEFAULT puts them back, and a new session can start with them.",
             "Save", "Cancel", this,
-            juce::ModalCallbackFunction::create ([this] (int ok) { if (ok) hub.saveUsualWiring(); }));
+            juce::ModalCallbackFunction::create ([this, sc] (int ok) { if (ok) hub.saveUsualWiring (sc); }));
     };
-    clearButton.setTooltip ("Pull every cable out of the patchbay: nothing is connected until you patch it");
+    clearButton.setTooltip ("Pull every cable on this tab out (the normals behind the bay still carry)");
     clearButton.onClick = [this]
     {
+        const auto sc = canvas.scope();
         juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Pull every cable",
-            "Pull every cable out? Nothing is wired behind the bay, so nothing is connected until you patch it (DEFAULT puts the usual cables back).",
+            "Pull every " + side() + " cable out? Only what's normalled behind the bay stays connected (DEFAULT puts the usual cables back).",
             "Pull them", "Cancel", this,
-            juce::ModalCallbackFunction::create ([this] (int ok) { if (ok) hub.getPatchbay().clearAll(); }));
+            juce::ModalCallbackFunction::create ([this, sc] (int ok) { if (ok) hub.getPatchbay().clearAll (sc); }));
     };
+    saveButton.setTooltip ("Save this tab's cables to a file");
+    openButton.setTooltip ("Open a saved patch onto this tab (only its cables change)");
+
+    // FLIP: behind the bay, the normals
+    flipButton.setClickingTogglesState (true);
+    flipButton.setColour (juce::TextButton::buttonOnColourId, Colours::accent);
+    flipButton.setColour (juce::TextButton::textColourOnId, Colours::bg);
+    flipButton.setTooltip ("Turn the bay round: behind it, wire normals that carry until a cable is plugged into the input. "
+                           "They're kept for every session");
+    flipButton.onClick = [this] { flip(); };
+    cutAllButton.setTooltip ("Cut every normal on this tab");
+    cutAllButton.onClick = [this]
+    {
+        const auto sc = canvas.scope();
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Cut every normal",
+            "Cut every " + side() + " normal behind the bay? (For every session: they're the studio's.)", "Cut them", "Cancel", this,
+            juce::ModalCallbackFunction::create ([this, sc] (int ok) { if (ok) hub.getPatchbay().clearNormals (sc); }));
+    };
+    fromCablesButton.setTooltip ("Wire a normal behind every input that has a cable in it on the front, from that cable's output");
+    fromCablesButton.onClick = [this]
+    {
+        const auto sc = canvas.scope();
+        juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Copy the cables",
+            "Wire the " + side() + " cables patched now behind the bay as normals (one into each input), for every session?", "Wire them", "Cancel", this,
+            juce::ModalCallbackFunction::create ([this, sc] (int ok)
+            {
+                if (! ok) return;
+                auto& pb = hub.getPatchbay();
+                std::vector<int> done;
+                for (auto& [d, c] : pb.getAllCords())
+                    if (pb.inScope (d, sc) && std::find (done.begin(), done.end(), d) == done.end())
+                    {
+                        pb.setNormal (c.source, d);
+                        done.push_back (d);
+                    }
+            }));
+    };
+    addChildComponent (cutAllButton);
+    addChildComponent (fromCablesButton);
+    addAndMakeVisible (flipButton);
     saveButton.onClick = [this] { save(); };
     openButton.onClick = [this] { open(); };
     everyCable.setTooltip ("Draw every cable on its own instead of runs as multicores");
@@ -1017,18 +1278,35 @@ PatchbayView::PatchbayView (Hub& h) : hub (h), canvas (h)
 
 PatchbayView::~PatchbayView() = default;
 
+juce::String PatchbayView::side() const { return midiTab.getToggleState() ? "MIDI" : "audio"; }
+
+void PatchbayView::flip()
+{
+    const bool rear = flipButton.getToggleState();
+    canvas.setRearView (rear);
+    for (auto* b : { &usualButton, &defaultButton, &clearButton, &saveButton, &openButton }) b->setVisible (! rear);
+    cutAllButton.setVisible (rear);
+    fromCablesButton.setVisible (rear);
+    everyCable.setButtonText (rear ? "SHOW EVERY WIRE" : "SHOW EVERY CABLE");
+    resized();
+    repaint();
+}
+
 void PatchbayView::paint (juce::Graphics& g)
 {
     g.fillAll (Colours::bg);
     auto bar = getLocalBounds().removeFromTop (46);
-    g.setColour (Colours::panel);
+    g.setColour (canvas.isRearView() ? juce::Colour (0xff2a2b2d) : Colours::panel);
     g.fillRect (bar);
     g.setColour (Colours::textDim);
     g.setFont (font (12.0f));
-    g.drawText (midiTab.getToggleState()
-                    ? "OUT to IN; a cable carries all 16 channels."
-                    : "Drag OUT to IN. Every connection is a cable.",
-                bar.reduced (14, 0).withTrimmedLeft (170).withTrimmedRight (800), juce::Justification::centredLeft, true);
+    juce::String hint;
+    if (canvas.isRearView())
+        hint = "BEHIND THE BAY: wire OUT to IN. A normal carries until a cable's plugged into the input. Kept for every session.";
+    else
+        hint = midiTab.getToggleState() ? "OUT to IN; a cable carries all 16 channels. FLIP to see behind."
+                                        : "Drag OUT to IN. An arc over an input: normalled behind (FLIP to see).";
+    g.drawText (hint, textArea, juce::Justification::centredLeft, true);
 }
 
 void PatchbayView::resized()
@@ -1037,12 +1315,22 @@ void PatchbayView::resized()
     auto bar = r.removeFromTop (46).reduced (10, 9);
     audioTab.setBounds (bar.removeFromLeft (76));
     midiTab.setBounds (bar.removeFromLeft (76));
-    for (auto* b : { &openButton, &saveButton, &clearButton, &defaultButton, &usualButton })
-    {
-        b->setBounds (bar.removeFromRight (b == &usualButton ? 116 : b == &clearButton ? 96 : 80));
-        bar.removeFromRight (6);
-    }
-    everyCable.setBounds (bar.removeFromRight (160));
+    bar.removeFromLeft (8);
+    flipButton.setBounds (bar.removeFromLeft (64));
+    if (canvas.isRearView())
+        for (auto* b : { &cutAllButton, &fromCablesButton })
+        {
+            b->setBounds (bar.removeFromRight (b == &fromCablesButton ? 140 : 84));
+            bar.removeFromRight (6);
+        }
+    else
+        for (auto* b : { &openButton, &saveButton, &clearButton, &defaultButton, &usualButton })
+        {
+            b->setBounds (bar.removeFromRight (b == &usualButton ? 116 : b == &clearButton ? 96 : 80));
+            bar.removeFromRight (6);
+        }
+    everyCable.setBounds (bar.removeFromRight (170));
+    textArea = bar.withTrimmedLeft (8).withTrimmedRight (8);
     viewport.setBounds (r);
 
     const int w = viewport.getMaximumVisibleWidth();
@@ -1053,24 +1341,24 @@ void PatchbayView::resized()
 
 void PatchbayView::save()
 {
-    chooser = std::make_unique<juce::FileChooser> ("Save the patch", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.melpatch");
+    chooser = std::make_unique<juce::FileChooser> ("Save the " + side() + " patch", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.melpatch");
     chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
                           [this] (const juce::FileChooser& fc)
                           {
                               auto f = fc.getResult();
                               if (f == juce::File()) return;
-                              hub.getPatchbay().toXml()->writeTo (f.withFileExtension ("melpatch"));
+                              hub.getPatchbay().toXml (canvas.scope())->writeTo (f.withFileExtension ("melpatch"));
                           });
 }
 
 void PatchbayView::open()
 {
-    chooser = std::make_unique<juce::FileChooser> ("Open a patch", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.melpatch");
+    chooser = std::make_unique<juce::FileChooser> ("Open a patch onto the " + side() + " tab", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.melpatch");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                           [this] (const juce::FileChooser& fc)
                           {
                               if (auto xml = juce::parseXML (fc.getResult()))
-                                  if (xml->hasTagName ("PATCH")) hub.getPatchbay().fromXml (*xml);
+                                  if (xml->hasTagName ("PATCH")) hub.getPatchbay().fromXml (*xml, canvas.scope());
                           });
 }
 

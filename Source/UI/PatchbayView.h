@@ -9,8 +9,10 @@
 //   drag a section's name onto another section's     patch the whole section, 1 to 1, 2 to 2 ...
 //   right-click a jack or a multicore                levels, pull cables
 //
-// No normals: every connection is a cable on the bay. DEFAULT cables the usual wiring;
-// SAVE AS USUAL keeps what's patched as your usual wiring.
+// FLIP turns the bay round: behind it, wire normals (output to input) that carry until a
+// cable is plugged into the input. They're the studio's, kept for every session; the cables
+// on the front are the session's. AUDIO and MIDI are separate: DEFAULT, PULL ALL, SAVE AS
+// USUAL, SAVE and OPEN work on the tab you're on.
 //
 // A run of cables between the same two sections (24 tape tracks into EMERSON, say) is
 // drawn as one multicore with its count; SHOW EVERY CABLE draws them all.
@@ -32,6 +34,9 @@ public:
     void rebuild();                  // the panels (when the reel or interface changes)
     void setShowEveryCable (bool);
     void setMidiView (bool);            // the MIDI tab: the MIDI jacks (else the audio ones)
+    void setRearView (bool);            // behind the bay: the normals (else the front and its cables)
+    bool isRearView() const noexcept { return rearView; }
+    Patchbay::Scope scope() const noexcept { return midiView ? Patchbay::Scope::midi : Patchbay::Scope::audio; }
 
     void paint (juce::Graphics&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -82,6 +87,9 @@ private:
     juce::Colour colourOfSource (int flat) const;
     void drawPanel (juce::Graphics&, const Panel&) const;
     void drawCables (juce::Graphics&) const;
+    void drawNormals (juce::Graphics&) const;
+    static void drawWire (juce::Graphics&, juce::Point<float> a, juce::Point<float> b, juce::Colour, float thickness);
+    void link (int source, int dest);    // a cable on the front, a normal behind
     static void drawCable (juce::Graphics&, juce::Point<float> a, juce::Point<float> b, juce::Colour, float thickness);
     void showJackMenu (const Hit&);
     void showMulticoreMenu (int srcPanel, int srcSection, int dstPanel, int dstSection);
@@ -89,7 +97,7 @@ private:
 
     Hub& hub;
     std::vector<Panel> panels;
-    bool showEveryCable = false, midiView = false;
+    bool showEveryCable = false, midiView = false, rearView = false;
     int contentHeight = 600;
     int lastTracks = -1, lastIns = -1, lastOuts = -1, tracksRev = -1;
     juce::String lastNetwork;
@@ -107,7 +115,7 @@ private:
     Hit hover;
 
     // multicores drawn this time (for clicking them)
-    struct Multicore { int sp, ss, dp, ds; juce::Point<float> label; };
+    struct Multicore { int sp, ss, dp, ds; juce::Point<float> label; };      // (behind the bay: a loom of normals)
     mutable std::vector<Multicore> multicores;
 };
 
@@ -129,6 +137,11 @@ private:
     juce::TextButton defaultButton { "DEFAULT" }, clearButton { "PULL ALL" }, saveButton { "SAVE" }, openButton { "OPEN" };
     juce::ToggleButton everyCable { "SHOW EVERY CABLE" };
     juce::TextButton audioTab { "AUDIO" }, midiTab { "MIDI" };
+    juce::TextButton flipButton { "FLIP" };
+    juce::TextButton cutAllButton { "CUT ALL" }, fromCablesButton { "COPY THE CABLES" };
+    void flip();
+    juce::String side() const;           // "audio" or "MIDI"
+    juce::Rectangle<int> textArea;
     PatchCanvas canvas;
     juce::Viewport viewport;
     std::unique_ptr<juce::FileChooser> chooser;

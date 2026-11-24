@@ -109,10 +109,80 @@ void Patchbay::clearDest (int dest)
     publish();
 }
 
-void Patchbay::clearAll()
+void Patchbay::clearAll (Scope sc)
 {
-    for (auto& c : edit.into) c.clear();
+    for (size_t d = 0; d < edit.into.size(); ++d)
+        if (inScope ((int) d, sc)) edit.into[d].clear();
     publish();
+}
+
+//==============================================================================
+void Patchbay::setNormal (int source, int dest)
+{
+    if (! juce::isPositiveAndBelow (source, numSources) || ! juce::isPositiveAndBelow (dest, numDests)) return;
+    if (isMidiSource (source) != isMidiDest (dest)) return;
+    normals.erase (std::remove_if (normals.begin(), normals.end(), [dest] (auto& n) { return n.second == dest; }), normals.end());
+    normals.push_back ({ source, dest });
+    normalsChanged();
+}
+
+void Patchbay::removeNormal (int dest)
+{
+    const auto before = normals.size();
+    normals.erase (std::remove_if (normals.begin(), normals.end(), [dest] (auto& n) { return n.second == dest; }), normals.end());
+    if (normals.size() != before) normalsChanged();
+}
+
+void Patchbay::clearNormals (Scope sc)
+{
+    normals.erase (std::remove_if (normals.begin(), normals.end(), [this, sc] (auto& n) { return inScope (n.second, sc); }), normals.end());
+    normalsChanged();
+}
+
+int Patchbay::normalInto (int dest) const
+{
+    for (auto& [s, d] : normals) if (d == dest) return s;
+    return -1;
+}
+
+std::unique_ptr<juce::XmlElement> Patchbay::normalsToXml() const
+{
+    auto xml = std::make_unique<juce::XmlElement> ("BEHIND");
+    xml->setAttribute ("version", 1);
+    for (auto& [s, d] : normals)
+    {
+        auto [sp, sc] = where (s, true);
+        auto [dp, dc] = where (d, false);
+        auto* e = xml->createNewChildElement ("NORMAL");
+        e->setAttribute ("fromPort", sp);
+        e->setAttribute ("from", sc);
+        e->setAttribute ("toPort", dp);
+        e->setAttribute ("to", dc);
+    }
+    return xml;
+}
+
+void Patchbay::normalsFromXml (const juce::XmlElement& xml)
+{
+    normals.clear();
+    for (auto* e : xml.getChildWithTagNameIterator ("NORMAL"))
+    {
+        const int s = findSource (e->getStringAttribute ("fromPort"), e->getStringAttribute ("from"));
+        const int d = findDest (e->getStringAttribute ("toPort"), e->getStringAttribute ("to"));
+        if (s >= 0 && d >= 0 && isMidiSource (s) == isMidiDest (d) && normalInto (d) < 0)
+            normals.push_back ({ s, d });
+    }
+    publish();          // (loading them doesn't save them again)
+}
+
+std::vector<std::pair<int, Cord>> Patchbay::getLiveCords() const
+{
+    std::vector<std::pair<int, Cord>> all;
+    if (auto* m = live.load (std::memory_order_acquire))
+        for (int d = 0; d < (int) m->into.size(); ++d)
+            for (auto& c : m->into[(size_t) d])
+                all.push_back ({ d, c });
+    return all;
 }
 
 int Patchbay::connectByName (const juce::String& fromPort, const juce::String& toPort)
@@ -178,28 +248,30 @@ void Patchbay::wiringFromXml (const juce::XmlElement& xml)
     loadCordsAndNormals (xml);      // (a NORMALS file from before: its normals as cables)
 }
 
-std::unique_ptr<juce::XmlElement> Patchbay::toXml() const
+std::pair<juce::String, juce::String> Patchbay::where (int flat, bool isSource) const
+{
+    for (auto& p : ports)
+    {
+        const int first = isSource ? p.firstSource : p.firstDest;
+        const auto& names = isSource ? p.sources : p.dests;
+        if (flat >= first && flat < first + names.size()) return { p.id, names[flat - first] };
+    }
+    return {};
+}
+
+std::unique_ptr<juce::XmlElement> Patchbay::toXml (Scope sc) const
 {
     auto xml = std::make_unique<juce::XmlElement> ("PATCH");
     xml->setAttribute ("version", 7);
-    auto where = [this] (int flat, bool isSource) -> std::pair<juce::String, juce::String>
-    {
-        for (auto& p : ports)
-        {
-            const int first = isSource ? p.firstSource : p.firstDest;
-            const auto& names = isSource ? p.sources : p.dests;
-            if (flat >= first && flat < first + names.size()) return { p.id, names[flat - first] };
-        }
-        return {};
-    };
-
+    if (sc != Scope::all) xml->setAttribute ("scope", sc == Scope::midi ? "midi" : "audio");
     for (auto& [d, c] : getAllCords())
     {
-        auto [sp, sc] = where (c.source, true);
+        if (! inScope (d, sc)) continue;
+        auto [sp, scName] = where (c.source, true);
         auto [dp, dc] = where (d, false);
         auto* e = xml->createNewChildElement ("CORD");
         e->setAttribute ("fromPort", sp);
-        e->setAttribute ("from", sc);
+        e->setAttribute ("from", scName);
         e->setAttribute ("toPort", dp);
         e->setAttribute ("to", dc);
         if (c.gain != 1.0f) e->setAttribute ("gain", (double) c.gain);
@@ -207,7 +279,7 @@ std::unique_ptr<juce::XmlElement> Patchbay::toXml() const
     return xml;
 }
 
-void Patchbay::fromXml (const juce::XmlElement& xml)
+void Patchbay::fromXml (const juce::XmlElement& xml, Scope sc)
 {
     // (version 3: the click and LTC out were Hawthorne's and Route's; they're MELVILLE's clock's now)
     juce::XmlElement x (xml);
@@ -226,26 +298,27 @@ void Patchbay::fromXml (const juce::XmlElement& xml)
             if (e->getStringAttribute ("from") == "THOREAU steps") e->setAttribute ("from", "FULLER steps");
             if (e->getStringAttribute ("from") == "POE")           e->setAttribute ("from", "POE 1");
         }
-    fromXmlCurrent (x);
+    fromXmlCurrent (x, sc);
     // (before version 5 there was no MIDI on the patchbay: its usual cords, so nothing goes quiet)
-    if (x.getIntAttribute ("version") < 5 && onOlderPatch) onOlderPatch();
+    if (x.getIntAttribute ("version") < 5 && sc != Scope::audio && onOlderPatch) onOlderPatch();
 
     // (version 6 had normals behind the bay: they came in above as cables, so it sounds as it did)
 }
 
-void Patchbay::fromXmlCurrent (const juce::XmlElement& xml)
+void Patchbay::fromXmlCurrent (const juce::XmlElement& xml, Scope sc)
 {
-    loadCordsAndNormals (xml);
+    loadCordsAndNormals (xml, sc);
 }
 
-void Patchbay::loadCordsAndNormals (const juce::XmlElement& xml)
+void Patchbay::loadCordsAndNormals (const juce::XmlElement& xml, Scope sc)
 {
-    for (auto& c : edit.into) c.clear();
+    for (size_t d = 0; d < edit.into.size(); ++d)
+        if (inScope ((int) d, sc)) edit.into[d].clear();
     for (auto* e : xml.getChildWithTagNameIterator ("CORD"))
     {
         const int s = findSource (e->getStringAttribute ("fromPort"), e->getStringAttribute ("from"));
         const int d = findDest (e->getStringAttribute ("toPort"), e->getStringAttribute ("to"));
-        if (s >= 0 && d >= 0 && isMidiSource (s) == isMidiDest (d))
+        if (s >= 0 && d >= 0 && isMidiSource (s) == isMidiDest (d) && inScope (d, sc))
             edit.into[(size_t) d].push_back ({ s, (float) e->getDoubleAttribute ("gain", 1.0) });
     }
     // normals (version 6): each one that was carrying becomes a cable
@@ -254,7 +327,7 @@ void Patchbay::loadCordsAndNormals (const juce::XmlElement& xml)
     {
         const int s = findSource (e->getStringAttribute ("fromPort"), e->getStringAttribute ("from"));
         const int d = findDest (e->getStringAttribute ("toPort"), e->getStringAttribute ("to"));
-        if (s < 0 || d < 0 || isMidiSource (s) != isMidiDest (d) || ! edit.into[(size_t) d].empty()) continue;
+        if (s < 0 || d < 0 || isMidiSource (s) != isMidiDest (d) || ! inScope (d, sc) || ! edit.into[(size_t) d].empty()) continue;
         if (e->getBoolAttribute ("full") && isSourcePlugged (s)) continue;
         carrying.push_back ({ s, d });
     }
@@ -265,6 +338,10 @@ void Patchbay::loadCordsAndNormals (const juce::XmlElement& xml)
 void Patchbay::publish()
 {
     auto* fresh = new Matrix (edit);
+    // the normals behind the bay carry into every input with no cable in it
+    for (auto& [s, d] : normals)
+        if (juce::isPositiveAndBelow (d, (int) fresh->into.size()) && edit.into[(size_t) d].empty())
+            fresh->into[(size_t) d].push_back ({ s, 1.0f });
     auto* old = live.exchange (fresh, std::memory_order_acq_rel);
     if (old != nullptr)
         retired.push_back ({ old, blocksDone.load (std::memory_order_acquire) + 2 });

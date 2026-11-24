@@ -52,9 +52,12 @@ public:
     Patchbay& getPatchbay() noexcept { return patchbay; }
     /** Pull every cable and put the usual wiring back, as cables: your own (saved with SAVE AS
         USUAL) if there is one, else MELVILLE's (factory). */
-    void defaultPatch (bool factory = false);
-    /** Your usual wiring: what DEFAULT (and a new studio, if you ask for it) puts back. */
-    void saveUsualWiring();
+    void defaultPatch (bool factory = false, Patchbay::Scope = Patchbay::Scope::all);
+    /** Your usual wiring: what DEFAULT (and a new studio, if you ask for it) puts back. With a
+        scope, only that side (audio or MIDI) is kept; the file's other side stays as it was. */
+    void saveUsualWiring (Patchbay::Scope = Patchbay::Scope::all);
+    /** The normals behind the bay: one file for every session. */
+    static juce::File normalsFile();
     void forgetUsualWiring();
     static bool hasUsualWiring();
     static juce::File usualWiringFile();
