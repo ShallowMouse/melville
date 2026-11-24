@@ -3,7 +3,7 @@
 // MELVILLE's own bar in the decade the theme is set to (PartHeader.h's Era): its lettering,
 // its keys and the readouts of its counter and tempo, from drum counters and Nixie tubes to
 // LEDs, vacuum fluorescent and LCD panels, and the flat screens since. STANDARD is the bar as
-// it was before there was a choice (Eighties.h).
+// (The 1980s keep the early-80s bar of Eighties.h, in MELVILLE's blue.)
 
 #include "PartHeader.h"
 #include "Eighties.h"
@@ -49,9 +49,9 @@ inline juce::Colour inkDim (Era e) { return ink (e).withAlpha (0.55f); }
 inline void drawWordmark (juce::Graphics& g, Era e, juce::Rectangle<float> r)
 {
     auto mark = r.withSizeKeepingCentre (r.getWidth(), 44.0f);
-    if (e == Era::standard || e == Era::eighties)
+    if (e == Era::eighties)
     {
-        g.setColour (eighties::legend());
+        g.setColour (partui::melvilleBlue().brighter (0.3f));
         g.setFont (eighties::sans (25.0f, true, true));
         g.drawText ("MELVILLE", mark.removeFromTop (28.0f), juce::Justification::bottomLeft);
         g.setColour (eighties::legendDim());
@@ -226,10 +226,6 @@ inline void drawReadout (juce::Graphics& g, Era e, const juce::String& text, juc
             eighties::drawLedWindow (g, r);
             eighties::drawSevenSegment (g, text, r.reduced (8.0f, 7.0f), partui::melvilleBlue().brighter (0.5f));
             return;
-        default:                   // (STANDARD: the red LEDs it had)
-            eighties::drawLedWindow (g, r);
-            eighties::drawSevenSegment (g, text, r.reduced (8.0f, 7.0f), eighties::ledRed());
-            return;
     }
 }
 
@@ -264,9 +260,8 @@ inline IconColours iconColours (Era e)
         case Era::noughties: return { b.brighter (0.2f), juce::Colours::white, juce::Colours::white };               // a glossy icon
         case Era::tens:      return { b.darker (0.1f), juce::Colours::white.withAlpha (0.85f), juce::Colours::white };   // flat
         case Era::today:     return { b.withAlpha (0.14f), juce::Colour (0xffdfe6e5), b.brighter (0.45f) };
-        case Era::standard:  break;
     }
-    return { juce::Colour (0xff2b2f33), juce::Colour (0xff8f8a80), b };     // (as it was)
+    return { juce::Colour (0xff2b2f33), juce::Colour (0xff8f8a80), b };
 }
 
 /** The badge an icon sits on (nothing for STANDARD); returns where the icon goes. */
@@ -327,7 +322,6 @@ inline juce::Rectangle<float> drawIconBadge (juce::Graphics& g, Era e, juce::Rec
             g.setColour (ic.body);
             g.fillRoundedRectangle (r, r.getWidth() * 0.26f);
             return r.reduced (5.0f);
-        case Era::standard: break;
     }
     return r;
 }

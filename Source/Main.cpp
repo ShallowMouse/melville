@@ -403,30 +403,13 @@ private:
         bool lit = false;
         void paintButton (juce::Graphics& g, bool over, bool down) override
         {
-            // square plastic keys, as on the machines of the time: grey for the winding keys,
-            // cream STOP, orange PLAY, red REC, each with a red LED that's lit while it's on
+            // the theme's key (PartHeader.h), lit in the transport's colours
             auto r = getLocalBounds().toFloat().reduced (2.0f, 1.0f);
-            const auto era = partui::era();
-            if (era == partui::Era::standard)
-            {
-                const auto ledAt = juce::Point<float> (r.getCentreX(), r.getY() + 4.0f);
-                r.removeFromTop (11.0f);
-                const auto cap = kind == rec ? eighties::red() : kind == play ? eighties::orange() : kind == stop ? eighties::cream()
-                                                                                                  : juce::Colour (0xff8d8c88);
-                eighties::drawKey (g, r, cap, down, over);
-                if (kind == play || kind == rec) eighties::drawLed (g, ledAt, 2.8f, lit);
-                r = r.translated (0.0f, down ? 1.0f : 0.0f);
-                g.setColour (juce::Colour (0xff1a1a1a).withAlpha (0.85f));
-            }
-            else
-            {
-                // the decade's key (PartHeader.h), lit in the transport's colours
-                const auto role = kind == rec ? erabar::Role::rec : kind == play ? erabar::Role::play : kind == stop ? erabar::Role::stop : erabar::Role::wind;
-                const auto colour = erabar::roleColour (role);
-                r = partui::drawKey (g, r.withSizeKeepingCentre (r.getWidth(), juce::jmin (r.getHeight(), 40.0f)), lit, over, down, colour);
-                g.setColour (lit ? partui::keyInk (true, over, isEnabled(), colour)
-                                 : kind == rec ? colour : partui::keyInk (false, false, isEnabled(), colour));
-            }
+            const auto role = kind == rec ? erabar::Role::rec : kind == play ? erabar::Role::play : kind == stop ? erabar::Role::stop : erabar::Role::wind;
+            const auto colour = erabar::roleColour (role);
+            r = partui::drawKey (g, r.withSizeKeepingCentre (r.getWidth(), juce::jmin (r.getHeight(), 40.0f)), lit, over, down, colour);
+            g.setColour (lit ? partui::keyInk (true, over, isEnabled(), colour)
+                             : kind == rec ? colour : partui::keyInk (false, false, isEnabled(), colour));
             auto a = r.withSizeKeepingCentre (14.0f, 14.0f);
             juce::Path p;
             auto tri = [&p] (juce::Rectangle<float> b, bool right)
@@ -1554,16 +1537,9 @@ public:
     {
         // an early-80s panel: flat charcoal, white legends, and the band of red, orange, yellow
         // and cream along the foot
-        // the theme's decade (MELVILLE's own setting: click the name); STANDARD, the early-80s
-        // panel it had before there was a choice
+        // the theme's decade (MELVILLE's own setting: click the name)
         const auto era = partui::era();
-        if (era == partui::Era::standard)
-        {
-            eighties::drawPanel (g, getLocalBounds().toFloat(), 0.0f);
-            eighties::drawBand (g, getLocalBounds().toFloat().removeFromBottom (5.0f));
-        }
-        else
-            partui::drawEraPanel (g, getLocalBounds().toFloat(), era);
+        partui::drawEraPanel (g, getLocalBounds().toFloat(), era);
 
         auto r = getLocalBounds().reduced (14, 0).withTrimmedBottom (5);
         wordmarkArea = r.removeFromLeft (wordmarkWidth - 14);
@@ -1875,7 +1851,11 @@ public:
         // the theme (click MELVILLE's name): the decade the bars are dressed for
         // (MELVILLE_THEME=<n> picks one, for pictures)
         {
-            int theme = props.getUserSettings()->getIntValue ("theme", 0);
+            // ("themeDecade"; the earlier "theme" counted a STANDARD first: 1940s was 1 there)
+            auto* us = props.getUserSettings();
+            int theme = us->containsKey ("themeDecade") ? us->getIntValue ("themeDecade")
+                      : us->containsKey ("theme") && us->getIntValue ("theme") > 0 ? us->getIntValue ("theme") - 1
+                      : (int) partui::Era::today;
             if (const auto env = juce::SystemStats::getEnvironmentVariable ("MELVILLE_THEME", {}); env.isNotEmpty()) theme = env.getIntValue();
             partui::setEra ((partui::Era) juce::jlimit (0, partui::numEras - 1, theme));
         }
@@ -1991,7 +1971,7 @@ public:
         barContent->onTheme = [this] (partui::Era e)
         {
             partui::setEra (e);
-            props.getUserSettings()->setValue ("theme", (int) e);
+            props.getUserSettings()->setValue ("themeDecade", (int) e);
             props.saveIfNeeded();
             for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i)
                 if (auto* c = juce::Desktop::getInstance().getComponent (i)) c->repaint();
