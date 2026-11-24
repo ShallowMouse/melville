@@ -111,7 +111,7 @@ namespace names
     juce::StringArray routeToHawthorne();     // "To Hawthorne track 1".."96", "To Hawthorne master L/R"
     juce::StringArray linkToWhitman();        // "Hawthorne track 1".."96", "EMERSON return A L/R", "EMERSON return B L/R"
     juce::StringArray linkFromWhitman();      // "To Hawthorne master L/R", "To EMERSON send A L/R", "To EMERSON send B L/R"
-    juce::StringArray whitmanIns();           // linkToWhitman(), then "Insert return track 1".."96"
+    juce::StringArray whitmanIns();           // linkToWhitman(), then "Insert return track 1".."96" (in when the channel's INS is pressed)
     juce::StringArray whitmanOuts();          // linkFromWhitman(), then "Insert send track 1".."96" (post-fader)
     juce::StringArray numbered (const juce::String& prefix, int n, int first = 1);
     /** FULLER's outputs, in its device-channel order: mix L/R, the 12 drums, overheads L/R, room L/R. */

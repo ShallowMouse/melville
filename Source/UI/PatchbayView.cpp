@@ -366,9 +366,9 @@ void PatchCanvas::rebuild()
                    { "RETURN A", "whitman", "FX return A coming back onto the desk.", { "EMERSON return A L", "EMERSON return A R" }, lr });
         column (p, { "SEND B", "whitman", "The desk's FX send B (to EMERSON's return B by default).", { "To EMERSON send B L", "To EMERSON send B R" }, lr },
                    { "RETURN B", "whitman", "FX return B coming back onto the desk.", { "EMERSON return B L", "EMERSON return B R" }, lr });
-        column (p, { "INSERT SEND", "whitman", "Each channel's insert point, after its fader: patch it to outboard (an interface output) or anything with an input.",
+        column (p, { "INSERT SEND", "whitman", "Each channel's insert send, after its EQ and dynamics, before its fader: patch it to outboard (an interface output) or anything with an input.",
                      numbered ("Insert send track ", tracks), numbers (tracks) },
-                   { "INSERT RETURN", "whitman", "What comes back into each channel's insert, on to its pan and the mix. Nothing cabled: the channel goes straight through.",
+                   { "INSERT RETURN", "whitman", "What comes back into each channel's insert, on to its fader: heard when the channel's INS button is in.",
                      numbered ("Insert return track ", tracks), numbers (tracks) }); }
 
     for (auto& p : panels)
