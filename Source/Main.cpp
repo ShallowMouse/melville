@@ -233,7 +233,7 @@ public:
         if (image.isValid())
             g.drawImage (image, iconArea, juce::RectanglePlacement::centred);
         else if (drawIcon)
-            drawIcon (g, iconArea);
+            drawIcon (g, erabar::drawIconBadge (g, era, iconArea));      // (MELVILLE's own icons, in the theme's dress)
 
         g.setColour (over ? accent.brighter (0.2f) : accent);
         g.setFont (erabar::label (era, 11.0f));
@@ -1387,15 +1387,16 @@ public:
 
         patchTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
         {
+            const auto ic = erabar::iconColours (partui::era());
             // a jack field with two cords
-            g.setColour (Colours::panelHi);
+            g.setColour (ic.body);
             g.fillRoundedRectangle (r, r.getWidth() * 0.12f);
             const float step = r.getWidth() / 5.0f;
-            g.setColour (Colours::textDim);
+            g.setColour (ic.line);
             for (int row = 0; row < 2; ++row)
                 for (int c = 0; c < 4; ++c)
                     g.fillEllipse (r.getX() + step * (c + 1) - 3.5f, r.getY() + r.getHeight() * (row == 0 ? 0.3f : 0.7f) - 3.5f, 7.0f, 7.0f);
-            g.setColour (Colours::accent);
+            g.setColour (ic.detail);
             juce::Path cord;
             cord.startNewSubPath (r.getX() + step, r.getY() + r.getHeight() * 0.3f);
             cord.cubicTo (r.getX() + step, r.getBottom(), r.getX() + step * 3, r.getY(), r.getX() + step * 3, r.getY() + r.getHeight() * 0.7f);
@@ -1405,44 +1406,52 @@ public:
         };
         audioTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
         {
+            const auto ic = erabar::iconColours (partui::era());
             // an interface: a box with two inputs and a meter
             auto box = r.withSizeKeepingCentre (r.getWidth(), r.getHeight() * 0.56f);
-            g.setColour (Colours::panelHi);
+            g.setColour (ic.body);
             g.fillRoundedRectangle (box, 5.0f);
-            g.setColour (Colours::textDim);
+            g.setColour (ic.line);
+            const float jd = box.getWidth() * 0.22f;          // (all in proportion, so it fits any badge)
             for (int c = 0; c < 2; ++c)
-                g.drawEllipse (box.getX() + box.getWidth() * (0.18f + 0.22f * c) - 7.0f, box.getCentreY() - 7.0f, 14.0f, 14.0f, 2.0f);
-            g.setColour (Colours::accent);
+                g.drawEllipse (box.getX() + box.getWidth() * (0.2f + 0.24f * (float) c) - jd * 0.5f, box.getCentreY() - jd * 0.5f, jd, jd, 2.0f);
+            g.setColour (ic.detail);
+            const float pitch = box.getWidth() * 0.075f, barW = box.getWidth() * 0.05f, base = box.getCentreY() + box.getHeight() * 0.32f;
             for (int k = 0; k < 5; ++k)
-                g.fillRect (box.getX() + box.getWidth() * 0.66f + k * 6.0f, box.getCentreY() + 8.0f - k * 4.0f, 4.0f, 4.0f + k * 4.0f);
+            {
+                const float h = box.getHeight() * (0.14f + 0.13f * (float) k);
+                g.fillRect (box.getX() + box.getWidth() * 0.58f + pitch * (float) k, base - h, barW, h);
+            }
         };
         netTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
         {
+            const auto ic = erabar::iconColours (partui::era());
             // three machines linked
             const juce::Point<float> a { r.getCentreX(), r.getY() + r.getHeight() * 0.22f },
                                      b { r.getX() + r.getWidth() * 0.2f, r.getBottom() - r.getHeight() * 0.22f },
                                      c { r.getRight() - r.getWidth() * 0.2f, r.getBottom() - r.getHeight() * 0.22f };
-            g.setColour (Colours::textDim);
+            g.setColour (ic.line);
             for (auto [p, q] : { std::pair { a, b }, std::pair { a, c }, std::pair { b, c } }) g.drawLine ({ p, q }, 2.0f);
             for (auto p : { a, b, c })
             {
-                g.setColour (Colours::panelHi);
+                g.setColour (ic.body);
                 g.fillRoundedRectangle (juce::Rectangle<float> (16, 12).withCentre (p), 2.0f);
-                g.setColour (Colours::forPart ("network"));
+                g.setColour (ic.detail);
                 g.drawRoundedRectangle (juce::Rectangle<float> (16, 12).withCentre (p), 2.0f, 1.5f);
             }
         };
         sessionTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
         {
+            const auto ic = erabar::iconColours (partui::era());
             // a tape box: the whole studio in one
             auto box = r.reduced (r.getWidth() * 0.14f, r.getHeight() * 0.08f);
-            g.setColour (Colours::panelHi);
+            g.setColour (ic.body);
             g.fillRoundedRectangle (box, 3.0f);
-            g.setColour (Colours::textDim);
+            g.setColour (ic.line);
             g.drawRoundedRectangle (box, 3.0f, 1.5f);
             const float d = box.getWidth() * 0.62f;
             auto reelArea = juce::Rectangle<float> (d, d).withCentre ({ box.getCentreX(), box.getY() + box.getHeight() * 0.42f });
-            g.setColour (Colours::accent);
+            g.setColour (ic.detail);
             g.drawEllipse (reelArea, 2.5f);
             g.fillEllipse (reelArea.withSizeKeepingCentre (d * 0.22f, d * 0.22f));
             g.fillRect (box.getX() + box.getWidth() * 0.2f, box.getBottom() - box.getHeight() * 0.18f, box.getWidth() * 0.6f, 3.0f);
@@ -1455,13 +1464,14 @@ public:
 
         sheetTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
         {
+            const auto ic = erabar::iconColours (partui::era());
             // a clipboard: the session sheet (notes, track sheet, take log, photos)
             auto box = r.reduced (r.getWidth() * 0.2f, r.getHeight() * 0.1f);
-            g.setColour (Colours::panelHi);
+            g.setColour (ic.body);
             g.fillRoundedRectangle (box, 3.0f);
-            g.setColour (Colours::textDim);
+            g.setColour (ic.line);
             g.drawRoundedRectangle (box, 3.0f, 1.5f);
-            g.setColour (Colours::accent);
+            g.setColour (ic.detail);
             g.fillRoundedRectangle (juce::Rectangle<float> (box.getWidth() * 0.44f, box.getHeight() * 0.12f)
                                         .withCentre ({ box.getCentreX(), box.getY() + 1.0f }), 2.0f);
             for (int k = 0; k < 4; ++k)
@@ -1482,6 +1492,7 @@ public:
 
         clockTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
         {
+            const auto ic = erabar::iconColours (partui::era());
             // a metronome: MELVILLE's tempo, click and timecode
             auto b = r.reduced (r.getWidth() * 0.16f);
             juce::Path p;
@@ -1490,9 +1501,9 @@ public:
             p.lineTo (b.getRight() - b.getWidth() * 0.06f, b.getBottom());
             p.lineTo (b.getX() + b.getWidth() * 0.06f, b.getBottom());
             p.closeSubPath();
-            g.setColour (Colours::textDim);
+            g.setColour (ic.line);
             g.strokePath (p, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-            g.setColour (Colours::accent);
+            g.setColour (ic.detail);
             g.drawLine (b.getCentreX(), b.getBottom() - b.getHeight() * 0.2f, b.getRight() - b.getWidth() * 0.18f, b.getY() + b.getHeight() * 0.12f, 2.5f);
             g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ b.getCentreX() + b.getWidth() * 0.16f, b.getY() + b.getHeight() * 0.42f }));
         };
@@ -1503,11 +1514,12 @@ public:
         addAndMakeVisible (netTile);
         updateTile.drawIcon = [] (juce::Graphics& g, juce::Rectangle<float> r)
         {
+            const auto ic = erabar::iconColours (partui::era());
             // a download arrow into a tray
             auto box = r.reduced (r.getWidth() * 0.12f);
-            g.setColour (Colours::panelHi);
+            g.setColour (ic.body);
             g.fillRoundedRectangle (box, box.getWidth() * 0.14f);
-            g.setColour (Colours::accent);
+            g.setColour (ic.detail);
             const float cx = box.getCentreX(), top = box.getY() + box.getHeight() * 0.2f, tip = box.getY() + box.getHeight() * 0.62f;
             g.drawLine (cx, top, cx, tip, 3.0f);
             juce::Path head;
