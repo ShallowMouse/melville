@@ -11,6 +11,7 @@
 #include "Parts/Parts.h"
 #include "UI/MelvilleLookAndFeel.h"
 #include "../Shared/Eighties.h"
+#include "../Shared/EraBar.h"
 #include "UI/NearestTooltips.h"
 #include "UI/PatchbayView.h"
 #include "UI/Taskbar.h"
@@ -219,10 +220,11 @@ public:
     void paintTile (juce::Graphics& g, bool over, bool down)
     {
         auto r = getLocalBounds().toFloat().reduced (2.0f);
+        const auto era = partui::era();
         if (over || down)
         {
             g.setColour (juce::Colours::white.withAlpha (down ? 0.09f : 0.05f));
-            g.fillRoundedRectangle (r, 2.0f);
+            g.fillRoundedRectangle (r, era == partui::Era::today ? 10.0f : era == partui::Era::tens ? 0.0f : 2.0f);
         }
 
         auto iconArea = r.removeFromTop (r.getHeight() - 26.0f).reduced (6.0f);
@@ -234,7 +236,7 @@ public:
             drawIcon (g, iconArea);
 
         g.setColour (over ? accent.brighter (0.2f) : accent);
-        g.setFont (eighties::sans (11.0f));
+        g.setFont (erabar::label (era, 11.0f));
         g.drawFittedText (getName().toUpperCase(), r.removeFromTop (14.0f).toNearestInt(), juce::Justification::centred, 1, 0.7f);
 
         // its LEDs, in the part's colour
@@ -244,10 +246,10 @@ public:
             auto row = r.removeFromTop (10.0f);
             const float pitch = 10.0f, x0 = row.getCentreX() - pitch * (float) (on.size() - 1) * 0.5f;
             for (size_t k = 0; k < on.size(); ++k)
-                eighties::drawLed (g, { x0 + pitch * (float) k, row.getCentreY() }, 2.6f, on[k], accent);
+                erabar::drawLamp (g, era, { x0 + pitch * (float) k, row.getCentreY() }, on[k], accent);
         }
         else if (isLit)
-            eighties::drawLed (g, r.removeFromTop (10.0f).getCentre(), 2.6f, isLit(), accent);
+            erabar::drawLamp (g, era, r.removeFromTop (10.0f).getCentre(), isLit(), accent);
     }
 
 private:
@@ -321,10 +323,10 @@ public:
         const int fr = (int) (std::fmod (secs, 1.0) * 30.0);
         const auto text = juce::String (h) + ":" + juce::String (m).paddedLeft ('0', 2) + ":" + juce::String (sec).paddedLeft ('0', 2)
                           + ":" + juce::String (fr).paddedLeft ('0', 2);
+        const auto era = partui::era();
         auto c = counterArea.toFloat();
         auto sub = c.removeFromBottom (13.0f);
-        eighties::drawLedWindow (g, c);
-        eighties::drawSevenSegment (g, text, c.reduced (8.0f, 7.0f), eighties::ledRed());
+        erabar::drawReadout (g, era, text, c);
 
         juce::String line = t.available.load() && t.reelLoaded.load() ? juce::String ("TAPE") : juce::String ("CLOCK");
         if (t.bpm.load() > 0.0)
@@ -337,20 +339,20 @@ public:
             const int bar = (int) (barIdx + (barIdx >= 0 ? 1 : 0)), beat = (int) (b - barIdx * bpb) + 1;
             line = "BAR " + juce::String (bar) + "   BEAT " + juce::String (beat);
         }
-        g.setFont (eighties::sans (9.5f));
-        g.setColour (t.recording.load() ? eighties::red() : t.rolling.load() ? eighties::legend() : eighties::legendDim());
+        g.setFont (erabar::label (era, 9.5f));
+        g.setColour (t.recording.load() ? eighties::red() : t.rolling.load() ? erabar::ink (era) : erabar::inkDim (era));
         g.drawText (line, sub, juce::Justification::centred);
 
-        // the tempo, in LEDs too (the label over it only shows while it's typed into)
-        g.setFont (eighties::sans (9.5f));
-        g.setColour (eighties::legendDim());
+        // the tempo, in the same display (the label over it only shows while it's typed into)
+        g.setFont (erabar::label (era, 9.5f));
+        g.setColour (erabar::inkDim (era));
         g.drawText (t.bpm.load() > 0.0 ? "TEMPO  " + juce::String (t.beatsPerBar.load()) + "/4" : juce::String ("TEMPO"),
                     tempoCaption, juce::Justification::centred);
         const auto tb = tempo.getBounds().toFloat();
-        eighties::drawLedWindow (g, tb);
         if (! tempo.isBeingEdited())
-            eighties::drawSevenSegment (g, t.bpm.load() > 0.0 ? juce::String (t.bpm.load(), 1) : juce::String ("---"),
-                                        tb.reduced (7.0f, 6.0f), eighties::ledRed());
+            erabar::drawReadout (g, era, t.bpm.load() > 0.0 ? juce::String (t.bpm.load(), 1) : juce::String ("---"), tb);
+        else
+            erabar::drawReadout (g, era, {}, tb);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -404,15 +406,28 @@ private:
             // square plastic keys, as on the machines of the time: grey for the winding keys,
             // cream STOP, orange PLAY, red REC, each with a red LED that's lit while it's on
             auto r = getLocalBounds().toFloat().reduced (2.0f, 1.0f);
-            const auto ledAt = juce::Point<float> (r.getCentreX(), r.getY() + 4.0f);
-            r.removeFromTop (11.0f);
-            const auto cap = kind == rec ? eighties::red() : kind == play ? eighties::orange() : kind == stop ? eighties::cream()
-                                                                                              : juce::Colour (0xff8d8c88);
-            eighties::drawKey (g, r, cap, down, over);
-            if (kind == play || kind == rec) eighties::drawLed (g, ledAt, 2.8f, lit);
-            r = r.translated (0.0f, down ? 1.0f : 0.0f);
+            const auto era = partui::era();
+            if (era == partui::Era::standard)
+            {
+                const auto ledAt = juce::Point<float> (r.getCentreX(), r.getY() + 4.0f);
+                r.removeFromTop (11.0f);
+                const auto cap = kind == rec ? eighties::red() : kind == play ? eighties::orange() : kind == stop ? eighties::cream()
+                                                                                                  : juce::Colour (0xff8d8c88);
+                eighties::drawKey (g, r, cap, down, over);
+                if (kind == play || kind == rec) eighties::drawLed (g, ledAt, 2.8f, lit);
+                r = r.translated (0.0f, down ? 1.0f : 0.0f);
+                g.setColour (juce::Colour (0xff1a1a1a).withAlpha (0.85f));
+            }
+            else
+            {
+                // the decade's key (PartHeader.h), lit in the transport's colours
+                const auto role = kind == rec ? erabar::Role::rec : kind == play ? erabar::Role::play : kind == stop ? erabar::Role::stop : erabar::Role::wind;
+                const auto colour = erabar::roleColour (role);
+                r = partui::drawKey (g, r.withSizeKeepingCentre (r.getWidth(), juce::jmin (r.getHeight(), 40.0f)), lit, over, down, colour);
+                g.setColour (lit ? partui::keyInk (true, over, isEnabled(), colour)
+                                 : kind == rec ? colour : partui::keyInk (false, false, isEnabled(), colour));
+            }
             auto a = r.withSizeKeepingCentre (14.0f, 14.0f);
-            g.setColour (juce::Colour (0xff1a1a1a).withAlpha (0.85f));
             juce::Path p;
             auto tri = [&p] (juce::Rectangle<float> b, bool right)
             {
@@ -1527,26 +1542,29 @@ public:
     {
         // an early-80s panel: flat charcoal, white legends, and the band of red, orange, yellow
         // and cream along the foot
-        eighties::drawPanel (g, getLocalBounds().toFloat(), 0.0f);
-        eighties::drawBand (g, getLocalBounds().toFloat().removeFromBottom (5.0f));
+        // the theme's decade (MELVILLE's own setting: click the name); STANDARD, the early-80s
+        // panel it had before there was a choice
+        const auto era = partui::era();
+        if (era == partui::Era::standard)
+        {
+            eighties::drawPanel (g, getLocalBounds().toFloat(), 0.0f);
+            eighties::drawBand (g, getLocalBounds().toFloat().removeFromBottom (5.0f));
+        }
+        else
+            partui::drawEraPanel (g, getLocalBounds().toFloat(), era);
 
         auto r = getLocalBounds().reduced (14, 0).withTrimmedBottom (5);
-        auto mark = r.removeFromLeft (wordmarkWidth - 14).toFloat().withSizeKeepingCentre ((float) wordmarkWidth - 14.0f, 44.0f);
-        g.setColour (eighties::legend());
-        g.setFont (eighties::sans (25.0f, true, true));          // (MELVILLE's own: a bold italic grotesque, unlike the parts)
-        g.drawText ("MELVILLE", mark.removeFromTop (28.0f), juce::Justification::bottomLeft);
-        g.setColour (eighties::legendDim());
-        g.setFont (eighties::sans (9.0f));
-        g.drawText ("STUDIO  SYSTEM", mark.translated (1.0f, 0.0f), juce::Justification::topLeft);
+        wordmarkArea = r.removeFromLeft (wordmarkWidth - 14);
+        erabar::drawWordmark (g, era, wordmarkArea.toFloat());
 
-        // printed lines between the parts, the transport and the studio controls
-        g.setColour (eighties::legend().withAlpha (0.25f));
+        // lines between the parts, the transport and the studio controls
+        g.setColour (erabar::ink (era).withAlpha (0.25f));
         g.drawVerticalLine (dividerX, 14.0f, (float) getHeight() - 19.0f);
         g.drawVerticalLine (divider2X, 14.0f, (float) getHeight() - 19.0f);
 
         if (statusArea.getWidth() > 60)
         {
-            g.setFont (eighties::sans (11.0f, false));
+            g.setFont (erabar::label (era, 11.0f, false));
             g.setColour (Colours::textDim);
             auto* dev = hub.deviceManager.getCurrentAudioDevice();
             juce::StringArray lines;
@@ -1748,6 +1766,28 @@ public:
 private:
     juce::Rectangle<int> statusArea;
     int dividerX = 0, divider2X = 0;
+    juce::Rectangle<int> wordmarkArea;
+
+public:
+    /** The theme was changed (the app saves it and repaints everything). */
+    std::function<void (partui::Era)> onTheme;
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (! wordmarkArea.contains (e.getPosition())) return;
+        // click MELVILLE's name: the theme, the decade the header bars and this bar are dressed for
+        juce::PopupMenu m;
+        m.addSectionHeader ("Theme");
+        for (int i = 0; i < partui::numEras; ++i)
+            m.addItem (i + 1, partui::eraName ((partui::Era) i), true, (int) partui::era() == i);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (wordmarkArea)),
+                         [this] (int r) { if (r > 0 && onTheme) onTheme ((partui::Era) (r - 1)); });
+    }
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        setMouseCursor (wordmarkArea.contains (e.getPosition()) ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+    }
+private:
     TransportStrip transportStrip;
     std::unique_ptr<juce::DocumentWindow> patchWindow, interfaceWindow;
 };
@@ -1820,6 +1860,13 @@ public:
         props.setStorageParameters (o);
 
         juce::LookAndFeel::setDefaultLookAndFeel (&lookAndFeel);
+        // the theme (click MELVILLE's name): the decade the bars are dressed for
+        // (MELVILLE_THEME=<n> picks one, for pictures)
+        {
+            int theme = props.getUserSettings()->getIntValue ("theme", 0);
+            if (const auto env = juce::SystemStats::getEnvironmentVariable ("MELVILLE_THEME", {}); env.isNotEmpty()) theme = env.getIntValue();
+            partui::setEra ((partui::Era) juce::jlimit (0, partui::numEras - 1, theme));
+        }
 
         // the hub first: the parts open their devices on it as they're made
         hub = std::make_unique<Hub>();
@@ -1929,6 +1976,14 @@ public:
         barContent->onShowTwain = [this] { showTwain(); };
         barContent->onSessionMenu = [this] (juce::Component& c) { showLibraryMenu (c); };
         barContent->onShowLibrary = [this] { showLibrary(); };
+        barContent->onTheme = [this] (partui::Era e)
+        {
+            partui::setEra (e);
+            props.getUserSettings()->setValue ("theme", (int) e);
+            props.saveIfNeeded();
+            for (int i = 0; i < juce::Desktop::getInstance().getNumComponents(); ++i)
+                if (auto* c = juce::Desktop::getInstance().getComponent (i)) c->repaint();
+        };
         {
             auto& l = melville::library();
             l.show = [this] { showLibrary(); };
