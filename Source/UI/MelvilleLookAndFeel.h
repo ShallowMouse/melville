@@ -70,7 +70,13 @@ public:
 
     juce::Typeface::Ptr getTypefaceForFont (const juce::Font& f) override
     {
-        return f.isBold() ? monoBold : mono;
+        // Courier Prime for anything not given a typeface; a named one (the bar's and POE's
+        // early-80s grotesque, Eighties.h) as named
+        const auto name = f.getTypefaceName();
+        if (name == juce::Font::getDefaultSansSerifFontName() || name == juce::Font::getDefaultSerifFontName()
+             || name == juce::Font::getDefaultMonospacedFontName() || name.isEmpty())
+            return f.isBold() ? monoBold : mono;
+        return LookAndFeel_V4::getTypefaceForFont (f);
     }
 
     juce::Font getTextButtonFont (juce::TextButton&, int h) override

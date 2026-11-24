@@ -1,15 +1,17 @@
 #pragma once
 
-// POE's window: the shared part header, then the sequencer as a piece of 70s hardware. On
+// POE's window: the shared part header, then the sequencer as a piece of early-80s hardware
+// (charcoal, white legends, red LEDs, keys in red, orange, yellow and cream). On
 // the left the programmer (patterns, rate, direction, scale, the MIDI and CV settings); on the
 // right the sixteen steps, each a column with its lamp, a readout of its note, the three
-// knobs of rows A, B and C, and its PLAY / TIE / REST / SKIP switch.
+// knobs of rows A, B and C, and its key (PLAY / TIE / REST / SKIP).
 
 #include <JuceHeader.h>
 #include "PoeEngine.h"
 #include "PequodLookAndFeel.h"
 #include "Hardware.h"
 #include "../../Shared/PartHeader.h"
+#include "../../Shared/Eighties.h"
 
 namespace poe
 {
@@ -36,7 +38,7 @@ public:
     }
 };
 
-/** A knob on the panel: black, with a white line, over a printed scale (drag up and down;
+/** A knob on the panel: a cream cap on a black skirt, over a printed scale (drag up and down;
     shift for fine; double-click for its usual setting; a wheel turns it too). `choices` > 1
     makes it a switch of that many positions. */
 class Knob : public juce::Component, public juce::SettableTooltipClient

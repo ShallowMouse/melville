@@ -6,42 +6,14 @@ namespace poe
 
 namespace
 {
-    const juce::Colour ink { 0xffe9e4d6 };              // the panel's legends: white paint
-    const juce::Colour inkDim { 0xff8a857b };
-    const juce::Colour face { 0xff222225 };             // black-anodised panel
-    const juce::Colour lampRed { 0xffff4a2e };          // the step lamps: incandescent behind red glass
+    // the early-80s panel (Eighties.h): white legends on charcoal, red LEDs
+    const juce::Colour ink = eighties::legend();
+    const juce::Colour inkDim = eighties::legendDim();
+    const juce::Colour lampRed = eighties::ledRed();
 
     constexpr float arcStart = -2.6f, arcEnd = 2.6f;    // the knobs' travel (radians from twelve o'clock)
 
-    /** A walnut end cheek. */
-    void cheek (juce::Graphics& g, juce::Rectangle<float> r)
-    {
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff5a3520), r.getX(), 0.0f, juce::Colour (0xff3a2112), r.getRight(), 0.0f, false));
-        g.fillRoundedRectangle (r, 3.0f);
-        juce::Random rnd (1966);
-        for (int i = 0; i < 26; ++i)
-        {
-            const float x = r.getX() + rnd.nextFloat() * r.getWidth();
-            g.setColour (juce::Colour (0xff24140a).withAlpha (0.12f + 0.25f * rnd.nextFloat()));
-            juce::Path grain;
-            grain.startNewSubPath (x, r.getY());
-            grain.cubicTo (x + 2.0f * rnd.nextFloat() - 1.0f, r.getY() + r.getHeight() * 0.33f,
-                           x + 2.0f * rnd.nextFloat() - 1.0f, r.getY() + r.getHeight() * 0.66f, x, r.getBottom());
-            g.strokePath (grain, juce::PathStrokeType (0.6f + rnd.nextFloat()));
-        }
-        g.setColour (juce::Colours::white.withAlpha (0.10f));
-        g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
-    }
-
-    void facePanel (juce::Graphics& g, juce::Rectangle<float> r)
-    {
-        Pequod::hw::panel (g, r, face, 3.0f);
-        g.setColour (juce::Colours::black.withAlpha (0.6f));
-        g.drawRoundedRectangle (r, 3.0f, 1.0f);
-        for (auto p : { r.getTopLeft() + juce::Point<float> (9.0f, 9.0f), r.getTopRight() + juce::Point<float> (-9.0f, 9.0f),
-                        r.getBottomLeft() + juce::Point<float> (9.0f, -9.0f), r.getBottomRight() + juce::Point<float> (-9.0f, -9.0f) })
-            Pequod::hw::screw (g, p, 3.0f, p.x * 0.13f);
-    }
+    void facePanel (juce::Graphics& g, juce::Rectangle<float> r) { eighties::drawPanel (g, r, 3.0f); }
 
     juce::String percent (float v) { return juce::String (juce::roundToInt (v * 100.0f)) + "%"; }
 }
@@ -63,13 +35,14 @@ void Knob::paint (juce::Graphics& g)
     auto b = getLocalBounds().toFloat();
     if (label.isNotEmpty())
     {
-        g.setFont (Pequod::heading (11.0f));
-        Pequod::hw::engraved (g, label, b.removeFromTop (15.0f), ink, juce::Justification::centred);
+        g.setFont (eighties::sans (10.5f));
+        g.setColour (ink);
+        g.drawText (label, b.removeFromTop (15.0f), juce::Justification::centred, false);
     }
     const auto k = knobArea();
     if (text)
     {
-        g.setFont (small ? Pequod::body (10.0f) : Pequod::heading (11.5f, false));
+        g.setFont (eighties::sans (small ? 9.5f : 10.5f, ! small));
         g.setColour (small ? inkDim : ink.withAlpha (0.85f));
         g.drawText (text (v), b.withY (k.getBottom()).withHeight (small ? 13.0f : 16.0f), juce::Justification::centred, false);
     }
@@ -77,38 +50,35 @@ void Knob::paint (juce::Graphics& g)
     const auto c = k.getCentre();
     const float R = k.getWidth() * 0.5f;
 
-    // the printed scale
+    // the printed scale: white dots, the ends a little bigger
     const int ticks = choices > 1 && choices <= 13 ? choices : 11;
-    g.setColour (ink.withAlpha (0.55f));
+    g.setColour (ink.withAlpha (0.7f));
     for (int t = 0; t < ticks; ++t)
     {
         const float a = arcStart + (arcEnd - arcStart) * (float) t / (float) (ticks - 1);
-        const float r0 = R * 0.86f, r1 = R * (t == 0 || t == ticks - 1 ? 1.0f : 0.95f);
-        g.drawLine (c.x + std::sin (a) * r0, c.y - std::cos (a) * r0, c.x + std::sin (a) * r1, c.y - std::cos (a) * r1, 1.0f);
+        const float rr = R * 0.93f, d = (t == 0 || t == ticks - 1) ? 2.4f : 1.6f;
+        g.fillEllipse (juce::Rectangle<float> (d, d).withCentre ({ c.x + std::sin (a) * rr, c.y - std::cos (a) * rr }));
     }
 
-    // the skirt (knurled), then the cap
-    const float rs = R * 0.78f, rc = R * 0.56f;
-    g.setColour (juce::Colours::black.withAlpha (0.5f));
+    // a black skirt, then the cream cap (the plastic knobs of the time)
+    const float rs = R * 0.76f, rc = R * 0.56f;
+    g.setColour (juce::Colours::black.withAlpha (0.55f));
     g.fillEllipse (c.x - rs, c.y - rs + 2.0f, rs * 2.0f, rs * 2.0f);
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a3a3c), c.x, c.y - rs, juce::Colour (0xff0b0b0c), c.x, c.y + rs, false));
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3b3b3d), c.x, c.y - rs, juce::Colour (0xff121213), c.x, c.y + rs, false));
     g.fillEllipse (c.x - rs, c.y - rs, rs * 2.0f, rs * 2.0f);
-    g.setColour (juce::Colours::white.withAlpha (0.07f));
-    for (int t = 0; t < 36; ++t)
-    {
-        const float a = juce::MathConstants<float>::twoPi * (float) t / 36.0f;
-        g.drawLine (c.x + std::sin (a) * rc, c.y - std::cos (a) * rc, c.x + std::sin (a) * rs, c.y - std::cos (a) * rs, 0.8f);
-    }
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2c2c2e), c.x - rc * 0.4f, c.y - rc, juce::Colour (0xff070708), c.x + rc * 0.3f, c.y + rc, false));
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xffece6d6), c.x - rc * 0.4f, c.y - rc, juce::Colour (0xffa9a394), c.x + rc * 0.3f, c.y + rc, false));
     g.fillEllipse (c.x - rc, c.y - rc, rc * 2.0f, rc * 2.0f);
-    g.setColour (juce::Colours::white.withAlpha (0.12f));
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
     g.drawEllipse (c.x - rc, c.y - rc, rc * 2.0f, rc * 2.0f, 0.8f);
 
-    // the line
+    // the line: black on the cap, out to the skirt's edge
     const float a = arcStart + (arcEnd - arcStart) * juce::jlimit (0.0f, 1.0f, v);
-    g.setColour (juce::Colour (0xfff4f0e6));
-    g.drawLine (c.x + std::sin (a) * rc * 0.2f, c.y - std::cos (a) * rc * 0.2f, c.x + std::sin (a) * rs * 0.95f, c.y - std::cos (a) * rs * 0.95f,
-                juce::jmax (1.5f, R * 0.09f));
+    g.setColour (juce::Colour (0xff141414));
+    g.drawLine (c.x + std::sin (a) * rc * 0.15f, c.y - std::cos (a) * rc * 0.15f, c.x + std::sin (a) * rc * 0.98f, c.y - std::cos (a) * rc * 0.98f,
+                juce::jmax (1.6f, R * 0.09f));
+    g.setColour (ink);
+    g.drawLine (c.x + std::sin (a) * rc * 1.05f, c.y - std::cos (a) * rc * 1.05f, c.x + std::sin (a) * rs * 0.97f, c.y - std::cos (a) * rs * 0.97f,
+                juce::jmax (1.4f, R * 0.07f));
 }
 
 void Knob::change (float v)
@@ -147,11 +117,17 @@ bool Knob::refresh()
 }
 
 //==============================================================================
-/** A step's switch: a lever in a slot with four detents, PLAY at the top, SKIP at the bottom. */
-class View::ModeSwitch : public juce::Component
+/** A step's key, in its group's colour (red, orange, yellow, cream: four steps each), its LED
+    lit while the step plays a note. Click: PLAY or REST. Shift-click: TIE. Alt-click: SKIP.
+    Right-click: the four. The wheel steps through them. */
+class View::ModeSwitch : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    ModeSwitch (Engine*& e, int s) : engine (e), step (s) {}
+    ModeSwitch (Engine*& e, int s) : engine (e), step (s)
+    {
+        setTooltip ("Step " + juce::String (s + 1) + ": click for PLAY or REST, shift-click TIE (held on from the step before), "
+                    "alt-click SKIP (left out of the run). Right-click for the list");
+    }
 
     int mode() const { return engine->now().steps[(size_t) step].mode.load(); }
     void setMode (int m) { engine->now().steps[(size_t) step].mode = juce::jlimit (0, 3, m); shown = -1; refresh(); }
@@ -159,26 +135,33 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        auto r = getLocalBounds().toFloat().reduced (2.0f, 3.0f);
+        auto r = getLocalBounds().toFloat().reduced (3.0f, 2.0f);
         const auto names = Engine::modeNames();
-        auto slotR = r.removeFromLeft (juce::jmin (12.0f, r.getWidth() * 0.3f));
-        Pequod::hw::slot (g, slotR.withSizeKeepingCentre (5.0f, slotR.getHeight() - 6.0f));
-        const float h = r.getHeight() / 4.0f;
         const int m = mode();
-        for (int k = 0; k < 4; ++k)
-        {
-            const auto row = juce::Rectangle<float> (r.getX() + 3.0f, r.getY() + h * (float) k, r.getWidth() - 3.0f, h);
-            g.setFont (Pequod::heading (9.5f, k == m));
-            g.setColour (k == m ? (k == Engine::play ? ink : partui::accent ("poe")) : inkDim.withAlpha (0.8f));
-            g.drawText (names[k], row, juce::Justification::centredLeft, false);
-        }
-        // the lever's head at its detent
-        const auto c = juce::Point<float> (slotR.getCentreX(), r.getY() + h * ((float) m + 0.5f));
-        g.setColour (juce::Colours::black.withAlpha (0.5f));
-        g.fillRoundedRectangle (juce::Rectangle<float> (11.0f, 7.0f).withCentre (c.translated (0.0f, 1.5f)), 2.0f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe8e8e4), c.x, c.y - 4.0f, juce::Colour (0xff6d6d6a), c.x, c.y + 4.0f, false));
-        g.fillRoundedRectangle (juce::Rectangle<float> (11.0f, 7.0f).withCentre (c), 2.0f);
+        auto caption = r.removeFromBottom (14.0f);
+        const float side = juce::jmin (r.getWidth(), r.getHeight() - 3.0f);
+        auto keyR = r.withSizeKeepingCentre (side, side - 2.0f).withY (r.getY());
+        const bool sounds = m == Engine::play || m == Engine::tie;
+        auto cap = eighties::band (step / 4);
+        if (m == Engine::skip) cap = cap.withMultipliedSaturation (0.25f).withMultipliedBrightness (0.55f);
+        eighties::drawKey (g, keyR, cap, held, isMouseOver());
+
+        // its LED, top centre of the key: lit while the step plays a note (a tie's too)
+        const auto led = juce::Point<float> (keyR.getCentreX(), keyR.getY() + keyR.getHeight() * 0.32f + (held ? 1.0f : 0.0f));
+        eighties::drawLed (g, led, juce::jmin (4.0f, side * 0.11f), sounds);
+        g.setColour (juce::Colour (0xff1a1a1a).withAlpha (0.75f));
+        g.setFont (eighties::sans (9.0f));
+        g.drawText (juce::String (step + 1), keyR.withTrimmedTop (keyR.getHeight() * 0.55f).translated (0.0f, held ? 1.0f : 0.0f),
+                    juce::Justification::centred, false);
+
+        g.setFont (eighties::sans (9.0f));
+        g.setColour (m == Engine::play ? ink : m == Engine::tie ? eighties::yellow() : inkDim);
+        g.drawText (names[m], caption, juce::Justification::centred, false);
     }
+
+    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
+    void mouseExit (const juce::MouseEvent&) override  { repaint(); }
+    void mouseUp (const juce::MouseEvent&) override    { held = false; repaint(); }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
@@ -190,22 +173,21 @@ public:
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [this] (int r) { if (r > 0) setMode (r - 1); });
             return;
         }
-        pick (e);
+        held = true;
+        const int m = mode();
+        if (e.mods.isShiftDown())     setMode (m == Engine::tie ? Engine::play : Engine::tie);
+        else if (e.mods.isAltDown())  setMode (m == Engine::skip ? Engine::play : Engine::skip);
+        else                          setMode (m == Engine::play ? Engine::rest : Engine::play);
     }
-    void mouseDrag (const juce::MouseEvent& e) override { pick (e); }
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
     {
         if (w.deltaY != 0.0f) setMode (mode() + (w.deltaY > 0.0f ? -1 : 1));
     }
 
 private:
-    void pick (const juce::MouseEvent& e)
-    {
-        const auto r = getLocalBounds().toFloat().reduced (2.0f, 3.0f);
-        setMode ((int) ((e.position.y - r.getY()) / (r.getHeight() / 4.0f)));
-    }
     Engine*& engine;
     int step, shown = -1;
+    bool held = false;
 };
 
 /** One of the eight pattern keys. */
@@ -213,6 +195,17 @@ class View::PatternKey : public partui::Key
 {
 public:
     PatternKey (int i) : partui::Key (juce::String (i + 1), partui::Icon::none, View::accent()) { setTooltip ("Pattern " + juce::String (i + 1)); }
+
+    void paintButton (juce::Graphics& g, bool over, bool down) override
+    {
+        auto r = getLocalBounds().toFloat().reduced (2.0f, 2.0f);
+        eighties::drawKey (g, r, eighties::cream(), down, over);
+        const auto k = r.translated (0.0f, down ? 1.0f : 0.0f);
+        eighties::drawLed (g, { k.getX() + 10.0f, k.getCentreY() }, 3.2f, getToggleState());
+        g.setColour (juce::Colour (0xff1a1a1a));
+        g.setFont (eighties::sans (14.0f));
+        g.drawText (getButtonText(), k.withTrimmedLeft (14.0f), juce::Justification::centred, false);
+    }
 };
 
 //==============================================================================
@@ -505,20 +498,22 @@ void View::paint (juce::Graphics& g)
         if (st >= 0) Pequod::hw::lamp (g, { kb.getCentreX(), kb.getBottom() + 5.0f }, 2.5f, st > 0 ? juce::Colour (0xffff4a2e) : accent().withAlpha (0.5f), st > 0);
     }
 
-    // the cabinet: walnut cheeks either side
-    const auto body = programmerArea.getUnion (stepsArea).toFloat();
-    cheek (g, juce::Rectangle<float> (body.getX() - 16.0f, body.getY() - 2.0f, 14.0f, body.getHeight() + 4.0f));
-    cheek (g, juce::Rectangle<float> (body.getRight() + 2.0f, body.getY() - 2.0f, 14.0f, body.getHeight() + 4.0f));
-
     // the programmer
     facePanel (g, programmerArea.toFloat());
-    g.setFont (Pequod::heading (12.0f));
-    Pequod::hw::engraved (g, "PATTERN", patternArea.withHeight (16).translated (0, -18).toFloat(), ink, juce::Justification::centredLeft);
-    g.setColour (ink.withAlpha (0.25f));
+    eighties::drawLegend (g, "PATTERN", patternArea.withHeight (16).translated (0, -19).toFloat(), 11.0f);
+    g.setColour (ink.withAlpha (0.5f));
     g.drawHorizontalLine (patternArea.getBottom() + 10, (float) programmerArea.getX() + 14.0f, (float) programmerArea.getRight() - 14.0f);
-    g.setFont (Pequod::heading (10.0f, false));
-    Pequod::hw::engraved (g, "SHALLOWMOUSE  MODEL 16  SEQUENTIAL CONTROLLER", programmerArea.toFloat().removeFromBottom (24.0f).reduced (14.0f, 0.0f),
-                          inkDim, juce::Justification::centred);
+    {
+        // the maker's line, and the band of four colours across the foot
+        auto foot = programmerArea.toFloat().removeFromBottom (34.0f).reduced (14.0f, 8.0f);
+        eighties::drawBand (g, foot.removeFromBottom (4.0f), 2.0f);
+        g.setColour (ink);
+        g.setFont (eighties::sans (12.5f, true, true));
+        g.drawText ("POE-16", foot, juce::Justification::centredLeft, false);
+        g.setColour (inkDim);
+        g.setFont (eighties::sans (9.0f));
+        g.drawText ("SEQUENTIAL CONTROLLER", foot, juce::Justification::centredRight, false);
+    }
 
     // the steps
     facePanel (g, stepsArea.toFloat());
@@ -532,51 +527,69 @@ void View::paint (juce::Graphics& g)
         const bool in = i < len;
         if (! in)
         {
-            g.setColour (juce::Colours::black.withAlpha (0.28f));
-            g.fillRect (col.withTop (rowArea[1].getY()).withBottom (rowArea[5].getBottom()).reduced (2, 0));
+            g.setColour (juce::Colours::black.withAlpha (0.30f));
+            g.fillRect (col.withTop (rowArea[1].getY()).withBottom (rowArea[4].getBottom()).reduced (2, 0));
         }
-        if (i > 0)
+        if (i > 0 && i % 4 == 0)       // a printed line between the groups of four
         {
-            g.setColour (juce::Colours::black.withAlpha (0.35f));
-            g.drawVerticalLine (col.getX(), (float) rowArea[1].getY(), (float) rowArea[5].getBottom());
-            g.setColour (juce::Colours::white.withAlpha (0.04f));
-            g.drawVerticalLine (col.getX() + 1, (float) rowArea[1].getY(), (float) rowArea[5].getBottom());
+            g.setColour (ink.withAlpha (0.35f));
+            g.drawVerticalLine (col.getX(), (float) rowArea[0].getY(), (float) rowArea[4].getBottom());
         }
         // its number and lamp
         auto la = lampArea[(size_t) i].toFloat();
-        g.setFont (Pequod::heading (12.0f));
-        Pequod::hw::engraved (g, juce::String (i + 1), la.removeFromLeft (la.getWidth() * 0.45f), in ? ink : inkDim, juce::Justification::centredRight);
-        Pequod::hw::lamp (g, { la.getCentreX(), la.getCentreY() }, 5.0f, lampRed, i == lit);
+        g.setFont (eighties::sans (11.0f));
+        g.setColour (in ? ink : inkDim);
+        g.drawText (juce::String (i + 1), la.removeFromLeft (la.getWidth() * 0.45f), juce::Justification::centredRight, false);
+        eighties::drawLed (g, { la.getCentreX(), la.getCentreY() }, 4.0f, i == lit);
 
-        // its note
+        // its note, in red LEDs
         const auto rd = readoutArea[(size_t) i].toFloat();
-        Pequod::hw::window (g, rd);
+        eighties::drawLedWindow (g, rd);
         const int mode = p.steps[(size_t) i].mode.load();
         const auto note = Engine::noteName (juce::jlimit (0, 127, cur->noteFor (p.steps[(size_t) i].a.load()) + tr));
         const auto shown = mode == Engine::rest ? juce::String ("--") : mode == Engine::skip ? juce::String ("  ") : note;
-        g.setFont (Pequod::heading (13.0f));
-        Pequod::hw::lit (g, shown, rd.reduced (2.0f, 1.0f), (in ? accent() : accent().withMultipliedBrightness (0.5f)).withAlpha (mode == Engine::tie ? 0.75f : 1.0f),
+        g.setFont (eighties::sans (13.0f));
+        Pequod::hw::lit (g, shown, rd.reduced (2.0f, 1.0f), (in ? lampRed : lampRed.withMultipliedBrightness (0.45f)).withAlpha (mode == Engine::tie ? 0.7f : 1.0f),
                          juce::Justification::centred, "888");
-        Pequod::hw::glass (g, rd);
+    }
+
+    // the band across the top of the step keys: a colour over each group of four
+    {
+        const auto first = columnArea[0], last = columnArea[(size_t) Engine::numSteps - 1];
+        const float y = (float) rowArea[5].getY() - 7.0f;
+        for (int grp = 0; grp < 4; ++grp)
+        {
+            const auto a = columnArea[(size_t) (grp * 4)], z = columnArea[(size_t) (grp * 4 + 3)];
+            g.setColour (eighties::band (grp));
+            g.fillRect (juce::Rectangle<float> ((float) a.getX() + 4.0f, y, (float) (z.getRight() - a.getX()) - 8.0f, 3.0f));
+        }
+        juce::ignoreUnused (first, last);
     }
 
     // the rows' legends, down the left
-    auto legend = [&] (int row, const juce::String& letter, const juce::String& what)
+    auto legend = [&] (int row, const juce::String& letter, const juce::String& what, juce::Colour c)
     {
         auto r = rowArea[(size_t) row].withWidth (columnArea[0].getX() - stepsArea.getX()).reduced (12, 0).toFloat();
-        g.setFont (Pequod::heading (24.0f));
-        Pequod::hw::engraved (g, letter, r.removeFromTop (r.getHeight() * 0.55f), accent(), juce::Justification::bottomLeft);
-        g.setFont (Pequod::heading (10.0f));
-        Pequod::hw::engraved (g, what, r, ink, juce::Justification::topLeft);
+        g.setColour (c);
+        g.setFont (eighties::sans (24.0f, true, true));
+        g.drawText (letter, r.removeFromTop (r.getHeight() * 0.55f), juce::Justification::bottomLeft, false);
+        g.setColour (ink);
+        g.setFont (eighties::sans (9.5f));
+        g.drawText (what, r, juce::Justification::topLeft, false);
     };
     const int bc = cur->bCc.load(), cc = cur->cCc.load();
-    g.setFont (Pequod::heading (10.0f));
-    Pequod::hw::engraved (g, "STEP", rowArea[0].withWidth (columnArea[0].getX() - stepsArea.getX()).reduced (12, 0).toFloat(), ink, juce::Justification::centredLeft);
-    Pequod::hw::engraved (g, "NOTE", rowArea[1].withWidth (columnArea[0].getX() - stepsArea.getX()).reduced (12, 0).toFloat(), ink, juce::Justification::centredLeft);
-    legend (2, "A", "PITCH");
-    legend (3, "B", bc < 0 ? juce::String ("VELOCITY") : "CC " + juce::String (bc));
-    legend (4, "C", cc < 0 ? juce::String ("GATE") : "CC " + juce::String (cc));
-    Pequod::hw::engraved (g, "MODE", rowArea[5].withWidth (columnArea[0].getX() - stepsArea.getX()).reduced (12, 0).toFloat(), ink, juce::Justification::centredLeft);
+    auto plain = [&] (int row, const juce::String& t)
+    {
+        g.setColour (ink);
+        g.setFont (eighties::sans (9.5f));
+        g.drawText (t, rowArea[(size_t) row].withWidth (columnArea[0].getX() - stepsArea.getX()).reduced (12, 0).toFloat(), juce::Justification::centredLeft, false);
+    };
+    plain (0, "STEP");
+    plain (1, "NOTE");
+    legend (2, "A", "PITCH", eighties::red());
+    legend (3, "B", bc < 0 ? juce::String ("VELOCITY") : "CC " + juce::String (bc), eighties::orange());
+    legend (4, "C", cc < 0 ? juce::String ("GATE") : "CC " + juce::String (cc), eighties::yellow());
+    plain (5, "STEP KEY");
 }
 
 void View::resized()
@@ -588,7 +601,7 @@ void View::resized()
     bar = partui::placeKeys (bar, { &patternKey, &randomKey, &runKey, seqKeys[3], seqKeys[2], seqKeys[1], seqKeys[0] });
     statusArea = bar.withTrimmedRight (10).withSizeKeepingCentre (bar.getWidth() - 10, 40);
 
-    r.reduce (26, 10);       // (room for the cheeks)
+    r.reduce (10, 10);
     programmerArea = r.removeFromLeft (300);
     r.removeFromLeft (8);
     stepsArea = r;
@@ -621,7 +634,7 @@ void View::resized()
     const int rowsH[] = { 30, 30 };
     rowArea[0] = stepsArea.withY (sr.getY()).withHeight (rowsH[0]);
     rowArea[1] = rowArea[0].translated (0, rowsH[0] + 4).withHeight (rowsH[1]);
-    const int switchH = 74;
+    const int switchH = 80;
     const int knobsTop = rowArea[1].getBottom() + 8, knobsH = (sr.getBottom() - switchH - 6 - knobsTop) / 3;
     for (int k = 0; k < 3; ++k) rowArea[(size_t) (2 + k)] = stepsArea.withY (knobsTop + k * knobsH).withHeight (knobsH);
     rowArea[5] = stepsArea.withY (sr.getBottom() - switchH).withHeight (switchH);
@@ -639,7 +652,7 @@ void View::resized()
             const auto cell = rowArea[(size_t) (2 + k)].withX (col.getX()).withWidth (col.getWidth()).reduced (1, 2);
             stepKnobs[(size_t) i][(size_t) k]->setBounds (cell);
         }
-        modes[i]->setBounds (rowArea[5].withX (col.getX()).withWidth (col.getWidth()).reduced (3, 2));
+        modes[i]->setBounds (rowArea[5].withX (col.getX()).withWidth (col.getWidth()).reduced (2, 2));
     }
 }
 

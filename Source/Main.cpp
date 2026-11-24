@@ -10,6 +10,7 @@
 #include "Core/Hub.h"
 #include "Parts/Parts.h"
 #include "UI/MelvilleLookAndFeel.h"
+#include "../Shared/Eighties.h"
 #include "UI/NearestTooltips.h"
 #include "UI/PatchbayView.h"
 #include "UI/Taskbar.h"
@@ -220,8 +221,8 @@ public:
         auto r = getLocalBounds().toFloat().reduced (2.0f);
         if (over || down)
         {
-            g.setColour (Colours::panelHi.brighter (down ? 0.08f : 0.0f));
-            g.fillRoundedRectangle (r, 6.0f);
+            g.setColour (juce::Colours::white.withAlpha (down ? 0.09f : 0.05f));
+            g.fillRoundedRectangle (r, 2.0f);
         }
 
         auto iconArea = r.removeFromTop (r.getHeight() - 26.0f).reduced (6.0f);
@@ -233,27 +234,20 @@ public:
             drawIcon (g, iconArea);
 
         g.setColour (over ? accent.brighter (0.2f) : accent);
-        g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)));
+        g.setFont (eighties::sans (11.0f));
         g.drawFittedText (getName().toUpperCase(), r.removeFromTop (14.0f).toNearestInt(), juce::Justification::centred, 1, 0.7f);
 
+        // its LEDs, in the part's colour
         if (lamps)
         {
             const auto on = lamps();
             auto row = r.removeFromTop (10.0f);
             const float pitch = 10.0f, x0 = row.getCentreX() - pitch * (float) (on.size() - 1) * 0.5f;
             for (size_t k = 0; k < on.size(); ++k)
-            {
-                g.setColour (on[k] ? accent : Colours::lampOff);
-                g.fillEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ x0 + pitch * (float) k, row.getCentreY() }));
-            }
+                eighties::drawLed (g, { x0 + pitch * (float) k, row.getCentreY() }, 2.6f, on[k], accent);
         }
         else if (isLit)
-        {
-            const bool on = isLit();
-            auto lamp = r.removeFromTop (10.0f).withSizeKeepingCentre (6.0f, 6.0f);
-            g.setColour (on ? accent : Colours::lampOff);
-            g.fillEllipse (lamp);
-        }
+            eighties::drawLed (g, r.removeFromTop (10.0f).getCentre(), 2.6f, isLit(), accent);
     }
 
 private:
@@ -297,7 +291,7 @@ public:
 
         tempo.setEditable (false, true, false);
         tempo.setJustificationType (juce::Justification::centred);
-        tempo.setColour (juce::Label::textColourId, Colours::text);
+        tempo.setColour (juce::Label::textColourId, juce::Colours::transparentBlack);   // (the strip draws it in LEDs)
         tempo.setColour (juce::Label::backgroundWhenEditingColourId, Colours::panelHi);
         tempo.setColour (juce::Label::textWhenEditingColourId, Colours::text);
         tempo.setTooltip ("MELVILLE's tempo (also kept on the reel when one is loaded): double-click to type one, right-click for beats per bar and bar 1. "
@@ -320,22 +314,19 @@ public:
     void paint (juce::Graphics& g) override
     {
         auto& t = melville::transport();
-        // the counter, like a tape machine's: hours, minutes, seconds, frames
-        g.setColour (juce::Colour (0xff101112));
-        g.fillRoundedRectangle (counterArea.toFloat(), 4.0f);
+        // the counter, in red seven-segment LEDs: hours, minutes, seconds, frames
         const double rate = juce::jmax (1.0, t.reelRate.load());
         const double secs = (double) t.position.load() / rate;
         const int h = (int) (secs / 3600.0), m = (int) std::fmod (secs / 60.0, 60.0), sec = (int) std::fmod (secs, 60.0);
         const int fr = (int) (std::fmod (secs, 1.0) * 30.0);
         const auto text = juce::String (h) + ":" + juce::String (m).paddedLeft ('0', 2) + ":" + juce::String (sec).paddedLeft ('0', 2)
                           + ":" + juce::String (fr).paddedLeft ('0', 2);
-        g.setColour (t.recording.load() ? Colours::warn : t.rolling.load() ? Colours::accent : Colours::text);
-        g.setFont (juce::Font (juce::FontOptions (22.0f, juce::Font::bold)));
-        auto c = counterArea.reduced (8, 2);
-        g.drawText (text, c.removeFromTop (c.getHeight() * 3 / 5), juce::Justification::centred);
-        g.setFont (juce::Font (juce::FontOptions (11.0f)));
-        g.setColour (Colours::textDim);
-        juce::String sub = t.available.load() && t.reelLoaded.load() ? juce::String ("TAPE") : juce::String ("CLOCK");
+        auto c = counterArea.toFloat();
+        auto sub = c.removeFromBottom (13.0f);
+        eighties::drawLedWindow (g, c);
+        eighties::drawSevenSegment (g, text, c.reduced (8.0f, 7.0f), eighties::ledRed());
+
+        juce::String line = t.available.load() && t.reelLoaded.load() ? juce::String ("TAPE") : juce::String ("CLOCK");
         if (t.bpm.load() > 0.0)
         {
             const double beats = ((double) t.position.load() - t.barOne.load()) / (rate * 60.0 / t.bpm.load());
@@ -344,14 +335,22 @@ public:
             const auto b = (juce::int64) std::floor (beats + 1.0e-9);
             const auto barIdx = b >= 0 ? b / bpb : -((-b + bpb - 1) / bpb);
             const int bar = (int) (barIdx + (barIdx >= 0 ? 1 : 0)), beat = (int) (b - barIdx * bpb) + 1;
-            sub = "BAR " + juce::String (bar) + "  BEAT " + juce::String (beat);
+            line = "BAR " + juce::String (bar) + "   BEAT " + juce::String (beat);
         }
-        g.drawText (sub, c, juce::Justification::centred);
+        g.setFont (eighties::sans (9.5f));
+        g.setColour (t.recording.load() ? eighties::red() : t.rolling.load() ? eighties::legend() : eighties::legendDim());
+        g.drawText (line, sub, juce::Justification::centred);
 
-        g.setFont (juce::Font (juce::FontOptions (10.0f, juce::Font::bold)));
-        g.setColour (Colours::textDim);
+        // the tempo, in LEDs too (the label over it only shows while it's typed into)
+        g.setFont (eighties::sans (9.5f));
+        g.setColour (eighties::legendDim());
         g.drawText (t.bpm.load() > 0.0 ? "TEMPO  " + juce::String (t.beatsPerBar.load()) + "/4" : juce::String ("TEMPO"),
                     tempoCaption, juce::Justification::centred);
+        const auto tb = tempo.getBounds().toFloat();
+        eighties::drawLedWindow (g, tb);
+        if (! tempo.isBeingEdited())
+            eighties::drawSevenSegment (g, t.bpm.load() > 0.0 ? juce::String (t.bpm.load(), 1) : juce::String ("---"),
+                                        tb.reduced (7.0f, 6.0f), eighties::ledRed());
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -380,17 +379,17 @@ public:
 
     void resized() override
     {
-        auto r = getLocalBounds().reduced (0, 18);
+        auto r = getLocalBounds().reduced (0, 16);
         for (auto* k : keys) { k->setBounds (r.removeFromLeft (40)); r.removeFromLeft (4); }
         r.removeFromLeft (8);
-        counterArea = r.removeFromLeft (150);
-        r.removeFromLeft (8);
-        auto tr = r.removeFromLeft (80);
-        tempoCaption = tr.removeFromTop (14);
+        counterArea = r.removeFromLeft (170);
+        r.removeFromLeft (10);
+        auto tr = r.removeFromLeft (84);
+        tempoCaption = tr.removeFromBottom (13);
         tempo.setBounds (tr);
     }
 
-    static constexpr int preferredWidth = 6 * 44 + 8 + 150 + 8 + 80;
+    static constexpr int preferredWidth = 6 * 44 + 8 + 170 + 10 + 84;
 
 private:
     enum Kind { rtz, rew, ffw, stop, play, rec, numKeys };
@@ -402,15 +401,18 @@ private:
         bool lit = false;
         void paintButton (juce::Graphics& g, bool over, bool down) override
         {
-            auto r = getLocalBounds().toFloat().reduced (1.0f);
-            g.setColour (Colours::panelHi.brighter (down ? 0.12f : over ? 0.05f : 0.0f));
-            g.fillRoundedRectangle (r, 4.0f);
-            const auto on = kind == rec ? Colours::warn : Colours::accent;
-            g.setColour (lit ? on : Colours::line);
-            g.drawRoundedRectangle (r, 4.0f, lit ? 1.5f : 1.0f);
-
-            auto a = r.withSizeKeepingCentre (16.0f, 16.0f);
-            g.setColour (lit ? on : kind == rec ? Colours::warn.withAlpha (0.8f) : Colours::text);
+            // square plastic keys, as on the machines of the time: grey for the winding keys,
+            // cream STOP, orange PLAY, red REC, each with a red LED that's lit while it's on
+            auto r = getLocalBounds().toFloat().reduced (2.0f, 1.0f);
+            const auto ledAt = juce::Point<float> (r.getCentreX(), r.getY() + 4.0f);
+            r.removeFromTop (11.0f);
+            const auto cap = kind == rec ? eighties::red() : kind == play ? eighties::orange() : kind == stop ? eighties::cream()
+                                                                                              : juce::Colour (0xff8d8c88);
+            eighties::drawKey (g, r, cap, down, over);
+            if (kind == play || kind == rec) eighties::drawLed (g, ledAt, 2.8f, lit);
+            r = r.translated (0.0f, down ? 1.0f : 0.0f);
+            auto a = r.withSizeKeepingCentre (14.0f, 14.0f);
+            g.setColour (juce::Colour (0xff1a1a1a).withAlpha (0.85f));
             juce::Path p;
             auto tri = [&p] (juce::Rectangle<float> b, bool right)
             {
@@ -420,8 +422,8 @@ private:
             switch (kind)
             {
                 case rtz:  p.addRectangle (a.getX(), a.getY(), 3.0f, a.getHeight()); tri (a.withTrimmedLeft (4.0f), false); break;
-                case rew:  tri (a.withWidth (8.0f), false); tri (a.withTrimmedLeft (8.0f), false); break;
-                case ffw:  tri (a.withWidth (8.0f), true);  tri (a.withTrimmedLeft (8.0f), true); break;
+                case rew:  tri (a.withWidth (7.0f), false); tri (a.withTrimmedLeft (7.0f), false); break;
+                case ffw:  tri (a.withWidth (7.0f), true);  tri (a.withTrimmedLeft (7.0f), true); break;
                 case stop: p.addRectangle (a.reduced (1.5f)); break;
                 case play: tri (a.reduced (1.0f, 0.0f), true); break;
                 case rec:  p.addEllipse (a.reduced (1.0f)); break;
@@ -1523,20 +1525,28 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (Colours::panel);
-        auto r = getLocalBounds().reduced (14, 0);
-        g.setColour (Colours::accent);
-        g.setFont (juce::Font (juce::FontOptions (24.0f, juce::Font::bold)));     // (MELVILLE's own: plain bold sans, unlike the parts)
-        g.drawText ("MELVILLE", r.removeFromLeft (wordmarkWidth - 14), juce::Justification::centredLeft);
+        // an early-80s panel: flat charcoal, white legends, and the band of red, orange, yellow
+        // and cream along the foot
+        eighties::drawPanel (g, getLocalBounds().toFloat(), 0.0f);
+        eighties::drawBand (g, getLocalBounds().toFloat().removeFromBottom (5.0f));
 
-        // a divider between the parts and the studio controls
-        g.setColour (Colours::line);
-        g.drawVerticalLine (dividerX, 14.0f, (float) getHeight() - 14.0f);
-        g.drawVerticalLine (divider2X, 14.0f, (float) getHeight() - 14.0f);
+        auto r = getLocalBounds().reduced (14, 0).withTrimmedBottom (5);
+        auto mark = r.removeFromLeft (wordmarkWidth - 14).toFloat().withSizeKeepingCentre ((float) wordmarkWidth - 14.0f, 44.0f);
+        g.setColour (eighties::legend());
+        g.setFont (eighties::sans (25.0f, true, true));          // (MELVILLE's own: a bold italic grotesque, unlike the parts)
+        g.drawText ("MELVILLE", mark.removeFromTop (28.0f), juce::Justification::bottomLeft);
+        g.setColour (eighties::legendDim());
+        g.setFont (eighties::sans (9.0f));
+        g.drawText ("STUDIO  SYSTEM", mark.translated (1.0f, 0.0f), juce::Justification::topLeft);
+
+        // printed lines between the parts, the transport and the studio controls
+        g.setColour (eighties::legend().withAlpha (0.25f));
+        g.drawVerticalLine (dividerX, 14.0f, (float) getHeight() - 19.0f);
+        g.drawVerticalLine (divider2X, 14.0f, (float) getHeight() - 19.0f);
 
         if (statusArea.getWidth() > 60)
         {
-            g.setFont (juce::Font (juce::FontOptions (12.0f)));
+            g.setFont (eighties::sans (11.0f, false));
             g.setColour (Colours::textDim);
             auto* dev = hub.deviceManager.getCurrentAudioDevice();
             juce::StringArray lines;
