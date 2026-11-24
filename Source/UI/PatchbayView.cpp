@@ -365,7 +365,11 @@ void PatchCanvas::rebuild()
         column (p, { "SEND A", "whitman", "The desk's FX send A (to EMERSON's return A by default).", { "To EMERSON send A L", "To EMERSON send A R" }, lr },
                    { "RETURN A", "whitman", "FX return A coming back onto the desk.", { "EMERSON return A L", "EMERSON return A R" }, lr });
         column (p, { "SEND B", "whitman", "The desk's FX send B (to EMERSON's return B by default).", { "To EMERSON send B L", "To EMERSON send B R" }, lr },
-                   { "RETURN B", "whitman", "FX return B coming back onto the desk.", { "EMERSON return B L", "EMERSON return B R" }, lr }); }
+                   { "RETURN B", "whitman", "FX return B coming back onto the desk.", { "EMERSON return B L", "EMERSON return B R" }, lr });
+        column (p, { "INSERT SEND", "whitman", "Each channel's insert point, after its fader: patch it to outboard (an interface output) or anything with an input.",
+                     numbered ("Insert send track ", tracks), numbers (tracks) },
+                   { "INSERT RETURN", "whitman", "What comes back into each channel's insert, on to its pan and the mix. Nothing cabled: the channel goes straight through.",
+                     numbered ("Insert return track ", tracks), numbers (tracks) }); }
 
     for (auto& p : panels)
         if (p.sections.empty() && p.note.isEmpty())
@@ -645,7 +649,8 @@ void PatchCanvas::drawPanel (juce::Graphics& g, const Panel& p) const
         g.setColour (face.darker (0.45f));
         g.fillEllipse (juce::Rectangle<float> (7, 7).withCentre (corner));
         g.setColour (face.brighter (0.3f));
-        g.drawLine (corner.x - 2.5f, corner.y, corner.x + 2.5f, corner.y, 1.0f);
+        const float a = screwTurn (corner, p.title.hashCode() % 997);
+        g.drawLine (corner.x - 2.5f * std::cos (a), corner.y - 2.5f * std::sin (a), corner.x + 2.5f * std::cos (a), corner.y + 2.5f * std::sin (a), 1.0f);
     }
 
     // the name

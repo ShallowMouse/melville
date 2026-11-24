@@ -211,6 +211,8 @@ namespace melville
     void takeMidi (int jack, juce::MidiBuffer& into) noexcept;
     /** What's cabled into that jack, by name ("Keyboards, FULLER steps"); empty if nothing. Message thread. */
     juce::String midiCabledInto (int jack);
+    /** A part's audio inputs that have something cabled (or normalled) into them, by name. Message thread. */
+    juce::StringArray audioCabledInto (const juce::String& partId);
     /** How long FULLER's steps hold (a 1/n note: 4, 8, 16, 32). */
     void setStepLength (int n);
     int getStepLength();

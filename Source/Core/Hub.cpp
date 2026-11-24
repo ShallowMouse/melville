@@ -41,7 +41,7 @@ Hub::Hub()
     // (its tracks, master and LTC leave by Hawthorne Route; its own device output is just the click)
     addNode (std::make_unique<PartNode> ("hawthorne", "HAWTHORNE", hawthorneIns, juce::StringArray ("Click")));
     addNode (std::make_unique<PartNode> ("emerson", "EMERSON", names::routeFromHawthorne(), names::routeToHawthorne()));
-    addNode (std::make_unique<PartNode> ("whitman", "WHITMAN", names::linkToWhitman(), names::linkFromWhitman()));
+    addNode (std::make_unique<PartNode> ("whitman", "WHITMAN", names::whitmanIns(), names::whitmanOuts()));
     addNode (std::make_unique<PartNode> ("thoreau", "FULLER", juce::StringArray(), names::thoreauOuts()));
     addNode (std::make_unique<PartNode> ("alcott", "ALCOTT", juce::StringArray(), names::alcottOuts()));
     addNode (std::make_unique<PartNode> ("poe", "POE", juce::StringArray(), names::poeOuts()));
@@ -479,6 +479,9 @@ void Hub::updateVisibleTracks (int numTracks)
         w->visibleIns.clear();
         for (int t = 0; t < numTracks; ++t) w->visibleIns.push_back (t);
         w->visibleIns.insert (w->visibleIns.end(), { maxT, maxT + 1, maxT + 2, maxT + 3 });   // returns A / B
+        for (int t = 0; t < numTracks; ++t) w->visibleIns.push_back (maxT + 4 + t);              // insert returns
+        w->visibleOuts = { 0, 1, 2, 3, 4, 5 };                                                   // the mix, sends A / B
+        for (int t = 0; t < numTracks; ++t) w->visibleOuts.push_back (6 + t);                    // insert sends
     }
 }
 

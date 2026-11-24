@@ -83,6 +83,21 @@ namespace names
         return { "To Hawthorne master L", "To Hawthorne master R",
                  "To EMERSON send A L", "To EMERSON send A R", "To EMERSON send B L", "To EMERSON send B R" };
     }
+
+    // WHITMAN's own jacks: the link's, then an insert point on every channel (post-fader send and return)
+    juce::StringArray whitmanIns()
+    {
+        auto s = linkToWhitman();
+        s.addArray (numbered ("Insert return track ", link::maxTracks));
+        return s;
+    }
+
+    juce::StringArray whitmanOuts()
+    {
+        auto s = linkFromWhitman();
+        s.addArray (numbered ("Insert send track ", link::maxTracks));
+        return s;
+    }
 }
 
 //==============================================================================

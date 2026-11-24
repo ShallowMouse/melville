@@ -9,6 +9,17 @@
 namespace melville
 {
 
+/** How far a screw's slot is turned: as random as screws done up by hand, but the same each time
+    that screw is drawn (from where it is, and a seed). */
+inline float screwTurn (juce::Point<float> c, float seed = 0.0f)
+{
+    auto h = (uint32_t) (juce::roundToInt (c.x * 3.0f) * 73856093) ^ (uint32_t) (juce::roundToInt (c.y * 3.0f) * 19349663)
+           ^ (uint32_t) (juce::roundToInt (seed * 1000.0f) * 83492791);
+    h ^= h >> 16; h *= 0x7feb352dU; h ^= h >> 15; h *= 0x846ca68bU; h ^= h >> 16;
+    return (float) (h & 0xffff) / 65536.0f * juce::MathConstants<float>::pi;
+}
+
+
 namespace Colours
 {
     const juce::Colour bg       { 0xff17191b };

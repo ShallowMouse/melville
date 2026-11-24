@@ -1,6 +1,8 @@
 #include "AlcottView.h"
 #include "PequodPanel.h"
 #include <MelvilleHosted.h>
+#include "PluginTags.h"
+#include "Favourites.h"
 
 namespace alcott
 {
@@ -143,6 +145,326 @@ private:
 };
 
 //==============================================================================
+/** ALCOTT's browser, over the rack: every PEQUOD instrument (or effect) to search, grouped by what
+    it is or by collection, with each one's description, and a FAVOURITES filter (ALCOTT's own).
+    A click on an instrument puts it in the slot at once, so it can be played before you choose. */
+class View::Browser : public juce::Component, private juce::ListBoxModel, private juce::KeyListener
+{
+public:
+    Browser (View& v) : owner (v)
+    {
+        load();
+        title.setFont (Pequod::heading (15.0f));
+        title.setColour (juce::Label::textColourId, accent());
+        addAndMakeVisible (title);
+        search.setTextToShowWhenEmpty ("Search names, makers, descriptions...", Pequod::Colours::textDim);
+        search.setFont (Pequod::body (14.0f));
+        search.onTextChange = [this] { refresh(); };
+        search.onEscapeKey = [this] { if (search.isEmpty()) close(); else search.clear(); };
+        search.onReturnKey = [this] { pick (list.getSelectedRow(), true); };
+        search.addKeyListener (this);
+        addAndMakeVisible (search);
+        for (auto* b : { &byFunction, &byCollection, &favs, &done })
+        {
+            b->setColour (juce::TextButton::buttonColourId, Pequod::Colours::panel);
+            b->setWantsKeyboardFocus (false);
+            addAndMakeVisible (b);
+        }
+        byFunction.onClick = [this] { byCollectionNow = false; save(); refresh(); };
+        byCollection.onClick = [this] { byCollectionNow = true; save(); refresh(); };
+        favs.onClick = [this] { onlyFavourites = ! onlyFavourites; save(); refresh(); };
+        favs.setTooltip ("Only your favourites (click a star to add one), still grouped by function or collection");
+        done.onClick = [this] { close(); };
+        list.setRowHeight (44);
+        list.setColour (juce::ListBox::backgroundColourId, Pequod::Colours::well);
+        list.setWantsKeyboardFocus (false);
+        addAndMakeVisible (list);
+    }
+
+    void open (bool inst, int at)
+    {
+        instruments = inst;
+        insertAt = at;
+        title.setText (inst ? "CHOOSE AN INSTRUMENT" : "ADD AN EFFECT", juce::dontSendNotification);
+        search.clear();
+        refresh();
+        setVisible (true);
+        toFront (false);
+        search.grabKeyboardFocus();
+        // (the slot's instrument, selected)
+        if (auto* cur = owner.engine.slot (owner.current).instrument.get(); inst && cur != nullptr)
+            for (int i = 0; i < (int) rows.size(); ++i)
+                if (rows[(size_t) i].info != nullptr && cur->name == rows[(size_t) i].info->name)
+                {
+                    list.selectRow (i);
+                    break;
+                }
+    }
+
+    void close()
+    {
+        setVisible (false);
+        owner.rebuildRack();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        Pequod::hw::panel (g, getLocalBounds().toFloat(), Pequod::Colours::panel);
+        g.setColour (accent().withAlpha (0.6f));
+        g.drawRect (getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (10);
+        auto top = r.removeFromTop (28);
+        done.setBounds (top.removeFromRight (80));
+        top.removeFromRight (10);
+        title.setBounds (top.removeFromLeft (220));
+        search.setBounds (top);
+        r.removeFromTop (8);
+        auto g = r.removeFromTop (24);
+        const int third = g.getWidth() / 3;
+        byFunction.setBounds (g.removeFromLeft (third).reduced (1, 0));
+        byCollection.setBounds (g.removeFromLeft (third).reduced (1, 0));
+        favs.setBounds (g.reduced (1, 0));
+        r.removeFromTop (8);
+        list.setBounds (r);
+    }
+
+private:
+    struct Row
+    {
+        juce::String header;
+        const PequodNative::Info* info = nullptr;
+        juce::String about, collection;
+        juce::Colour colour;
+        bool favourite = false;
+    };
+
+    View& owner;
+    bool instruments = true, byCollectionNow = false, onlyFavourites = false;
+    int insertAt = -1;
+    Favourites favourites;
+    juce::Label title;
+    juce::TextEditor search;
+    juce::TextButton byFunction { "BY FUNCTION" }, byCollection { "BY COLLECTION" }, favs { "FAVOURITES" }, done { "DONE" };
+    juce::ListBox list { "instruments", this };
+    std::vector<Row> rows;
+
+    static juce::File file()
+    {
+        return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("MELVILLE").getChildFile ("alcott-browser.xml");
+    }
+    void load()
+    {
+        if (auto x = juce::XmlDocument::parse (file()))
+        {
+            favourites.fromString (x->getStringAttribute ("favourites").replace ("\\n", "\n"));
+            byCollectionNow = x->getBoolAttribute ("byCollection");
+            onlyFavourites = x->getBoolAttribute ("onlyFavourites");
+        }
+    }
+    void save()
+    {
+        juce::XmlElement x ("ALCOTT_BROWSER");
+        x.setAttribute ("favourites", favourites.toString().replace ("\n", "\\n"));
+        x.setAttribute ("byCollection", byCollectionNow);
+        x.setAttribute ("onlyFavourites", onlyFavourites);
+        file().getParentDirectory().createDirectory();
+        x.writeTo (file());
+    }
+
+    /** What kind of instrument it is (ALCOTT's BY FUNCTION). */
+    static juce::String kindOf (const juce::String& name)
+    {
+        static const std::vector<std::pair<const char*, const char*>> kinds {
+            { "ORGANS", "B-3 Organ|Tonewheel Organ|Combo Compact|Compact Organ|Continental" },
+            { "PIANOS & ELECTRIC PIANOS", "Stage 73|Electric Grand|Pianet|Reed 200|Clavi D6|Muse Pianos" },
+            { "TAPE & SAMPLE KEYBOARDS", "Tape 400|Music Master|Fairlight CMI" },
+            { "STRING MACHINES", "String Ensemble|RS-202" },
+            { "SYNTHESIZERS", "Model 72|Prophet Five|Juno Six|Twenty-Six|VCS3|FM 7|Dream Machine|Clavioline|ARP Odyssey|ARP 2600|"
+                              "Oberheim OB-X|Roland Jupiter-8|Moog Polymoog|Hammond Novachord" },
+            { "BASS", "Bass Line|Bass Pedals|P-Bass Voice|Foxton Bass|Upright Slap|Bass Voice" },
+            { "DRUMS & PERCUSSION", "TR-606|Synare 3" },
+            { "GUITARS", "6120 Voice|Archtop|Red Special|Ricky 330" },
+        };
+        for (auto& [k, names] : kinds)
+            if (juce::StringArray::fromTokens (names, "|", "").contains (name)) return k;
+        return "OTHER";
+    }
+    static int kindOrder (const juce::String& k)
+    {
+        static const juce::StringArray order { "SYNTHESIZERS", "PIANOS & ELECTRIC PIANOS", "ORGANS", "TAPE & SAMPLE KEYBOARDS", "STRING MACHINES",
+                                               "BASS", "DRUMS & PERCUSSION", "GUITARS", "OTHER" };
+        return order.indexOf (k);
+    }
+
+    void refresh()
+    {
+        byFunction.setToggleState (! byCollectionNow, juce::dontSendNotification);
+        byCollection.setToggleState (byCollectionNow, juce::dontSendNotification);
+        favs.setToggleState (onlyFavourites, juce::dontSendNotification);
+        rows.clear();
+        const auto filter = search.getText().trim();
+        struct E { Row row; juce::String group; int order; };
+        std::vector<E> es;
+        for (auto* i : instruments ? Engine::instruments() : Engine::effects())
+        {
+            const auto d = PequodNative::describe (*i);
+            Row row;
+            row.info = i;
+            row.collection = PluginTags::collectionOf (d);
+            row.colour = PluginColours::forPlugin (d);
+            row.favourite = favourites.contains (PluginTags::duplicateKey (d));
+            const auto& pv = PequodNative::panelOf (*i);
+            if (auto* sub = pv.getProperty ("subtitle", {}).getArray(); sub != nullptr && sub->size() == 2)
+                row.about = sub->getReference (0).toString() + "  " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7")) + "  " + sub->getReference (1).toString();
+            if (onlyFavourites && ! row.favourite) continue;
+            if (filter.isNotEmpty() && ! (i->name.containsIgnoreCase (filter) || row.collection.containsIgnoreCase (filter) || row.about.containsIgnoreCase (filter)))
+                continue;
+            const auto group = byCollectionNow ? row.collection.toUpperCase()
+                             : instruments ? kindOf (i->name) : PluginTags::functionOf (d).toUpperCase();
+            const int order = byCollectionNow ? (row.collection.startsWith ("PEQUOD") ? 0 : 1)
+                            : instruments ? kindOrder (group) : PluginTags::functionOrder (d);
+            es.push_back ({ row, group, order });
+        }
+        std::sort (es.begin(), es.end(), [] (const E& a, const E& b)
+        {
+            if (a.order != b.order) return a.order < b.order;
+            if (auto c = a.group.compareIgnoreCase (b.group); c != 0) return c < 0;
+            return a.row.info->name.compareIgnoreCase (b.row.info->name) < 0;
+        });
+        juce::String last = "\x01";
+        for (auto& e : es)
+        {
+            if (e.group != last)
+            {
+                Row h;
+                h.header = e.group;
+                rows.push_back (h);
+                last = e.group;
+            }
+            rows.push_back (e.row);
+        }
+        if (rows.empty())
+        {
+            Row h;
+            h.header = onlyFavourites && filter.isEmpty() ? "NO FAVOURITES YET - CLICK A STAR" : "NO MATCHES";
+            rows.push_back (h);
+        }
+        list.updateContent();
+        list.repaint();
+    }
+
+    int getNumRows() override { return (int) rows.size(); }
+
+    void paintListBoxItem (int i, juce::Graphics& g, int w, int h, bool selected) override
+    {
+        if (! juce::isPositiveAndBelow (i, (int) rows.size())) return;
+        auto& row = rows[(size_t) i];
+        auto r = juce::Rectangle<int> (0, 0, w, h);
+        if (row.info == nullptr)
+        {
+            g.setColour (accent().withAlpha (0.45f));
+            g.fillRect (r.removeFromBottom (1));
+            g.setColour (accent());
+            g.setFont (Pequod::heading (12.0f));
+            g.drawText (row.header, r.reduced (10, 4), juce::Justification::bottomLeft);
+            return;
+        }
+        if (selected)
+        {
+            g.setColour (Pequod::Colours::panelHi);
+            g.fillRect (r);
+            g.setColour (accent());
+            g.fillRect (r.withWidth (3));
+        }
+        g.setColour (PluginColours::forLed (row.colour));
+        g.fillEllipse (juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ 12.0f, (float) h * 0.32f }));
+        Favourites::drawStar (g, r.removeFromRight (Favourites::starWidth + 6).toFloat(), row.favourite, accent().brighter (0.4f), selected);
+        auto t = r.reduced (24, 4);
+        auto tag = t.removeFromRight (juce::jmin (220, w / 3));
+        g.setColour (Pequod::Colours::textDim);
+        g.setFont (Pequod::heading (10.0f, false));
+        g.drawText (row.collection.toUpperCase(), tag.removeFromTop (h / 2 - 4), juce::Justification::centredRight, true);
+        g.setColour (Pequod::Colours::text);
+        g.setFont (Pequod::body (15.0f, true));
+        g.drawText (row.info->name, t.removeFromTop (t.getHeight() / 2), juce::Justification::centredLeft, true);
+        g.setColour (Pequod::Colours::textDim);
+        g.setFont (Pequod::body (11.5f));
+        g.drawText (row.about, t.withRight (w - Favourites::starWidth - 10), juce::Justification::centredLeft, true);
+    }
+
+    void listBoxItemClicked (int i, const juce::MouseEvent& e) override
+    {
+        if (! juce::isPositiveAndBelow (i, (int) rows.size()) || rows[(size_t) i].info == nullptr) return;
+        if (e.x >= list.getVisibleRowWidth() - Favourites::starWidth - 6 || e.mods.isPopupMenu())
+        {
+            favourites.toggle (PluginTags::duplicateKey (PequodNative::describe (*rows[(size_t) i].info)));
+            save();
+            const auto pos = list.getViewport()->getViewPositionY();
+            refresh();
+            list.getViewport()->setViewPosition (0, pos);
+            return;
+        }
+        pick (i, false);
+    }
+    void listBoxItemDoubleClicked (int i, const juce::MouseEvent&) override { pick (i, true); }
+    void selectedRowsChanged (int i) override
+    {
+        // (the arrow keys audition as they go)
+        if (instruments && juce::isPositiveAndBelow (i, (int) rows.size()) && rows[(size_t) i].info != nullptr && keyboardMoved)
+            pick (i, false);
+        keyboardMoved = false;
+    }
+    bool keyboardMoved = false;
+
+    bool keyPressed (const juce::KeyPress& k, juce::Component*) override
+    {
+        if (k == juce::KeyPress::upKey || k == juce::KeyPress::downKey)
+        {
+            int i = list.getSelectedRow();
+            const int dir = k == juce::KeyPress::upKey ? -1 : 1;
+            do { i += dir; } while (juce::isPositiveAndBelow (i, (int) rows.size()) && rows[(size_t) i].info == nullptr);
+            if (juce::isPositiveAndBelow (i, (int) rows.size()))
+            {
+                keyboardMoved = true;
+                list.selectRow (i);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /** An instrument goes straight into the slot (to play it); an effect is added on a double-click. */
+    void pick (int i, bool andClose)
+    {
+        if (! juce::isPositiveAndBelow (i, (int) rows.size()) || rows[(size_t) i].info == nullptr)
+        {
+            if (andClose) close();
+            return;
+        }
+        const auto id = PequodNative::describe (*rows[(size_t) i].info).fileOrIdentifier;
+        if (instruments)
+        {
+            if (auto* cur = owner.engine.slot (owner.current).instrument.get(); cur == nullptr || cur->name != rows[(size_t) i].info->name)
+            {
+                owner.units.clear();
+                owner.engine.setInstrument (owner.current, id);
+                owner.list->repaint();
+            }
+        }
+        else if (andClose)
+        {
+            owner.units.clear();
+            owner.engine.addEffect (owner.current, id, insertAt);
+        }
+        if (andClose) close();
+    }
+};
+
+//==============================================================================
 /** A PEQUOD panel mounted in the rack: power and remove on the left ear, move up / down on the right. */
 class View::Unit : public juce::Component, private juce::ComponentListener
 {
@@ -223,8 +545,8 @@ public:
             for (int k : { 0, n - 1 })
             {
                 const float cy = r.getY() + u * ((float) k + 0.5f);
-                Pequod::hw::screw (g, { x, cy - half }, screw, 0.4f + (float) k);
-                if (n == 1 || k == n - 1) Pequod::hw::screw (g, { x, cy + half }, screw, 1.3f + (float) k);
+                Pequod::hw::screw (g, { x, cy - half }, screw, Pequod::hw::screwSeed (this) + 0.4f + (float) k);
+                if (n == 1 || k == n - 1) Pequod::hw::screw (g, { x, cy + half }, screw, Pequod::hw::screwSeed (this) + 1.3f + (float) k);
             }
         g.setColour (juce::Colour (0xff1c1d1f));
         g.fillRect (face.getBounds());
@@ -322,7 +644,7 @@ public:
             for (int k : { 0, n - 1 })
             {
                 const float cy = u * ((float) k + 0.5f);
-                if (k == 0 || n > 1) { Pequod::hw::screw (g, { x, cy - half }, screw, 0.9f); Pequod::hw::screw (g, { x, cy + half }, screw, 2.1f); }
+                if (k == 0 || n > 1) { Pequod::hw::screw (g, { x, cy - half }, screw, Pequod::hw::screwSeed (this) + 0.9f + (float) k); Pequod::hw::screw (g, { x, cy + half }, screw, Pequod::hw::screwSeed (this) + 2.1f + (float) k); }
             }
         auto vents = r.reduced (ear + u * 0.6f, u * 0.3f);
         const float slotW = juce::jmax (3.0f, u * 0.07f), gap = slotW * 2.2f;
@@ -460,6 +782,8 @@ View::View()
 
     engine.onChanged = [this] { list->repaint(); };
     select (0);
+    if (juce::SystemStats::getEnvironmentVariable ("ALCOTT_BROWSER", {}).isNotEmpty())     // (for pictures)
+        juce::MessageManager::callAsync ([sp = juce::Component::SafePointer<View> (this)] { if (sp != nullptr) sp->openBrowser (true); });
     setSize (1300, 820);
     startTimerHz (20);
 }
@@ -539,51 +863,23 @@ void View::layoutRack()
 
 void View::showInstrumentMenu()
 {
-    // the PEQUOD Keys (organs, electric pianos, clavinet, Mellotron and Chamberlin, string machines,
-    // Minimoog, Taurus, TB-303, DX7, CS-80) first, then the rest
-    juce::PopupMenu m;
-    const auto list = Engine::instruments();
-    auto isKeys = [] (const PequodNative::Info* i) { return i->vendor.endsWithIgnoreCase ("Keys"); };
-    for (int pass = 0; pass < 2; ++pass)
-    {
-        bool header = false;
-        for (size_t k = 0; k < list.size(); ++k)
-        {
-            if (isKeys (list[k]) != (pass == 0)) continue;
-            if (! header) { m.addSectionHeader (pass == 0 ? "KEYS" : "INSTRUMENTS"); header = true; }
-            m.addItem ((int) k + 1, list[k]->name + "   " + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7")) + "  " + list[k]->vendor.fromLastOccurrenceOf ("PEQUOD", false, true).trim());
-        }
-    }
-    if (list.empty()) m.addItem (-1, "(no PEQUOD instruments in this build)", false);
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (rackView), [this, list] (int r)
-    {
-        if (r <= 0 || (size_t) r > list.size()) return;
-        units.clear();
-        engine.setInstrument (current, PequodNative::describe (*list[(size_t) r - 1]).fileOrIdentifier);
-        rebuildRack();
-    });
+    openBrowser (true);
 }
 
 void View::showEffectMenu (int insertAt)
 {
-    // by collection, as in IRVING's browser
-    const auto list = Engine::effects();
-    std::map<juce::String, juce::PopupMenu> byVendor;
-    for (size_t k = 0; k < list.size(); ++k)
+    openBrowser (false, insertAt);
+}
+
+void View::openBrowser (bool instruments, int insertAt)
+{
+    if (browser == nullptr)
     {
-        auto v = list[k]->vendor.fromLastOccurrenceOf ("PEQUOD", false, true).trim();
-        if (v.isEmpty()) v = "PEQUOD";
-        byVendor[v].addItem ((int) k + 1, list[k]->name);
+        browser = std::make_unique<Browser> (*this);
+        addChildComponent (*browser);
     }
-    juce::PopupMenu m;
-    for (auto& [v, sub] : byVendor) m.addSubMenu (v, sub);
-    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (rackView), [this, list, insertAt] (int r)
-    {
-        if (r <= 0 || (size_t) r > list.size()) return;
-        units.clear();
-        engine.addEffect (current, PequodNative::describe (*list[(size_t) r - 1]).fileOrIdentifier, insertAt);
-        rebuildRack();
-    });
+    browser->setBounds (rackView.getBounds());
+    browser->open (instruments, insertAt);
 }
 
 void View::showMidiInputs()
@@ -728,6 +1024,7 @@ void View::resized()
         r.removeFromBottom (6);
     }
     rackView.setBounds (r.reduced (6, 4));
+    if (browser != nullptr) browser->setBounds (rackView.getBounds());
     layoutRack();
 }
 

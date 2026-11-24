@@ -198,6 +198,17 @@ juce::String midiCabledInto (int jack)
     return from.joinIntoString (", ");
 }
 
+juce::StringArray audioCabledInto (const juce::String& partId)
+{
+    juce::StringArray into;
+    if (auto* h = Hub::getIfExists())
+        if (auto* p = h->getPatchbay().findPort (partId))
+            for (auto& [d, c] : h->getPatchbay().getLiveCords())
+                if (d >= p->firstDest && d < p->firstDest + p->dests.size())
+                    into.addIfNotAlreadyThere (p->dests[d - p->firstDest]);
+    return into;
+}
+
 void setStepLength (int n)
 {
     if (auto* h = Hub::getIfExists())

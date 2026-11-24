@@ -29,6 +29,31 @@ public:
     std::atomic<bool> dim { false }, mute { false }, mono { false }, talk { false };
     std::atomic<float> speakerTrim[numSpeakers] { { 1.0f }, { 1.0f }, { 1.0f } };
 
+    /** EXT 1 and EXT 2's names, as set in TWAIN's settings ("PHONE", "REFS"...): the room's own,
+        kept from reel to reel. Empty: "EXT 1" / "EXT 2". Any thread. */
+    juce::String extName (int i) const
+    {
+        const juce::SpinLock::ScopedLockType l (nameLock);
+        const auto n = extNames[(size_t) juce::jlimit (0, 1, i)];
+        return n.isNotEmpty() ? n : "EXT " + juce::String (i + 1);
+    }
+    juce::String customExtName (int i) const
+    {
+        const juce::SpinLock::ScopedLockType l (nameLock);
+        return extNames[(size_t) juce::jlimit (0, 1, i)];
+    }
+    void setExtName (int i, const juce::String& n)
+    {
+        const juce::SpinLock::ScopedLockType l (nameLock);
+        extNames[(size_t) juce::jlimit (0, 1, i)] = n.trim().toUpperCase().substring (0, 12);
+    }
+    /** The name of a monitor source: MIX, 2-TRACK, EXT 1 (or its name), PHONES 1... */
+    juce::String sourceName (int s, bool shortPhones = false) const
+    {
+        return s == mix ? juce::String ("MIX") : s == twoTrack ? juce::String ("2-TRACK") : s == ext1 ? extName (0) : s == ext2 ? extName (1)
+             : (shortPhones ? "PH " : "PHONES ") + juce::String (s - feed1 + 1);
+    }
+
     struct Feed
     {
         std::atomic<float> cue[numCues];          // each cue input's level (0 = out)
@@ -53,6 +78,11 @@ public:
         }
     }
 
+private:
+    mutable juce::SpinLock nameLock;
+    std::array<juce::String, 2> extNames;
+
+public:
     // meters (audio -> UI): peak of the monitor and of each feed
     std::atomic<float> monitorPeak { 0.0f };
     std::array<std::atomic<float>, numFeeds> feedPeak {};

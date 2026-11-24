@@ -23,6 +23,8 @@ inline std::unique_ptr<juce::XmlElement> twainToXml (const TwainNode& t)
     x->setAttribute ("dimLevel", (double) t.dimLevel.load());
     x->setAttribute ("talkLevel", (double) t.talkLevel.load());
     x->setAttribute ("mono", t.mono.load());
+    x->setAttribute ("ext1Name", t.customExtName (0));
+    x->setAttribute ("ext2Name", t.customExtName (1));
     for (int s = 0; s < TwainNode::numSpeakers; ++s) x->setAttribute ("trim" + juce::String (s), (double) t.speakerTrim[s].load());
     for (int f = 0; f < TwainNode::numFeeds; ++f)
     {
@@ -47,6 +49,8 @@ inline void twainFromXml (TwainNode& t, const juce::XmlElement& x)
     t.dimLevel = (float) x.getDoubleAttribute ("dimLevel", t.dimLevel.load());
     t.talkLevel = (float) x.getDoubleAttribute ("talkLevel", t.talkLevel.load());
     t.mono = x.getBoolAttribute ("mono", false);
+    if (x.hasAttribute ("ext1Name")) t.setExtName (0, x.getStringAttribute ("ext1Name"));
+    if (x.hasAttribute ("ext2Name")) t.setExtName (1, x.getStringAttribute ("ext2Name"));
     for (int s = 0; s < TwainNode::numSpeakers; ++s) t.speakerTrim[s] = (float) x.getDoubleAttribute ("trim" + juce::String (s), 1.0);
     int f = 0;
     for (auto* e : x.getChildWithTagNameIterator ("FEED"))
@@ -223,16 +227,14 @@ public:
         // --- monitor source
         for (int s = 0; s < TwainNode::numSources; ++s)
         {
-            const juce::String name = s == TwainNode::mix ? "MIX" : s == TwainNode::twoTrack ? "2-TRACK" : s == TwainNode::ext1 ? "EXT 1"
-                                    : s == TwainNode::ext2 ? "EXT 2" : "PH " + juce::String (s - TwainNode::feed1 + 1);
-            auto* b = sources.add (new juce::TextButton (name));
+            auto* b = sources.add (new juce::TextButton (twain.sourceName (s, true)));
             b->setClickingTogglesState (true);
             b->setRadioGroupId (1);
             b->setColour (juce::TextButton::buttonOnColourId, accent.darker (0.3f));
             b->onClick = [this, s] { twain.source = s; };
             b->setTooltip (s == TwainNode::mix ? "Listen to the desk: the mix, live (TWAIN's MIX IN)"
                          : s == TwainNode::twoTrack ? "Listen to the tape: Hawthorne's master tape (TWAIN's 2-TRACK IN)"
-                         : s == TwainNode::ext1 ? "Listen to TWAIN's EXT 1 IN" : s == TwainNode::ext2 ? "Listen to TWAIN's EXT 2 IN"
+                         : s == TwainNode::ext1 ? "Listen to TWAIN's EXT 1 IN (name it in TWAIN's settings)" : s == TwainNode::ext2 ? "Listen to TWAIN's EXT 2 IN (name it in TWAIN's settings)"
                          : "Listen to what headphone feed " + juce::String (s - TwainNode::feed1 + 1) + " is hearing");
             addAndMakeVisible (b);
         }
@@ -359,7 +361,8 @@ public:
                 g.setColour (juce::Colour (0xff111111));
                 g.fillEllipse (juce::Rectangle<float> (9, 9).withCentre (p));
                 g.setColour (juce::Colour (0xff6d6e70));
-                g.drawLine (p.x - 3.0f, p.y - 1.0f, p.x + 3.0f, p.y + 1.0f, 1.5f);
+                const float t = screwTurn (p, 7.0f);
+                g.drawLine (p.x - 3.0f * std::cos (t), p.y - 3.0f * std::sin (t), p.x + 3.0f * std::cos (t), p.y + 3.0f * std::sin (t), 1.5f);
             }
             // the printed name, with an orange rule
             g.setColour (orange);
@@ -451,8 +454,7 @@ public:
     {
         const auto dot = juce::String ("  ") + juce::String (juce::CharPointer_UTF8 ("\xc2\xb7")) + "  ";
         const int src = twain.source.load();
-        const juce::String source = src == TwainNode::mix ? "MIX" : src == TwainNode::twoTrack ? "2-TRACK" : src == TwainNode::ext1 ? "EXT 1"
-                                  : src == TwainNode::ext2 ? "EXT 2" : "PHONES " + juce::String (src - TwainNode::feed1 + 1);
+        const juce::String source = twain.sourceName (src);
         const float lv = twain.monitorLevel.load();
         juce::String s = "LISTENING TO " + source + dot + "SPEAKERS " + juce::String::charToString ((juce::juce_wchar) ('A' + twain.speakers.load()))
                        + dot + (lv <= 0.0f ? juce::String ("OFF") : juce::String (juce::Decibels::gainToDecibels (lv), 1) + " dB");
@@ -554,7 +556,11 @@ public:
     {
         const juce::ScopedValueSetter<bool> u (updating, true);
         auto put = [] (juce::Slider& k, double v) { if (! k.isMouseButtonDown() && std::abs (k.getValue() - v) > 1.0e-4) k.setValue (v, juce::dontSendNotification); };
-        for (int s = 0; s < sources.size(); ++s) sources[s]->setToggleState (twain.source.load() == s, juce::dontSendNotification);
+        for (int s = 0; s < sources.size(); ++s)
+        {
+            sources[s]->setToggleState (twain.source.load() == s, juce::dontSendNotification);
+            if (s == TwainNode::ext1 || s == TwainNode::ext2) sources[s]->setButtonText (twain.sourceName (s, true));
+        }
         for (int s = 0; s < speakerButtons.size(); ++s) speakerButtons[s]->setToggleState (twain.speakers.load() == s, juce::dontSendNotification);
         dim.setToggleState (twain.dim.load(), juce::dontSendNotification);
         mute.setToggleState (twain.mute.load(), juce::dontSendNotification);
@@ -623,7 +629,7 @@ private:
     }
 
     juce::Rectangle<int> headerArea;
-    partui::Key settingsKey { "Settings: the dim level and each speaker set's trim", partui::Icon::settings, Colours::forPart ("twain") };
+    partui::Key settingsKey { "Settings: the dim level, each speaker set's trim and what EXT 1 and EXT 2 are called", partui::Icon::settings, Colours::forPart ("twain") };
 
     /** TWAIN's settings: how far DIM (and talkback) takes the monitor down, each speaker set's trim
         (to match them), and where the phones page is. */
@@ -652,7 +658,17 @@ private:
                     setUp (sl, -12.0, 6.0, juce::Decibels::gainToDecibels (twain.speakerTrim[k].load(), -12.0f), [this, k] (double v) { twain.speakerTrim[k] = juce::Decibels::decibelsToGain ((float) v); });
                     sl.setDoubleClickReturnValue (true, 0.0);
                 }
-                setSize (520, 270);
+                for (int e = 0; e < 2; ++e)
+                {
+                    auto& ed = names[(size_t) e];
+                    ed.setText (twain.customExtName (e), juce::dontSendNotification);
+                    ed.setTextToShowWhenEmpty ("EXT " + juce::String (e + 1), Colours::textDim);
+                    ed.setInputRestrictions (12);
+                    ed.onTextChange = [this, e] { twain.setExtName (e, names[(size_t) e].getText()); };
+                    ed.setTooltip ("What EXT " + juce::String (e + 1) + " IN is called on TWAIN's buttons (a phone, the refs...). Empty: EXT " + juce::String (e + 1));
+                    addAndMakeVisible (ed);
+                }
+                setSize (520, 350);
             }
             void paint (juce::Graphics& g) override
             {
@@ -661,11 +677,14 @@ private:
                 g.setColour (Colours::forPart ("twain"));
                 g.drawText ("MONITOR", 18, 10, 200, 20, juce::Justification::centredLeft);
                 g.drawText ("SPEAKER TRIMS", 18, 76, 200, 20, juce::Justification::centredLeft);
+                g.drawText ("EXTERNAL INPUTS", 18, 200, 200, 20, juce::Justification::centredLeft);
                 g.setFont (juce::Font (juce::FontOptions (13.0f)));
                 g.setColour (Colours::text);
                 g.drawText ("Dim (and talkback)", 18, dim.getY(), 140, dim.getHeight(), juce::Justification::centredLeft);
                 for (int k = 0; k < TwainNode::numSpeakers; ++k)
                     g.drawText ("Speakers " + juce::String::charToString ((juce::juce_wchar) ('A' + k)), 18, trims[(size_t) k].getY(), 140, trims[(size_t) k].getHeight(), juce::Justification::centredLeft);
+                for (int e = 0; e < 2; ++e)
+                    g.drawText ("EXT " + juce::String (e + 1) + " IN is called", 18, names[(size_t) e].getY(), 140, names[(size_t) e].getHeight(), juce::Justification::centredLeft);
                 g.setColour (Colours::textDim);
                 g.setFont (juce::Font (juce::FontOptions (12.0f)));
                 const auto url = phonesUrl ? phonesUrl() : juce::String();
@@ -679,11 +698,13 @@ private:
             {
                 dim.setBounds (160, 36, getWidth() - 178, 26);
                 for (int k = 0; k < TwainNode::numSpeakers; ++k) trims[(size_t) k].setBounds (160, 102 + 30 * k, getWidth() - 178, 26);
+                for (int e = 0; e < 2; ++e) names[(size_t) e].setBounds (160, 226 + 30 * e, 180, 26);
             }
             TwainNode& twain;
             std::function<juce::String()> phonesUrl, oscStatus;
             juce::Slider dim;
             std::array<juce::Slider, TwainNode::numSpeakers> trims;
+            std::array<juce::TextEditor, 2> names;
         };
         melville::showPanel (std::make_unique<Panel> (twain, phonesUrl, oscStatus), "TWAIN settings", "twain");
     }

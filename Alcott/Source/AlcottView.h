@@ -96,6 +96,7 @@ private:
     class SlotList;
     class Unit;
     class Blank;
+    class Browser;
 
     void timerCallback() override;
     void select (int slot);
@@ -133,6 +134,8 @@ private:
     struct Cabinet : juce::Component { void paint (juce::Graphics&) override; } rack;      // (the rails, behind the units)
     juce::OwnedArray<Unit> units;
     std::unique_ptr<Blank> chooseInstrument, addEffect;
+    std::unique_ptr<Browser> browser;
+    void openBrowser (bool instruments, int insertAt = -1);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (View)
 };

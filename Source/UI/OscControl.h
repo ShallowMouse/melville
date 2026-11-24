@@ -676,8 +676,7 @@ private:
         lamp ("/twain/ref", std::abs (db) < 0.25f);
         o.push_back ({ "/twain/level", false, (db + 60.0f) / 66.0f, {} });
         text ("/twain/level/text", twain.mute.load() ? juce::String ("MUTE") : db <= -59.9f ? juce::String ("-INF") : juce::String (db, 1) + " dB");
-        static const char* names[] = { "MIX", "2-TRACK", "EXT 1", "EXT 2" };
-        const juce::String listening = juce::isPositiveAndBelow (src, 4) ? juce::String (names[src]) : "PHONES " + juce::String (src - TwainNode::feed1 + 1);
+        const juce::String listening = twain.sourceName (src);
         text ("/twain/display/1", "LISTENING  " + listening + "   SPEAKERS " + juce::String::charToString ((juce::juce_wchar) ('A' + spk)));
         juce::StringArray flags;
         if (twain.dim.load())  flags.add ("DIM");
