@@ -66,7 +66,7 @@ void Knob::paint (juce::Graphics& g)
     g.fillEllipse (c.x - rs, c.y - rs + 2.0f, rs * 2.0f, rs * 2.0f);
     g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3b3b3d), c.x, c.y - rs, juce::Colour (0xff121213), c.x, c.y + rs, false));
     g.fillEllipse (c.x - rs, c.y - rs, rs * 2.0f, rs * 2.0f);
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xffece6d6), c.x - rc * 0.4f, c.y - rc, juce::Colour (0xffa9a394), c.x + rc * 0.3f, c.y + rc, false));
+    g.setGradientFill (juce::ColourGradient (cap.brighter (0.08f), c.x - rc * 0.4f, c.y - rc, cap.darker (0.32f), c.x + rc * 0.3f, c.y + rc, false));
     g.fillEllipse (c.x - rc, c.y - rc, rc * 2.0f, rc * 2.0f);
     g.setColour (juce::Colours::black.withAlpha (0.35f));
     g.drawEllipse (c.x - rc, c.y - rc, rc * 2.0f, rc * 2.0f, 0.8f);
@@ -117,16 +117,16 @@ bool Knob::refresh()
 }
 
 //==============================================================================
-/** A step's key, in its group's colour (red, orange, yellow, cream: four steps each), its LED
-    lit while the step plays a note. Click: PLAY or REST. Shift-click: TIE. Alt-click: SKIP.
-    Right-click: the four. The wheel steps through them. */
+/** A step's setting, as on the panels of the time: PLAY, TIE, REST and SKIP down a column, each
+    with an LED, the one it's on lit (and its name bright). Click one to set it; the wheel steps
+    through them. */
 class View::ModeSwitch : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     ModeSwitch (Engine*& e, int s) : engine (e), step (s)
     {
-        setTooltip ("Step " + juce::String (s + 1) + ": click for PLAY or REST, shift-click TIE (held on from the step before), "
-                    "alt-click SKIP (left out of the run). Right-click for the list");
+        setTooltip ("Step " + juce::String (s + 1) + ": PLAY a note, TIE it on from the step before, REST (silent), or SKIP (left out of the run). "
+                    "Click one to set it");
     }
 
     int mode() const { return engine->now().steps[(size_t) step].mode.load(); }
@@ -135,59 +135,49 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        auto r = getLocalBounds().toFloat().reduced (3.0f, 2.0f);
         const auto names = Engine::modeNames();
         const int m = mode();
-        auto caption = r.removeFromBottom (14.0f);
-        const float side = juce::jmin (r.getWidth(), r.getHeight() - 3.0f);
-        auto keyR = r.withSizeKeepingCentre (side, side - 2.0f).withY (r.getY());
-        const bool sounds = m == Engine::play || m == Engine::tie;
-        auto cap = eighties::band (step / 4);
-        if (m == Engine::skip) cap = cap.withMultipliedSaturation (0.25f).withMultipliedBrightness (0.55f);
-        eighties::drawKey (g, keyR, cap, held, isMouseOver());
-
-        // its LED, top centre of the key: lit while the step plays a note (a tie's too)
-        const auto led = juce::Point<float> (keyR.getCentreX(), keyR.getY() + keyR.getHeight() * 0.32f + (held ? 1.0f : 0.0f));
-        eighties::drawLed (g, led, juce::jmin (4.0f, side * 0.11f), sounds);
-        g.setColour (juce::Colour (0xff1a1a1a).withAlpha (0.75f));
-        g.setFont (eighties::sans (9.0f));
-        g.drawText (juce::String (step + 1), keyR.withTrimmedTop (keyR.getHeight() * 0.55f).translated (0.0f, held ? 1.0f : 0.0f),
-                    juce::Justification::centred, false);
-
-        g.setFont (eighties::sans (9.0f));
-        g.setColour (m == Engine::play ? ink : m == Engine::tie ? eighties::yellow() : inkDim);
-        g.drawText (names[m], caption, juce::Justification::centred, false);
-    }
-
-    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
-    void mouseExit (const juce::MouseEvent&) override  { repaint(); }
-    void mouseUp (const juce::MouseEvent&) override    { held = false; repaint(); }
-
-    void mouseDown (const juce::MouseEvent& e) override
-    {
-        if (e.mods.isPopupMenu())
+        auto r = rows();
+        const float h = r.getHeight() / 4.0f;
+        for (int k = 0; k < 4; ++k)
         {
-            juce::PopupMenu menu;
-            const auto names = Engine::modeNames();
-            for (int k = 0; k < 4; ++k) menu.addItem (k + 1, names[k], true, k == mode());
-            menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this), [this] (int r) { if (r > 0) setMode (r - 1); });
-            return;
+            auto row = juce::Rectangle<float> (r.getX(), r.getY() + h * (float) k, r.getWidth(), h);
+            const bool on = k == m;
+            if (on)
+            {
+                g.setColour (eighties::band (step / 4).withAlpha (0.22f));
+                g.fillRoundedRectangle (row.reduced (0.0f, 1.0f), 2.0f);
+            }
+            else if (k == hover)
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.05f));
+                g.fillRoundedRectangle (row.reduced (0.0f, 1.0f), 2.0f);
+            }
+            eighties::drawLed (g, { row.getX() + 7.0f, row.getCentreY() }, 3.0f, on);
+            g.setFont (eighties::sans (9.5f, on));
+            g.setColour (on ? ink : inkDim.withAlpha (0.75f));
+            g.drawText (names[k], row.withTrimmedLeft (14.0f), juce::Justification::centredLeft, false);
         }
-        held = true;
-        const int m = mode();
-        if (e.mods.isShiftDown())     setMode (m == Engine::tie ? Engine::play : Engine::tie);
-        else if (e.mods.isAltDown())  setMode (m == Engine::skip ? Engine::play : Engine::skip);
-        else                          setMode (m == Engine::play ? Engine::rest : Engine::play);
     }
+
+    void mouseMove (const juce::MouseEvent& e) override { const int k = rowAt (e); if (k != hover) { hover = k; repaint(); } }
+    void mouseExit (const juce::MouseEvent&) override   { hover = -1; repaint(); }
+    void mouseDown (const juce::MouseEvent& e) override { if (const int k = rowAt (e); k >= 0) setMode (k); }
     void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
     {
         if (w.deltaY != 0.0f) setMode (mode() + (w.deltaY > 0.0f ? -1 : 1));
     }
 
 private:
+    juce::Rectangle<float> rows() const { return getLocalBounds().toFloat().reduced (2.0f, 1.0f); }
+    int rowAt (const juce::MouseEvent& e) const
+    {
+        const auto r = rows();
+        if (! r.contains (e.position)) return -1;
+        return juce::jlimit (0, 3, (int) ((e.position.y - r.getY()) / (r.getHeight() / 4.0f)));
+    }
     Engine*& engine;
-    int step, shown = -1;
-    bool held = false;
+    int step, shown = -1, hover = -1;
 };
 
 /** One of the eight pattern keys. */
@@ -289,6 +279,11 @@ View::View()
     add ("TRANSPOSE", 2, 1.0f, [this] { return cur->follows.load() ? 1.0f : 0.0f; }, [this] (float v) { cur->follows = v > 0.5f; },
          [] (float v) { return v > 0.5f ? juce::String ("FOLLOWS KEY") : juce::String ("FIXED"); },
          "Whether this sequencer follows the TRANSPOSE jack's keyboard (a bass line that does, a drone that doesn't)");
+    // the programmer's row knobs in their rows' colours: row A's scale, root, octave and range
+    // red; ROW B orange; ROW C yellow
+    for (int i = 6; i <= 9; ++i) settings[i]->cap = eighties::band (0);
+    settings[10]->cap = eighties::band (1);
+    settings[11]->cap = eighties::band (2);
     static const float scales[] = { 5.0f, 8.0f, 10.0f, 12.0f, 15.0f, 20.0f };
     add ("CV SCALE", 6, at (2, 6),
          [this, at] { int i = 0; for (int k = 0; k < 6; ++k) if (std::abs (cur->fullScale.load() - scales[k]) < 0.01f) i = k; return at (i, 6); },
@@ -303,6 +298,7 @@ View::View()
         {
             auto k = std::make_unique<Knob>();
             k->small = true;
+            k->cap = eighties::band (row);           // A red, B orange, C yellow, as the rows' letters
             k->normal = row == 0 ? 0.0f : row == 1 ? 0.75f : 0.5f;
             k->get = [this, i, row]
             {
@@ -589,7 +585,7 @@ void View::paint (juce::Graphics& g)
     legend (2, "A", "PITCH", eighties::red());
     legend (3, "B", bc < 0 ? juce::String ("VELOCITY") : "CC " + juce::String (bc), eighties::orange());
     legend (4, "C", cc < 0 ? juce::String ("GATE") : "CC " + juce::String (cc), eighties::yellow());
-    plain (5, "STEP KEY");
+    plain (5, "MODE");
 }
 
 void View::resized()
@@ -634,7 +630,7 @@ void View::resized()
     const int rowsH[] = { 30, 30 };
     rowArea[0] = stepsArea.withY (sr.getY()).withHeight (rowsH[0]);
     rowArea[1] = rowArea[0].translated (0, rowsH[0] + 4).withHeight (rowsH[1]);
-    const int switchH = 80;
+    const int switchH = 78;
     const int knobsTop = rowArea[1].getBottom() + 8, knobsH = (sr.getBottom() - switchH - 6 - knobsTop) / 3;
     for (int k = 0; k < 3; ++k) rowArea[(size_t) (2 + k)] = stepsArea.withY (knobsTop + k * knobsH).withHeight (knobsH);
     rowArea[5] = stepsArea.withY (sr.getBottom() - switchH).withHeight (switchH);

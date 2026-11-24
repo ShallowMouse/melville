@@ -51,6 +51,7 @@ public:
     int choices = 0;
     float normal = 0.0f;
     bool small = false;
+    juce::Colour cap { 0xffece6d6 };              // the cap's colour (the step rows': their row's)
 
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
