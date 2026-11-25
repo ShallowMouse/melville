@@ -736,6 +736,26 @@ View::View()
 
     // (development: instruments straight away, for screenshots and checks)
     if (juce::SystemStats::getEnvironmentVariable ("ALCOTT_KEYS", {}).isNotEmpty()) showKeyboard (true);     // (for pictures)
+    // (development: PEQUOD_PANEL_SHOTS=<folder> pictures every PEQUOD panel, in the rack and full size)
+    if (auto dir = juce::SystemStats::getEnvironmentVariable ("PEQUOD_PANEL_SHOTS", {}); dir.isNotEmpty())
+    {
+        const bool wasRack = PequodPanel::isRackMounted();
+        juce::File out (dir);
+        out.createDirectory();
+        for (auto& i : PequodNative::all())
+            for (bool rack : { true, false })
+            {
+                PequodPanel::setRackMounted (rack);
+                PequodNative::Instance inst (i);
+                PequodPanel panel (inst);
+                auto img = panel.createComponentSnapshot (panel.getLocalBounds(), true, 1.0f);
+                if (auto problems = panel.checkLayout(); ! problems.isEmpty())
+                    out.getChildFile ("problems.txt").appendText (i.name + (rack ? " [rack]" : " [full]") + "\n    " + problems.joinIntoString ("\n    ") + "\n");
+                juce::FileOutputStream os (out.getChildFile (i.name.replaceCharacters ("/ ", "__") + (rack ? "-rack" : "-full") + ".png"));
+                if (os.openedOk()) { os.setPosition (0); os.truncate(); juce::PNGImageFormat().writeImageToStream (img, os); }
+            }
+        PequodPanel::setRackMounted (wasRack);
+    }
     //   ALCOTT_PREVIEW="1=Juno Six|Tape Echo;2=Prophet Five"
     if (auto pv = juce::SystemStats::getEnvironmentVariable ("ALCOTT_PREVIEW", {}); pv.isNotEmpty())
         for (auto& item : juce::StringArray::fromTokens (pv, ";", ""))
