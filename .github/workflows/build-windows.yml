@@ -297,11 +297,14 @@ jobs:
           cp -R "$app" dmg/
           ln -s /Applications dmg/Applications
           cp README.md dmg/; cp Resources/Licences/*.txt dmg/
-          hdiutil create -volname "MELVILLE $MELVILLE_VERSION" -srcfolder dmg -ov -format UDZO "dist/MELVILLE-$MELVILLE_VERSION-mac.dmg"
+          # (an explicit size: hdiutil's own guess runs out of room on an app this big)
+          size=$(( $(du -sm dmg | cut -f1) * 13 / 10 + 50 ))
+          hdiutil create -volname "MELVILLE $MELVILLE_VERSION" -srcfolder dmg -ov -fs HFS+ -size ${size}m -format UDZO "dist/MELVILLE-$MELVILLE_VERSION-mac.dmg"
           lapp="build/MelvilleLink_artefacts/Release/MELVILLE Link.app"
           codesign --force --deep --sign - "$lapp"
           cp -R "$lapp" link/; ln -s /Applications link/Applications; cp Resources/Licences/*.txt link/
-          hdiutil create -volname "MELVILLE Link $MELVILLE_VERSION" -srcfolder link -ov -format UDZO "dist/MELVILLE-Link-$MELVILLE_VERSION-mac.dmg"
+          size=$(( $(du -sm link | cut -f1) * 13 / 10 + 50 ))
+          hdiutil create -volname "MELVILLE Link $MELVILLE_VERSION" -srcfolder link -ov -fs HFS+ -size ${size}m -format UDZO "dist/MELVILLE-Link-$MELVILLE_VERSION-mac.dmg"
 
       - name: Upload build
         uses: actions/upload-artifact@v4
