@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.22)
 
 # The build sets MELVILLE_VERSION (1.0.<build number>); MELVILLE compares it with the latest release to offer updates.
 set(MELVILLE_VERSION "1.0.0" CACHE STRING "Version of this build")
+# macOS: one app for Apple silicon and Intel Macs, from Big Sur on
+set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Oldest macOS MELVILLE runs on")
 project(MELVILLE VERSION ${MELVILLE_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)

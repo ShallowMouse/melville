@@ -23,17 +23,26 @@ set(PEQUOD_ENGINE_NATIVE_LIBS)
 if(EXISTS "${PEQUOD_ENGINE_LIB}.libs")
     file(READ "${PEQUOD_ENGINE_LIB}.libs" _pq_libs)
     string(REGEX MATCHALL "[^ \t\r\n]+" _pq_tokens "${_pq_libs}")
+    set(_pq_framework FALSE)
     foreach(_t IN LISTS _pq_tokens)
-        if(_t MATCHES "^(.+)\\.lib$")
+        if(_pq_framework)                              # (macOS: "-framework AppKit")
+            list(APPEND PEQUOD_ENGINE_NATIVE_LIBS "-framework ${_t}")
+            set(_pq_framework FALSE)
+        elseif(_t STREQUAL "-framework")
+            set(_pq_framework TRUE)
+        elseif(_t MATCHES "^(.+)\\.lib$")
             list(APPEND PEQUOD_ENGINE_NATIVE_LIBS "${CMAKE_MATCH_1}")
         elseif(_t MATCHES "^-l(.+)$")
             list(APPEND PEQUOD_ENGINE_NATIVE_LIBS "${CMAKE_MATCH_1}")
         endif()
     endforeach()
     list(REMOVE_DUPLICATES PEQUOD_ENGINE_NATIVE_LIBS)
-    list(REMOVE_ITEM PEQUOD_ENGINE_NATIVE_LIBS c msvcrt libcmt ucrt libucrt vcruntime libvcruntime)
+    list(REMOVE_ITEM PEQUOD_ENGINE_NATIVE_LIBS c msvcrt libcmt ucrt libucrt vcruntime libvcruntime System)
 elseif(WIN32)
     set(PEQUOD_ENGINE_NATIVE_LIBS kernel32 advapi32 bcrypt ntdll userenv ws2_32 ole32 oleaut32 shell32 user32 gdi32 opengl32 dwmapi uxtheme crypt32 secur32 propsys uuid)
+elseif(APPLE)
+    set(PEQUOD_ENGINE_NATIVE_LIBS "-framework AppKit" "-framework CoreGraphics" "-framework CoreFoundation" "-framework CoreServices"
+        "-framework Foundation" "-framework OpenGL" "-framework QuartzCore" "-framework Security" "-framework CoreText" objc iconv)
 else()
     set(PEQUOD_ENGINE_NATIVE_LIBS xcb GL X11-xcb X11 pthread dl m rt util)
 endif()
@@ -69,6 +78,8 @@ juce_add_gui_app(Melville
     PRODUCT_NAME "MELVILLE"
     COMPANY_NAME "PEQUOD"
     BUNDLE_ID    "com.pequod.melville"
+    MICROPHONE_PERMISSION_ENABLED TRUE
+    MICROPHONE_PERMISSION_TEXT "MELVILLE records and plays through your audio interface's inputs."
     ${_icon_args}
     VERSION      ${PROJECT_VERSION})
 juce_generate_juce_header(Melville)
@@ -233,6 +244,8 @@ juce_add_gui_app(MelvilleLink
     PRODUCT_NAME "MELVILLE Link"
     COMPANY_NAME "PEQUOD"
     BUNDLE_ID    "com.pequod.melvillelink"
+    MICROPHONE_PERMISSION_ENABLED TRUE
+    MICROPHONE_PERMISSION_TEXT "MELVILLE Link sends this computer's audio inputs to MELVILLE."
     ${_icon_args}
     VERSION      ${PROJECT_VERSION})
 target_sources(MelvilleLink PRIVATE

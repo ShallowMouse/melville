@@ -1,4 +1,5 @@
 name: Build Windows
+# (and the Mac: both builds go into one release)
 
 on:
   push:
@@ -207,20 +208,124 @@ jobs:
           name: MELVILLE-Windows
           path: dist/
 
+  # MELVILLE for the Mac: one app for Apple silicon and Intel, from the same sources
+  mac:
+    needs: firmware
+    runs-on: macos-14
+    env:
+      MELVILLE_VERSION: 1.0.${{ github.run_number }}
+      PARTS_BRANCH: ${{ github.event.inputs.parts_branch || 'melville' }}
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get Hawthorne
+        uses: actions/checkout@v4
+        with: { repository: ShallowMouse/hawthorne, ref: "${{ env.PARTS_BRANCH }}", path: parts/hawthorne }
+      - name: Get EMERSON
+        uses: actions/checkout@v4
+        with: { repository: ShallowMouse/emerson, ref: "${{ env.PARTS_BRANCH }}", path: parts/emerson }
+      - name: Get WHITMAN
+        uses: actions/checkout@v4
+        with: { repository: ShallowMouse/whitman, ref: "${{ env.PARTS_BRANCH }}", path: parts/whitman }
+      - name: Get THOREAU
+        uses: actions/checkout@v4
+        with: { repository: ShallowMouse/thoreau, ref: "${{ env.PARTS_BRANCH }}", path: parts/thoreau }
+      - name: Get PEQUOD Host
+        uses: actions/checkout@v4
+        with: { repository: ShallowMouse/PEQUOD-HOST, ref: "${{ env.PARTS_BRANCH }}", path: parts/pequod-host }
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: parts/pequod-host/engine
+
+      - name: Build the PEQUOD engine (Apple silicon and Intel, joined)
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          M=parts/pequod-host/engine/Cargo.toml
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo rustc --release -p pequod_engine --lib --target $t --manifest-path $M -- --print native-static-libs 2>&1 | tee engine-$t.log
+            test "${PIPESTATUS[0]}" -eq 0 || { echo "::error title=engine::$(grep -m 40 -i error engine-$t.log | tr '\n' ' ')"; exit 1; }
+          done
+          out=parts/pequod-host/engine/target/universal
+          mkdir -p $out
+          lipo -create parts/pequod-host/engine/target/aarch64-apple-darwin/release/libpequod_engine.a \
+                       parts/pequod-host/engine/target/x86_64-apple-darwin/release/libpequod_engine.a -output $out/libpequod_engine.a
+          sed -n 's/.*native-static-libs: //p' engine-aarch64-apple-darwin.log | tail -1 > $out/libpequod_engine.a.libs
+          cat $out/libpequod_engine.a.libs
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Xcode "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            "-DMELVILLE_VERSION=$MELVILLE_VERSION" -DMELVILLE_BUILD_TESTS=ON \
+            "-DPEQUOD_ENGINE_LIB=$PWD/parts/pequod-host/engine/target/universal/libpequod_engine.a" 2>&1 | tee configure.log
+          test "${PIPESTATUS[0]}" -eq 0 || { echo "::error title=configure::$(tail -40 configure.log | tr '\n' ' ')"; exit 1; }
+
+      - name: Build
+        run: |
+          cmake --build build --config Release --parallel -- -quiet 2>&1 | tee build.log
+          test "${PIPESTATUS[0]}" -eq 0 || { echo "::error title=build::$(grep -m 60 'error:' build.log | tr '\n' ' ')"; exit 1; }
+
+      - name: Core tests (must pass to ship)
+        run: |
+          ./build/MelvilleTests_artefacts/Release/MelvilleTests 2>&1 | tee tests.log
+          code=${PIPESTATUS[0]}
+          grep FAIL tests.log | while read -r l; do echo "::error title=test::$l"; done
+          exit $code
+
+      - name: Smoke test (every part starts inside MELVILLE)
+        run: |
+          MELVILLE_QUIT_AFTER_MS=8000 timeout 90 ./build/Melville_artefacts/Release/MELVILLE.app/Contents/MacOS/MELVILLE 2>&1 | tee smoke.log
+          code=${PIPESTATUS[0]}
+          test $code -eq 0 || { echo "::error title=smoke::Not every part started on the Mac (exit $code)"; exit 1; }
+
+      - name: Get the firmware
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: { name: firmware, path: firmware }
+
+      - name: Package (disk images, signed ad hoc)
+        run: |
+          mkdir -p dist dmg link
+          app=build/Melville_artefacts/Release/MELVILLE.app
+          if ls firmware/*.bin >/dev/null 2>&1; then mkdir -p "$app/Contents/Resources/firmware"; cp firmware/*.bin "$app/Contents/Resources/firmware/"; fi
+          codesign --force --deep --sign - "$app"
+          cp -R "$app" dmg/
+          ln -s /Applications dmg/Applications
+          cp README.md dmg/; cp Resources/Licences/*.txt dmg/
+          hdiutil create -volname "MELVILLE $MELVILLE_VERSION" -srcfolder dmg -ov -format UDZO "dist/MELVILLE-$MELVILLE_VERSION-mac.dmg"
+          lapp="build/MelvilleLink_artefacts/Release/MELVILLE Link.app"
+          codesign --force --deep --sign - "$lapp"
+          cp -R "$lapp" link/; ln -s /Applications link/Applications; cp Resources/Licences/*.txt link/
+          hdiutil create -volname "MELVILLE Link $MELVILLE_VERSION" -srcfolder link -ov -format UDZO "dist/MELVILLE-Link-$MELVILLE_VERSION-mac.dmg"
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: MELVILLE-Mac
+          path: dist/
+
+  # One release with both: Windows has to pass; the Mac's files go in when its build passed
+  release:
+    needs: [build, mac]
+    if: always() && needs.build.result == 'success' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.parts_branch == '' || inputs.parts_branch == 'melville')))
+    runs-on: ubuntu-latest
+    env:
+      MELVILLE_VERSION: 1.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: MELVILLE-Windows, path: dist }
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: { name: MELVILLE-Mac, path: dist }
       - name: Publish release
-        # (a run started by hand releases too - for updates that are only in the parts - but only from their melville branches)
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (inputs.parts_branch == '' || inputs.parts_branch == 'melville')))
-        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          MAC_RESULT: ${{ needs.mac.result }}
         run: |
-          if (-not $env:GH_TOKEN) {
-            Write-Output "::warning title=release::Not published - add the RELEASES_TOKEN secret and the ShallowMouse/Melville-Releases repo"
-            exit 0
-          }
-          $notes = git log -1 --pretty=%s
-          $notes | Out-File -Encoding utf8 notes.md
-          gh release create "v$env:MELVILLE_VERSION" --repo ShallowMouse/Melville-Releases `
-            --title "MELVILLE $env:MELVILLE_VERSION" --notes-file notes.md `
-            "dist/MELVILLE-Setup-$env:MELVILLE_VERSION.exe" "dist/MELVILLE-$env:MELVILLE_VERSION-portable.zip" "dist/MELVILLE-Link-$env:MELVILLE_VERSION.zip"
-          if ($LASTEXITCODE -ne 0) { Write-Output "::error title=release::Publishing the release failed"; exit 1 }
+          if [ -z "$GH_TOKEN" ]; then echo "::warning title=release::Not published - add the RELEASES_TOKEN secret"; exit 0; fi
+          git log -1 --pretty=%s > notes.md
+          [ "$MAC_RESULT" = "success" ] || echo "::warning title=release::The Mac build didn't pass: this release is Windows only"
+          gh release create "v$MELVILLE_VERSION" --repo ShallowMouse/Melville-Releases \
+            --title "MELVILLE $MELVILLE_VERSION" --notes-file notes.md dist/*

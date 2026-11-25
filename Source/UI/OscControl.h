@@ -186,7 +186,12 @@ public:
     /** The firmware MELVILLE carries for a type of hardware (none: an empty file). */
     static FirmwareFile carriedFirmware (int type)
     {
+       #if JUCE_MAC
+        // (in the app bundle's Resources)
+        const auto folder = juce::File::getSpecialLocation (juce::File::currentApplicationFile).getChildFile ("Contents/Resources/firmware");
+       #else
         const auto folder = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile ("firmware");
+       #endif
         return bundledFirmware (folder, type);
     }
 

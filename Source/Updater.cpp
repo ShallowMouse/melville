@@ -131,7 +131,11 @@ void Updater::doCheck()
         for (auto& a : *assets)
         {
             auto name = a["name"].toString();
+           #if JUCE_MAC
+            if (name.startsWithIgnoreCase ("MELVILLE-") && name.endsWithIgnoreCase ("-mac.dmg"))
+           #else
             if (name.startsWithIgnoreCase ("MELVILLE-Setup") && name.endsWithIgnoreCase (".exe"))
+           #endif
             {
                 foundUrl = a["browser_download_url"].toString();
                 foundName = name;
@@ -167,7 +171,7 @@ void Updater::doDownload()
     for (int attempt = 1; attempt <= 3 && ! ok && ! threadShouldExit(); ++attempt)
     {
         target = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                    .getChildFile (name.upToLastOccurrenceOf (".", false, false) + "-" + juce::String (juce::Time::currentTimeMillis()) + ".exe");
+                    .getChildFile (name.upToLastOccurrenceOf (".", false, false) + "-" + juce::String (juce::Time::currentTimeMillis()) + "." + name.fromLastOccurrenceOf (".", false, false));
         int status = 0;
         auto in = juce::URL (url).createInputStream (juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
                                                          .withExtraHeaders ("User-Agent: MELVILLE\r\nAccept: application/octet-stream\r\n")
@@ -240,6 +244,14 @@ void Updater::handleAsyncUpdate()
 
     if (toRun.existsAsFile())
     {
+       #if JUCE_MAC
+        // On a Mac: the disk image opens, to drag the new MELVILLE onto Applications (after quitting this one)
+        if (toRun.startAsProcess())
+        {
+            if (onStatus) onStatus ("MELVILLE " + latestVersion + " is open in Finder: quit MELVILLE, then drag it onto Applications");
+            return;
+        }
+       #endif
         // The installer closes MELVILLE if it's still open, replaces it and starts it again.
         if (toRun.startAsProcess ("/SILENT /SP- /SUPPRESSMSGBOXES /CLOSEAPPLICATIONS"))
             juce::JUCEApplication::getInstance()->systemRequestedQuit();
