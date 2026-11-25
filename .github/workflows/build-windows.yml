@@ -211,7 +211,7 @@ jobs:
   # MELVILLE for the Mac: one app for Apple silicon and Intel, from the same sources
   mac:
     needs: firmware
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       MELVILLE_VERSION: 1.0.${{ github.run_number }}
       PARTS_BRANCH: ${{ github.event.inputs.parts_branch || 'melville' }}
