@@ -275,8 +275,12 @@ jobs:
 
       - name: Smoke test (every part starts inside MELVILLE)
         run: |
-          MELVILLE_QUIT_AFTER_MS=8000 timeout 90 ./build/Melville_artefacts/Release/MELVILLE.app/Contents/MacOS/MELVILLE 2>&1 | tee smoke.log
-          code=${PIPESTATUS[0]}
+          # (macOS has no timeout: a watchdog stops it if it doesn't quit by itself)
+          MELVILLE_QUIT_AFTER_MS=8000 ./build/Melville_artefacts/Release/MELVILLE.app/Contents/MacOS/MELVILLE > smoke.log 2>&1 &
+          pid=$!
+          ( sleep 90; kill -9 $pid 2>/dev/null ) &
+          wait $pid; code=$?
+          cat smoke.log
           test $code -eq 0 || { echo "::error title=smoke::Not every part started on the Mac (exit $code)"; exit 1; }
 
       - name: Get the firmware
