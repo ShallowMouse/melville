@@ -284,7 +284,7 @@ private:
             { "TAPE & SAMPLE KEYBOARDS", "Tape 400|Music Master|Fairlight CMI" },
             { "STRING MACHINES", "String Ensemble|RS-202" },
             { "SYNTHESIZERS", "Model 72|Prophet Five|Juno Six|Twenty-Six|VCS3|FM 7|Dream Machine|Clavioline|ARP Odyssey|ARP 2600|"
-                              "Oberheim OB-X|Roland Jupiter-8|Moog Polymoog|Hammond Novachord" },
+                              "Oberheim OB-X|Roland Jupiter-8|Moog Polymoog|Hammond Novachord|Roland Juno-60|Roland Juno-106" },
             { "BASS", "Bass Line|Bass Pedals|P-Bass Voice|Foxton Bass|Upright Slap|Bass Voice" },
             { "DRUMS & PERCUSSION", "TR-606|Synare 3" },
             { "GUITARS", "6120 Voice|Archtop|Red Special|Ricky 330" },
